@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "elench"
+version = "0.69.0"
+description = "Elench: a cost-contract language and static verification framework for AI-generated code"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Wang, Haolin" }]
+keywords = ["cost analysis", "static analysis", "complexity", "AI-generated code"]
+
+# **零第三方依赖**是本项目的一条承诺（见 README）：这里保持空列表，
+# 任何新增依赖都必须先改 README 的承诺，再改这里。
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/xiaohuo123212/ai-lang-design"
+
+# 只装入口脚本；`src/` 在仓库里是扁平目录（历史上就这样），
+# 用 `py-modules` 逐个列出，避免为了打包去搬动 40 个文件的目录结构。
+# 只装入口脚本；`src/` 在仓库里是扁平目录（历史上就这样），
+# 用 `py-modules` 逐个列出，避免为了打包搬动 40+ 个文件的目录结构。
+# **必须列全**：`dsh` 会 import 下面每一个模块，漏一个 `elench` 就跑不起来。
+[tool.setuptools]
+py-modules = [
+    "archive_specs",
+    "ast_util",
+    "bench",
+    "borrow",
+    "bound",
+    "cfg",
+    "check_docs",
+    "checker",
+    "cost_check",
+    "cost_interp",
+    "dispatch",
+    "dsh",
+    "dup_scan",
+    "formatter",
+    "highlight",
+    "interp",
+    "isolated",
+    "lexer",
+    "migrate_docs",
+    "migrate_tests",
+    "otel",
+    "parser",
+    "rename_ch",
+    "symbolic",
+    "sync_docs",
+    "typecheck",
+    "walk",
+]
+package-dir = { "" = "src" }
+
+[project.scripts]
+"elench" = "dsh:main"

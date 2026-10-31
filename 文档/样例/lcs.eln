@@ -1,0 +1,66 @@
+// lcs.eln —— 最长公共子序列（十个手写程序之十）的实现部分
+//
+// 手算期望值（写进 test_programs.py）：
+//   a = "ABCBDAB"  b = "BDCABA"   → 4   （LCS 之一：BCBA）
+//   a = "AGGTAB"   b = "GXTXAYB"  → 4   （LCS：GTAB）
+//   a = "ABC"      b = "ABC"      → 3   （完全相同）
+//   a = ""         b = "ABC"      → 0   （空串的 LCS 是空串）
+//
+// 表格构型：
+//   width = b.length() + 1            （+1 是为了有第 0 列当哨兵）
+//   行数  = a.length() + 1            （第 0 行同理）
+//   总格  = (a.length() + 1) * width
+//   dp[i * width + j] = a[0..i) 与 b[0..j) 的 LCS 长度（i、j 从 0 起算的格子号）
+//
+// 为什么要先 push 铺满零：`dp[idx] = v` 是**原地写**，只能写已经存在的格子；
+// 让序列增长的是 push。所以顺序是「先 push 到总格数 → 再原地下标写」。
+// 总格数超过 LCS_CAP 时 MUST 在 push 之前挡住，否则 push 会抛容量溢出。
+
+// #region fn
+pub func lcs(
+             const Vec<u8>& a,
+                 const Vec<u8>& b) -> u64! {
+    const u64 width = b.length() + 1;
+    const u64 total = (a.length() + 1) * width;
+
+    // 定长表的真边界：装不下就说清楚，而不是让 push 抛异常
+    if (total > LCS_CAP) {
+        return Err(LcsError::Capacity);
+    }
+
+    // ---- 第一步：建表
+    // `filled(0)` 一次给足 LCS_CAP 个零——**表是建好才用的**，
+    // 不需要 push 循环（那是让作者替语言补实现）。
+    // 定长表的容量上界仍是 LCS_CAP，超过就在上面被 Err 挡住。
+    FixedVec<u64,
+    LCS_CAP> dp = FixedVec<u64,
+    LCS_CAP>::filled(0);
+
+    // ---- 第二步：两层 DP（原地写 dp[(i+1)*width + (j+1)]）
+    u64 i = 0;
+    while (i < a.length()) {
+        u64 j = 0;
+        while (j < b.length()) {
+            const u64 x = a.at(i);
+            const u64 y = b.at(j);
+            if (x == y) {
+                // 同字符：左上角 + 1
+                dp[(i + 1) * width + (j + 1)] = dp[i * width + j] + 1;
+            } else {
+                // 不同字符：取上、左的较大者（用 if 分两支，避免需要 max 内建）
+                const u64 up = dp[i * width + (j + 1)];
+                const u64 left = dp[(i + 1) * width + j];
+                if (up > left) {
+                    dp[(i + 1) * width + (j + 1)] = up;
+                } else {
+                    dp[(i + 1) * width + (j + 1)] = left;
+                }
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+
+    return dp[a.length() * width + b.length()];
+}
+// #endregion fn

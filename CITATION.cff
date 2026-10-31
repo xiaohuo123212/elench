@@ -1,0 +1,44 @@
+cff-version: 1.2.0
+message: "If you use Elench in academic work, please cite it as below."
+
+title: "Elench: A Cost-Contract Language and Static Verification Framework for AI-Generated Code"
+abstract: >-
+  Elench is a programming language designed for AI code generation.
+  Instead of asking whether generated code is correct, it asks whether the
+  generated code's *cost* stays inside a declared contract. Every function
+  carries a cost signature derived by static analysis over a symbolic value
+  domain; candidates for the same task are measured and dispatched by input
+  size; and the whole toolchain emits machine-readable cost signatures so that
+  an agent can treat cost as a budget prior rather than an afterthought.
+
+authors:
+  - family-names: "Wang"
+    given-names: "Haolin"
+    name-particle: ""
+    affiliation: "Beijing University of Posts and Telecommunications"
+    orcid: "https://orcid.org/0009-0008-7307-2319"
+    email: ""
+
+version: 0.71.0
+# 尚未正式发布（Zenodo DOI 计划在 M1 完成后拿到）；此处记录当前快照日期
+date-released: "2026-10-31"
+license: "Apache-2.0"
+repository-code: "https://github.com/xiaohuo123212/ai-lang-design"
+url: "https://github.com/xiaohuo123212/ai-lang-design"
+
+keywords:
+  - programming languages
+  - AI-generated code
+  - cost contracts
+  - static analysis
+  - complexity analysis
+  - compiler construction
+  - agent tooling
+
+type: software
+
+# 本文件的维护规则（写在这里，免得以后忘）：
+#   1. `version` 与 `date-released` MUST 与 GitHub Release 的 tag 一致
+#   2. `license` MUST 与仓库根的 LICENSE 文件一致
+#   3. 作者信息（姓名 / 单位 / ORCID）MUST NOT 凭猜测填写
+#   4. 这段注释不会出现在 GitHub 的「Cite this repository」里，但会被提交历史记住

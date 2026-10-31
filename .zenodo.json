@@ -1,0 +1,31 @@
+{
+  "title": "Elench: A Cost-Contract Language and Static Verification Framework for AI-Generated Code",
+  "upload_type": "software",
+  "description": "<p>Elench is a programming language designed for AI code generation. Instead of asking whether generated code is correct, it asks whether the generated code's <em>cost</em> stays inside a declared contract.</p><ul><li>Every function carries a <strong>cost signature</strong> derived by static analysis over a symbolic value domain (<code>target { time: { max: O(...) } }</code>).</li><li>Multiple candidates for the same task are declared with <code>choose</code> over a closed set; the toolchain computes where they cross over and dispatches by input size (<code>?!label(...)</code>).</li><li>Static estimates and measured timings are kept in separate metrics with explicit <code>cost.source</code> / <code>cost.semantics</code> attributes, and conflicts are resolved in favour of measurement.</li><li>The whole toolchain emits machine-readable cost signatures (<code>dsh cost --signature</code>) so an agent can treat cost as a <strong>budget prior</strong> rather than an afterthought.</li></ul><p>The repository contains the language specification, a Python reference implementation (lexer, parser, formatter, checker, type checker, two value domains, cost analysis, dispatch planning, OTLP exporter), 30 test suites with 633 assertions, and ten hand-written sample programs.</p>",
+  "creators": [
+    {
+      "name": "Wang, Haolin",
+      "affiliation": "Beijing University of Posts and Telecommunications",
+      "orcid": "0009-0008-7307-2319"
+    }
+  ],
+  "license": "Apache-2.0",
+  "access_right": "open",
+  "language": "eng",
+  "keywords": [
+    "programming languages",
+    "AI-generated code",
+    "cost contracts",
+    "static analysis",
+    "complexity analysis",
+    "agent tooling"
+  ],
+  "related_identifiers": [
+    {
+      "relation": "isSupplementTo",
+      "identifier": "https://github.com/xiaohuo123212/ai-lang-design",
+      "scheme": "url"
+    }
+  ],
+  "version": "0.71.0"
+}

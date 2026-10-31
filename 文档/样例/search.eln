@@ -1,0 +1,56 @@
+// ============================================================
+// search.ai —— 二分查找样例的实现部分
+//
+// 三个候选：search_linear / search_binary 已实现；search_interp 在 .tu 里标了
+// pending，故意没有实现。
+//
+// 候选写成 `名字 { 体 }`：不带关键字、不带签名——参数与返回类型由 `kernels` 头给出。
+// 整块只有一个 `}`；候选体里可以再挂一个 `kernels` 块（嵌套上限 2 层）。
+// ============================================================
+
+// #region fn
+// `in_range` 是普通函数：spec 在 .tu 里（含 repeats），实现就在这里。
+// 它只被用作 while 条件——区间未空就继续。
+func in_range(u64 lo, u64 hi) -> bool {
+    return lo < hi;
+}
+
+pub func binary_search(
+                       const Vec<u64>& xs, u64 key) -> u64! {
+    const u64 n = xs.length();
+    if (n == 0) {
+        return Err(SearchError::NotFound);
+    }
+    const u64 idx = (?!search_impl(xs, key))?;
+    return idx;
+} kernels search_impl(
+                      const Vec<u64>& xs, u64 key) -> u64! {
+    search_linear {
+        u64 i = 0;
+        while (i < n) {
+            if (xs.at(i) == key) {
+                return i;
+            }
+            i = i + 1;
+        }
+        return Err(SearchError::NotFound);
+    }
+    search_binary {
+        u64 lo = 0;
+        u64 hi = n;
+        while (in_range(lo, hi)) {
+            const u64 mid = lo + ((hi - lo) / 2)?;
+            const u64 v = xs.at(mid);
+            if (v == key) {
+                return mid;
+            }
+            if (v < key) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        return Err(SearchError::NotFound);
+    }
+}
+// #endregion fn

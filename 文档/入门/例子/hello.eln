@@ -1,0 +1,4 @@
+func main() -> u64 {
+    print(42);
+    return 0;
+}

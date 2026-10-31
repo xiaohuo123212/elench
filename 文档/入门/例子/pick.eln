@@ -1,0 +1,26 @@
+func rank(const Vec<u64>& xs) -> u64! {
+    return ?!kernel(xs);
+} kernels kernel(const Vec<u64>& xs) -> u64! {
+    by_scan {
+        u64 best = 0;
+        u64 i = 0;
+        while (i < xs.length()) {
+            best = max(best, xs.at(i));
+            i = i + 1;
+        }
+        return best;
+    }
+    by_pairs {
+        u64 best = 0;
+        u64 i = 0;
+        while (i < xs.length()) {
+            u64 j = 0;
+            while (j < xs.length()) {
+                best = max(best, xs.at(j));
+                j = j + 1;
+            }
+            i = i + 1;
+        }
+        return best;
+    }
+}

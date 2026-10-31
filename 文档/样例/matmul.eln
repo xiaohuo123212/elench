@@ -1,0 +1,45 @@
+// matmul.eln —— 矩阵乘法（十个手写程序之八）的实现部分
+//
+// 手算期望值（写进 test_programs.py）：
+//   a = [1, 2, 3, 4]  (2x2:  [[1,2],[3,4]])
+//   b = [5, 6, 7, 8]  (2x2:  [[5,6],[7,8]])
+//   a*b = [[1*5+2*7, 1*6+2*8], [3*5+4*7, 3*6+4*8]]
+//       = [[19, 22], [43, 50]]  →  扁平 [19, 22, 43, 50]
+//
+//   a = [1]        dim=1  b = [7]         →  [7]
+//   a = [1,0,0,1]  dim=2  b = [1,2,3,4]   →  [1, 2, 3, 4]（单位阵不改变）
+//   a = [1..9]     dim=3  b = 单位阵      →  等于 a 本身
+//
+// 三层循环的上界都是 `dim`（标量整数形参，T13 认作尺寸）。
+
+// #region fn
+pub func matmul(
+                const Vec<u64>& a,
+                    const Vec<u64>& b, u64 dim) -> Vec<u64>! {
+    const u64 need = dim * dim;
+    if (a.length() != need) {
+        return Err(MatError::DimensionMismatch);
+    }
+    if (b.length() != need) {
+        return Err(MatError::DimensionMismatch);
+    }
+
+    Vec<u64> out = Vec<u64>::make();
+    u64 i = 0;
+    while (i < dim) {
+        u64 j = 0;
+        while (j < dim) {
+            u64 acc = 0;
+            u64 k = 0;
+            while (k < dim) {
+                acc = acc + a.at(i * dim + k) * b.at(k * dim + j);
+                k = k + 1;
+            }
+            out.push(acc);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    return out;
+}
+// #endregion fn

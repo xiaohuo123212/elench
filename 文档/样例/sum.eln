@@ -1,0 +1,38 @@
+// ============================================================
+// sum.ai —— 求和样例的实现部分
+//
+// 两个候选复杂度相同（O(n)），差异只在常数因子：
+//   sum_by_index —— 按下标遍历
+//   sum_by_iter  —— 用 for 遍历
+// 所以 `?!` 的上界是 O(n)，与 target 相等；谁更快只能测。
+// ============================================================
+
+// #region fn
+pub func average(
+                 const Vec<u8>& scores) -> u64! {
+    const u64 n = scores.length();
+    if (n == 0) {
+        return Err(CalcError::Empty);
+    }
+    const u64 total = (?!sum_kernel(scores))?;
+    return total / n;
+} kernels sum_kernel(
+                     const Vec<u8>& scores) -> u64! {
+    sum_by_index {
+        u64 s = 0;
+        u64 i = 0;
+        while (i < n) {
+            s = s + scores.at(i);
+            i = i + 1;
+        }
+        return s;
+    }
+    sum_by_iter {
+        u64 s = 0;
+        for (x in scores) {
+            s = s + x;
+        }
+        return s;
+    }
+}
+// #endregion fn

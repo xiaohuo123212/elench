@@ -1,0 +1,226 @@
+// ============================================================
+// calculator.ai —— 表达式求值器的实现
+//
+// v0.68 语法（全面 C++ 风格）：
+//   func           函数关键字（参数后置，唯一刻意保留的非 C++ 处）
+//   const T n      不可变绑定（类型前置）
+//   T n            可变绑定
+//   条件带括号     if (n == 0) { … }
+//   块只用 }       不写 end
+//   Vec<T>         动态数组（会分配）
+//   FixedVec<T, N> 定容数组（不分配）
+//   T!             可能失败；错误类型取模块的 error 声明
+//   return x       T! 函数里自动成为 Ok(x)——不要写 Ok(...)
+//   调用可能失败   一律写 `?`
+//
+// 全部契约（cost / effects / target）见同目录 calculator.tu。
+// ============================================================
+
+pub func evaluate(
+                  const Vec<u8>& text) -> i64! {
+    const FixedVec<Token,
+    MAX_TOKENS> tokens = tokenize(text)?;
+    return reduce(tokens);
+}
+
+func tokenize(
+              const Vec<u8>& text) -> FixedVec<Token, MAX_TOKENS>! {
+    FixedVec<Token,
+    MAX_TOKENS> tokens = FixedVec<Token,
+    MAX_TOKENS>::make();
+    u64 index = 0;
+    const u64 total = text.length();
+
+    while (index < total) {
+        const u64 byte = text.at(index);
+
+        if (byte == SPACE) {
+            index = index + 1;
+        } else if (byte == PLUS) {
+            tokens.push(Token::Plus);
+            index = index + 1;
+        } else if (byte == MINUS) {
+            tokens.push(Token::Minus);
+            index = index + 1;
+        } else if (byte == STAR) {
+            tokens.push(Token::Star);
+            index = index + 1;
+        } else if (byte == SLASH) {
+            tokens.push(Token::Slash);
+            index = index + 1;
+        } else if (byte == OPEN_PAREN) {
+            tokens.push(Token::OpenParenthesis);
+            index = index + 1;
+        } else if (byte == CLOSE_PAREN) {
+            tokens.push(Token::CloseParenthesis);
+            index = index + 1;
+        } else if (is_digit(byte)) {
+            const (i64, u64) scanned = read_number(text, index)?;
+            tokens.push(Token::Number(scanned.0));
+            index = scanned.1;
+        } else {
+            return Err(CalcError::UnexpectedByte(index));
+        }
+    }
+
+    if (tokens.length() == 0) {
+        return Err(CalcError::EmptyExpression);
+    }
+
+    return tokens;
+}
+
+func read_number(
+                 const Vec<u8>& text, u64 start) -> (i64, u64)! {
+    u64 index = start;
+    i64 value = 0;
+    u64 digits = 0;
+    const u64 total = text.length();
+
+    while (index < total and is_digit(text.at(index))) {
+        if (digits >= MAX_DIGITS) {
+            return Err(CalcError::NumberTooLong);
+        }
+        const i64 digit = digit_value(text.at(index));
+        value = value * 10;
+        value = value + digit;
+        index = index + 1;
+        digits = digits + 1;
+    }
+
+    if (digits == 0) {
+        return Err(CalcError::UnexpectedByte(start));
+    }
+
+    return (value, index);
+}
+
+func reduce(
+            const FixedVec<Token, MAX_TOKENS>& tokens) -> i64! {
+    FixedVec<i64,
+    MAX_DEPTH> values = FixedVec<i64,
+    MAX_DEPTH>::make();
+    FixedVec<Token,
+    MAX_DEPTH> operators = FixedVec<Token,
+    MAX_DEPTH>::make();
+    u64 index = 0;
+    const u64 total = tokens.length();
+
+    while (index < total) {
+        const Token token = tokens.at(index);
+
+        match token {
+            Token::Number(value) => {
+                values.push(value);
+            }
+            ,
+            Token::OpenParenthesis => {
+                operators.push(token);
+            }
+            ,
+            Token::CloseParenthesis => {
+                const bool closed = pop_until_open(values, operators)?;
+                if (not closed) {
+                    return Err(CalcError::UnbalancedParenthesis);
+                }
+            }
+            ,
+            _ => {
+                while (should_reduce(operators, token)) {
+                    const i64 value = apply_top(& values, & operators)?;
+                    values.push(value);
+                }
+                operators.push(token);
+            }
+            ,
+        }
+
+        index = index + 1;
+    }
+
+    while (operators.length() > 0) {
+        const i64 value = apply_top(& values, & operators)?;
+        values.push(value);
+    }
+
+    if (values.length() != 1) {
+        return Err(CalcError::UnbalancedParenthesis);
+    }
+
+    return values.at(0);
+}
+
+func pop_until_open(FixedVec<i64, MAX_DEPTH>& values, FixedVec<Token,
+                    MAX_DEPTH>& operators) -> bool! {
+    while (operators.length() > 0) {
+        const Token top = operators.at(operators.length() - 1);
+        if (top == Token::OpenParenthesis) {
+            // pop 的 requires 由上一层分支与循环条件直接履行（T12 + T12-a）
+            operators.pop();
+            return true;
+        }
+        const i64 value = apply_top(values, operators)?;
+        values.push(value);
+    }
+
+    return false;
+}
+
+func should_reduce(
+                   const FixedVec<Token, MAX_DEPTH>& operators, Token next) -> bool {
+    if (operators.length() == 0) {
+        return false;
+    }
+
+    const Token top = operators.at(operators.length() - 1);
+    if (top == Token::OpenParenthesis) {
+        return false;
+    }
+
+    return precedence(top) >= precedence(next);
+}
+
+func precedence(Token token) -> u64 {
+    match token {
+        Token::Plus => return 1,
+        Token::Minus => return 1,
+        Token::Star => return 2,
+        Token::Slash => return 2,
+        _ => return 0,
+    }
+}
+
+func apply_top(FixedVec<i64, MAX_DEPTH>& values, FixedVec<Token,
+               MAX_DEPTH>& operators) -> i64! {
+    if (values.length() < 2 or operators.length() < 1) {
+        return Err(CalcError::UnbalancedParenthesis);
+    }
+
+    // 下面三次 pop 的 requires（length >= 1）由上面的分支直接履行（T12 + T12-a），
+    // 因此不再需要 `?`。这是标准库 API 按"前置条件优先"重设计后的写法。
+    const Token operator = operators.pop();
+    const i64 right = values.pop();
+    const i64 left = values.pop();
+
+    match operator {
+        Token::Plus => return left + right,
+        Token::Minus => return left - right,
+        Token::Star => return left * right,
+        Token::Slash => {
+            if (right == 0) {
+                return Err(CalcError::Arith(cause = Arithmetic::DivisionByZero));
+            }
+            return (left / right)?;
+        }
+        ,
+        _ => return Err(CalcError::UnbalancedParenthesis),
+    }
+}
+
+func is_digit(u64 byte) -> bool {
+    return byte >= ZERO and byte <= NINE;
+}
+
+func digit_value(u64 byte) -> i64 {
+    return (byte - ZERO) as i64;
+}

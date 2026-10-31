@@ -1,0 +1,166 @@
+// topk.eln —— 第 k 大（十个手写程序之九）的实现部分
+//
+// 手算期望值（写进 test_programs.py），k 从 1 开始数（1 = 最大）：
+//   ([5, 1, 9, 3], 2)  → 5    （降序 9,5,3,1 → 第 2 个）
+//   ([5, 1, 9, 3], 1)  → 9    （最大）
+//   ([5, 1, 9, 3], 4)  → 1    （最小 = 第 n 大）
+//   ([7, 7, 7],    2)  → 7    （重复值**按名次算**，不跳过：并列第 1、2、3 大都是 7）
+//
+// 两个候选都返回同一个数，只是做法不同：
+//   topk_heap   —— 维护大小 k 的**最小堆**，堆顶就是第 k 大；O(n·log k)
+//   topk_select —— 反复扫描找下一个最大值（带重复计数）；O(n·k)
+// 小 k + 大 n 时堆法赢，k 接近 n 时两者的常数反过来 —— 真实交叉点。
+//
+// 本文件里**没有一处递减循环**：堆的上浮/下沉本来是 `while (j > 0)`，
+// 但 T13 推不出递减循环的界，所以改成「固定 HEAP_LEVELS 圈 + 位置守卫」。
+// **代价**：log k 变成了常数 6，堆法每个元素恒定做 6 圈 —— 静态成本式因此被撑大
+// （`dsh cost` 里能看到 `n(xs)×61`），`dsh dispatch` 于是静态地认为
+// 「topk_select 全程更省」。这不是写错，是「上界必须可写」这条规则的真实代价。
+
+// #region fn
+pub func topk(
+              const Vec<u64>& xs, u64 k) -> u64! {
+    const u64 len = xs.length();
+    // 名次从 1 开始：0 是非法名次
+    if (k == 0) {
+        return Err(TopkError::RankZero);
+    }
+    if (k > len) {
+        return Err(TopkError::RankTooLarge);
+    }
+    // 定长堆不会自己长大：k 超过容量就是错误，而不是崩溃
+    if (k > HEAP_CAP) {
+        return Err(TopkError::RankTooLarge);
+    }
+    return ?!topk_kernel(xs, k);
+} kernels topk_kernel(
+                      const Vec<u64>& xs, u64 k) -> u64! {
+    topk_heap {
+        const u64 n = xs.length();
+        FixedVec<u64,
+        HEAP_CAP> heap = FixedVec<u64,
+        HEAP_CAP>::make();
+        u64 i = 0;
+        u64 pos = 0;
+        u64 depth = 0;
+        u64 tmp = 0;
+        u64 left = 0;
+        u64 right = 0;
+        u64 small = 0;
+
+        while (i < n) {
+            const u64 v = xs.at(i);
+            if (i < k) {
+                // ---- 前 k 个：入堆（push 到末尾）后上浮
+                heap.push(v);
+                pos = i;
+                depth = 0;
+                while (depth < HEAP_LEVELS) {
+                    if (pos > 0) {
+                        const u64 par = ((pos - 1) / 2)?;
+                        if (heap.at(par) > heap.at(pos)) {
+                            tmp = heap.at(par);
+                            heap[par] = heap.at(pos);
+                            heap[pos] = tmp;
+                            pos = par;
+                        }
+                    }
+                    depth = depth + 1;
+                }
+            } else if (v > heap.at(0)) {
+                // ---- 后 n-k 个：比堆顶（当前第 k 大）大才替换，再下沉
+                heap[0] = v;
+                pos = 0;
+                depth = 0;
+                while (depth < HEAP_LEVELS) {
+                    left = pos * 2 + 1;
+                    right = left + 1;
+                    small = pos;
+                    if (left < k) {
+                        if (heap.at(left) < heap.at(small)) {
+                            small = left;
+                        }
+                    }
+                    if (right < k) {
+                        if (heap.at(right) < heap.at(small)) {
+                            small = right;
+                        }
+                    }
+                    if (small != pos) {
+                        tmp = heap.at(pos);
+                        heap[pos] = heap.at(small);
+                        heap[small] = tmp;
+                        pos = small;
+                    }
+                    depth = depth + 1;
+                }
+            }
+            i = i + 1;
+        }
+        return heap.at(0);
+    }
+    topk_select {
+        const u64 n = xs.length();
+        // 已经确认的名次（1..rank-1 都已落定），threshold 是上一轮找到的值
+        u64 rank = 1;
+        u64 threshold = 0;
+        u64 has_prev = 0;
+        u64 round = 0;
+        u64 best = 0;
+        u64 seen = 0;
+        u64 times = 0;
+        u64 take = 0;
+        u64 answer = 0;
+        u64 i = 0;
+        u64 j = 0;
+
+        while (round < k) {
+            // ---- 第 1 遍：找「比 threshold 小的那些数」里的最大者
+            best = 0;
+            seen = 0;
+            i = 0;
+            while (i < n) {
+                const u64 v = xs.at(i);
+                take = 0;
+                if (has_prev == 0) {
+                    take = 1;
+                } else if (v < threshold) {
+                    take = 1;
+                }
+                if (take == 1) {
+                    if (seen == 0) {
+                        best = v;
+                        seen = 1;
+                    } else if (v > best) {
+                        best = v;
+                    }
+                }
+                i = i + 1;
+            }
+
+            // ---- 第 2 遍：数 best 出现几次（重复值占多个名次）
+            times = 0;
+            j = 0;
+            while (j < n) {
+                if (xs.at(j) == best) {
+                    times = times + 1;
+                }
+                j = j + 1;
+            }
+
+            answer = best;
+            if (rank + times > k) {
+                // 第 k 大就落在这一批并列值里 → 落定
+                round = k;
+            } else {
+                // 整批并列值都还在 k 名之前 → 下一轮只找严格更小的
+                threshold = best;
+                has_prev = 1;
+                rank = rank + times;
+                round = round + 1;
+            }
+        }
+        return answer;
+    }
+}
+// #endregion fn

@@ -1,0 +1,59 @@
+// merge.eln —— 区间合并（十个手写程序之五）的实现部分
+//
+// 手算期望值（写进 test_programs.py）：
+//   [(1,3), (2,6), (8,10), (15,18)]  → [(1,6), (8,10), (15,18)]
+//   [(1,4), (4,5)]                   → [(1,5)]          ← 相邻（端点接触）也算重叠
+//   [(1,10), (2,3)]                  → [(1,10)]         ← 完全包含
+//   [(5,7)]                          → [(5,7)]          ← 单元素
+//   []                               → []               ← 空
+//
+// 算法两步：
+//   1. 按 start 插入排序（原地写 `xs[i] = Interval {...}`）
+//   2. 单次描合并：与「上一个已合并区间」比较，重叠就延长它的 end
+//
+// 插入排序是 O(n²)，target 也写 O(n²) —— **同阶**，不假装有阶差。
+
+// #region fn
+// 比较器：按 start 升序。**必须是具名函数**——匿名比较器是任意代码，
+// 成本不可静态界定，会打穿 `O(n log n × κ(cmp))` 这条契约。
+func earlier(Interval a, Interval b) -> bool {
+    return a.start < b.start;
+}
+
+pub func merge(Vec<Interval>& xs) -> Vec<Interval>! {
+    Vec<Interval> out = Vec<Interval>::make();
+    const u64 n = xs.length();
+    if (n == 0) {
+        return out;
+    }
+
+    // ---- 第一步：按 start 排序
+    // 用语言给的 `sort_by`（**稳定**排序），不再手写：
+    //   手写选择排序不稳定 —— 相同 start 的两个区间，先后次序会被打乱；
+    //   而「区间合并」的输出次序依赖这个稳定性。
+    //
+    // 这一段原来是 20 行手写选择排序，因为 T13 当时推不出递减循环的上界，
+    // 插入排序写不了。**T13 现在认递减循环了，但更该做的是不用手写排序。**
+    sort_by(xs, earlier);
+
+    // ---- 第二步：单次扫描合并
+    u64 cur_begin = xs.at(0).start;
+    u64 cur_finish = xs.at(0).finish;
+    u64 idx = 1;
+    while (idx < n) {
+        const u64 s = xs.at(idx).start;
+        const u64 e = xs.at(idx).finish;
+        if (s <= cur_finish) {
+            // 重叠或相邻：延长右端（取大——用 if 分两支，避免 i64 负数）
+            cur_finish = max(cur_finish, e);
+        } else {
+            out.push(Interval { start: cur_begin, finish: cur_finish });
+            cur_begin = s;
+            cur_finish = e;
+        }
+        idx = idx + 1;
+    }
+    out.push(Interval { start: cur_begin, finish: cur_finish });
+    return out;
+}
+// #endregion fn

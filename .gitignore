@@ -1,0 +1,35 @@
+# 生成物与本地文件，不进版本库
+*.cost.yaml
+*.dispatch.yaml
+*.bench.yaml
+__pycache__/
+*.pyc
+.venv/
+
+# 编辑器与系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# 临时
+*.tmp
+*.bak
+*~
+
+# 编辑器扩展打包产物
+*.vsix
+
+# 本地私有材料（不进公开仓库）
+_private/
+
+# 打包产物
+dist/
+build/
+*.egg-info/
+
+# 内部文档：设计、规划、申请书、预印本、材料 —— **只留本地，不入公开仓库**
+/文档/设计/
+/文档/其他/
+/文档/实验/
+/文档/待办.md
