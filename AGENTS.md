@@ -24,3 +24,23 @@
 - 发布版本时把 `Unreleased` 改成版本号 + 日期；
 - **没有 CHANGELOG 条目就不推**——公开仓库的读者只能靠它知道发生了什么。
 
+## 4. **两个远端：`origin` 全量、`clean` 对外**
+
+| 远端 | 仓库 | 内容 | 用途 |
+|---|---|---|---|
+| **origin** | `xiaohuo123212/ai-lang-design`（private） | **全量**：代码 + 内部设计/规划/申报材料 + 完整历史 | 自己开发与备份 |
+| **clean** | `xiaohuo123212/ai-lang-design-clean`（private，**可随时转 public**） | **只有代码与对外文档**，**单提交起点、历史里没有内部材料** | 对外发布 / 将来开源 |
+
+**规则**：
+- **用户说 "push" 时，两个仓库一起推**（先 `origin`，再 `clean`）：
+
+  ```bash
+  git push origin main
+  git push clean main
+  ```
+
+  两个都失败时如实报告哪一个成功了、哪一个没有；
+- 日常提交照旧只 commit 到本地，**不主动推**；
+- **`clean` 里永远不出现** `文档/设计/`、`文档/其他/`、`文档/实验/`（`.gitignore` 已保证）；
+- 转 public 之前跑一次 `git ls-files | grep '^文档/'` 自查。
+
