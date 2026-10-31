@@ -10,6 +10,7 @@
 ## [Unreleased]
 
 ### Added
+- `tools/sync_public.py`：把当前树同步成对外仓库 `clean` 的一个新提交（不携带开发历史）。
 - `文档/入门30分钟.md`、`文档/语法清单.md`、`文档/内建函数.md`：对外可直接阅读的入门与参考。
 - `文档/样例/`：10 个可运行样例（与内部样例同源）。
 - `editors/vscode/python/`：VS Code 扩展内置解释器。

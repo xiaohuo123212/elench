@@ -32,11 +32,13 @@
 | **clean** | `xiaohuo123212/ai-lang-design-clean`（private，**可随时转 public**） | **只有代码与对外文档**，**单提交起点、历史里没有内部材料** | 对外发布 / 将来开源 |
 
 **规则**：
-- **用户说 "push" 时，两个仓库一起推**（先 `origin`，再 `clean`）：
+- **用户说 "push" 时，两个仓库一起推**（先 `origin`，再 `clean`）。
+  **clean 不能用 `git push clean main`**（历史是故意独立的，直接推要么被拒，
+  要么把含内部材料的开发历史带过去）。用同步脚本：
 
   ```bash
-  git push origin main
-  git push clean main
+  git push origin main            # 全量 + 完整历史
+  python tools/sync_public.py --push   # 只把"当前树"同步成 clean 的一个新提交
   ```
 
   两个都失败时如实报告哪一个成功了、哪一个没有；
