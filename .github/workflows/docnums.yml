@@ -45,9 +45,16 @@ jobs:
           [ -f "$EXE.exe" ] && EXE="$EXE.exe"
           python cpp/docnums/parity.py "$EXE"
 
-      - name: 自检（--list / --check）
+      - name: 自检（--list）
         shell: bash
         run: |
           EXE=cpp/docnums/build/docnums
           [ -f "$EXE.exe" ] && EXE="$EXE.exe"
           "$EXE" --list
+
+      - name: 校验公开样例（demo.md，只依赖 src/ 与 tests/）
+        shell: bash
+        run: |
+          EXE=cpp/docnums/build/docnums
+          [ -f "$EXE.exe" ] && EXE="$EXE.exe"
+          "$EXE" --check cpp/docnums/examples/demo.md
