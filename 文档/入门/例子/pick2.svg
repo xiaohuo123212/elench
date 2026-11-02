@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="460" viewBox="0 0 760 460" font-family="Segoe UI, sans-serif">
+<rect width="760" height="460" fill="#ffffff"/>
+<text x="380" y="28" text-anchor="middle" font-size="16" font-weight="600" fill="#1a1a1a">rank：静态上界 vs 实测（各自归一化，双对数）</text>
+<text x="380" y="46" text-anchor="middle" font-size="11" fill="#666">虚线=承诺(最劣候选)、点线=κ分段(逐段最优)、实线=实测；同口径看**点线 vs 实线**是否平行</text>
+<rect x="78" y="56" width="658" height="342" fill="#fafafa" stroke="#cccccc"/>
+<line x1="78" y1="383.5" x2="736" y2="383.5" stroke="#eeeeee"/>
+<text x="70" y="387.5" text-anchor="end" font-size="10" fill="#888">1x</text>
+<line x1="78" y1="354.4" x2="736" y2="354.4" stroke="#eeeeee"/>
+<text x="70" y="358.4" text-anchor="end" font-size="10" fill="#888">2x</text>
+<line x1="78" y1="325.4" x2="736" y2="325.4" stroke="#eeeeee"/>
+<text x="70" y="329.4" text-anchor="end" font-size="10" fill="#888">4x</text>
+<line x1="78" y1="296.3" x2="736" y2="296.3" stroke="#eeeeee"/>
+<text x="70" y="300.3" text-anchor="end" font-size="10" fill="#888">8x</text>
+<line x1="78" y1="267.2" x2="736" y2="267.2" stroke="#eeeeee"/>
+<text x="70" y="271.2" text-anchor="end" font-size="10" fill="#888">16x</text>
+<line x1="78.0" y1="56" x2="78.0" y2="398" stroke="#f2f2f2"/>
+<text x="78.0" y="414" text-anchor="middle" font-size="9" fill="#888">1</text>
+<line x1="132.8" y1="56" x2="132.8" y2="398" stroke="#f2f2f2"/>
+<text x="132.8" y="414" text-anchor="middle" font-size="9" fill="#888">2</text>
+<line x1="187.7" y1="56" x2="187.7" y2="398" stroke="#f2f2f2"/>
+<text x="187.7" y="414" text-anchor="middle" font-size="9" fill="#888">4</text>
+<line x1="242.5" y1="56" x2="242.5" y2="398" stroke="#f2f2f2"/>
+<text x="242.5" y="414" text-anchor="middle" font-size="9" fill="#888">8</text>
+<line x1="297.3" y1="56" x2="297.3" y2="398" stroke="#f2f2f2"/>
+<text x="297.3" y="414" text-anchor="middle" font-size="9" fill="#888">16</text>
+<line x1="352.2" y1="56" x2="352.2" y2="398" stroke="#f2f2f2"/>
+<text x="352.2" y="414" text-anchor="middle" font-size="9" fill="#888">32</text>
+<line x1="407.0" y1="56" x2="407.0" y2="398" stroke="#f2f2f2"/>
+<text x="407.0" y="414" text-anchor="middle" font-size="9" fill="#888">64</text>
+<line x1="461.8" y1="56" x2="461.8" y2="398" stroke="#f2f2f2"/>
+<text x="461.8" y="414" text-anchor="middle" font-size="9" fill="#888">128</text>
+<line x1="516.7" y1="56" x2="516.7" y2="398" stroke="#f2f2f2"/>
+<text x="516.7" y="414" text-anchor="middle" font-size="9" fill="#888">256</text>
+<line x1="571.5" y1="56" x2="571.5" y2="398" stroke="#f2f2f2"/>
+<text x="571.5" y="414" text-anchor="middle" font-size="9" fill="#888">512</text>
+<line x1="626.3" y1="56" x2="626.3" y2="398" stroke="#f2f2f2"/>
+<text x="626.3" y="414" text-anchor="middle" font-size="9" fill="#888">1,024</text>
+<line x1="681.2" y1="56" x2="681.2" y2="398" stroke="#f2f2f2"/>
+<text x="681.2" y="414" text-anchor="middle" font-size="9" fill="#888">2,048</text>
+<line x1="736.0" y1="56" x2="736.0" y2="398" stroke="#f2f2f2"/>
+<text x="736.0" y="414" text-anchor="middle" font-size="9" fill="#888">4,096</text>
+<polyline points="78.0,383.5 132.8,371.4 187.7,354.4 242.5,333.0 297.3,308.4 352.2,281.7 407.0,253.9 461.8,225.4 516.7,196.7 571.5,167.8 626.3,138.8 681.2,109.7 736.0,80.7" fill="none" stroke="#1f77b4" stroke-width="2"/>
+<circle cx="78.0" cy="383.5" r="3" fill="#1f77b4"/>
+<circle cx="132.8" cy="371.4" r="3" fill="#1f77b4"/>
+<circle cx="187.7" cy="354.4" r="3" fill="#1f77b4"/>
+<circle cx="242.5" cy="333.0" r="3" fill="#1f77b4"/>
+<circle cx="297.3" cy="308.4" r="3" fill="#1f77b4"/>
+<circle cx="352.2" cy="281.7" r="3" fill="#1f77b4"/>
+<circle cx="407.0" cy="253.9" r="3" fill="#1f77b4"/>
+<circle cx="461.8" cy="225.4" r="3" fill="#1f77b4"/>
+<circle cx="516.7" cy="196.7" r="3" fill="#1f77b4"/>
+<circle cx="571.5" cy="167.8" r="3" fill="#1f77b4"/>
+<circle cx="626.3" cy="138.8" r="3" fill="#1f77b4"/>
+<circle cx="681.2" cy="109.7" r="3" fill="#1f77b4"/>
+<circle cx="736.0" cy="80.7" r="3" fill="#1f77b4"/>
+<polyline points="78.0,383.5 132.8,378.3 187.7,365.2 242.5,346.0 297.3,322.9 352.2,296.9 407.0,269.6 461.8,241.2 516.7,212.7 571.5,184.0 626.3,155.0 681.2,126.1 736.0,97.3" fill="none" stroke="#d62728" stroke-width="2"/>
+<polyline points="78.0,383.5 132.8,368.7 187.7,349.0 242.5,325.6 297.3,299.7 352.2,272.3 407.0,244.1 461.8,215.4 516.7,186.6 571.5,157.6 626.3,128.6 681.2,99.5 736.0,70.5" fill="none" stroke="#ff9d1f" stroke-width="2"/>
+<circle cx="78.0" cy="383.5" r="3" fill="#d62728"/>
+<circle cx="132.8" cy="378.3" r="3" fill="#d62728"/>
+<circle cx="187.7" cy="365.2" r="3" fill="#d62728"/>
+<circle cx="242.5" cy="346.0" r="3" fill="#d62728"/>
+<circle cx="297.3" cy="322.9" r="3" fill="#d62728"/>
+<circle cx="352.2" cy="296.9" r="3" fill="#d62728"/>
+<circle cx="407.0" cy="269.6" r="3" fill="#d62728"/>
+<circle cx="461.8" cy="241.2" r="3" fill="#d62728"/>
+<circle cx="516.7" cy="212.7" r="3" fill="#d62728"/>
+<circle cx="571.5" cy="184.0" r="3" fill="#d62728"/>
+<circle cx="626.3" cy="155.0" r="3" fill="#d62728"/>
+<circle cx="681.2" cy="126.1" r="3" fill="#d62728"/>
+<circle cx="736.0" cy="97.3" r="3" fill="#d62728"/>
+<text x="407" y="442" text-anchor="middle" font-size="11" fill="#444">输入规模 n（对数）</text>
+<text x="16" y="227" text-anchor="middle" font-size="11" fill="#444" transform="rotate(-90 16 227)">相对成本（各自除以第一个点，对数）</text>
+<rect x="558" y="66" width="168" height="64" fill="#ffffff" stroke="#dddddd" rx="4"/>
+<line x1="580" y1="82" x2="604" y2="82" stroke="#1f77b4" stroke-width="2"/>
+<text x="610" y="86" font-size="10" fill="#333">静态上界 κ（操作数）</text>
+<line x1="580" y1="100" x2="604" y2="100" stroke="#d62728" stroke-width="2"/>
+<text x="610" y="104" font-size="10" fill="#333">实测（纳秒）</text>
+<line x1="580" y1="118" x2="604" y2="118" stroke="#ff9d1f" stroke-width="2" stroke-dasharray="6 4"/>
+<text x="610" y="122" font-size="10" fill="#333">κ分段（逐段最优）</text>
+</svg>

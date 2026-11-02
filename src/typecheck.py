@@ -301,6 +301,11 @@ class TypeChecker:
         self.diags.append(Diag(code, msg, getattr(n, "line", 0) if n else 0,
                                getattr(n, "col", 0) if n else 0))
 
+    def _warn(self, code: str, msg: str, n: Optional[Node]) -> None:
+        self.diags.append(Diag(code, msg, getattr(n, "line", 0) if n else 0,
+                               getattr(n, "col", 0) if n else 0,
+                               severity="warning"))
+
     def _check_fn(self, fn: Node) -> None:
         sc = Scope(self.globals)
         for name, ty in self._params_of(fn):
@@ -545,6 +550,17 @@ class TypeChecker:
                                              Ty("name", ty_name))
             s = sc.lookup(name)
             if s is None:
+                # **弃用内建**：名字还认（老代码能跑），但给出改写指引
+                try:
+                    import stdlib as _std
+                    if _std.is_deprecated(name):
+                        self._warn(
+                            "W-Builtin-Deprecated",
+                            f"`{name}` 已弃用（v0.73 移除）：改用 "
+                            + _std.replacement_for(name), n)
+                        return TY_UNKNOWN
+                except Exception:                       # noqa: BLE001
+                    pass
                 self._err("E-Name-Undefined", f"未声明的名字 `{name}`", n)
                 return TY_UNKNOWN
             return s.ty
@@ -587,7 +603,20 @@ class TypeChecker:
             if name in ("sort", "sort_by"):
                 # 原地排序，返回元素个数（u64）。比较器是**名字**，不是值。
                 return TY_U64
+            if name == "for_each":
+                # **高阶内建**：`for_each(容器, 具名函数)`（v0.73 起支持 Vec）。
+                # 以前只在解释器里有实现、名字表里没有 → 合法程序被 check 拒。
+                if len(args) != 2:
+                    self._err("E-Type-ArgCount",
+                              f"for_each 要 2 个实参（容器 + 具名函数），给了 {len(args)}", n)
+                return TY_U64
             if stdlib.is_stdlib(name):
+                # **弃用内建**：还能用，但要告诉作者该改写成什么（v0.73 移除）
+                if stdlib.is_deprecated(name):
+                    self._warn(
+                        "W-Builtin-Deprecated",
+                        f"`{name}` 已弃用（v0.73 移除）：改用 "
+                        + stdlib.replacement_for(name), n)
                 # 最小基本库：本批全部是 `(容器, …) -> u64`，只校验实参个数。
                 if len(args) != stdlib.arity(name):
                     self._err("E-Type-ArgCount",

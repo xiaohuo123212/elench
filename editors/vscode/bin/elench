@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Elench 命令行启动器（Linux / macOS）
+set -e
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT="$HERE/../python/elench.py"
+
+PY=""
+for cand in python3 python; do
+  if command -v "$cand" >/dev/null 2>&1; then PY="$cand"; break; fi
+done
+if [ -z "$PY" ]; then
+  echo "[elench] 找不到 Python 3.10+，请先安装。" >&2
+  exit 2
+fi
+exec "$PY" "$SCRIPT" "$@"

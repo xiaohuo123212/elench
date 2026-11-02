@@ -941,10 +941,22 @@ class Parser:
             # v0.68：`const T& name` / `T& name` / `T name`（类型前置）
             if self.at(Kind.CONST) or self._at_cxx_param() or self._at_typed_param() \
                     or self._at_legacy_param():
-                pt = self.advance() if self.at(Kind.CONST) else self.peek()
+                _is_const = self.at(Kind.CONST)
+                pt = self.advance() if _is_const else self.peek()
                 typ = self.parse_type()
-                nm = self.expect_ident("参数名").text
-                params.add(Node("param", pt.line, pt.col, name=nm).add(typ))
+                # **泛型按值形参**（v0.72）：`FixedVec<u64, 3> v`。
+                # 以前 `_at_typed_param` 只认「两个相邻 IDENT」，`Name<…> v`
+                # 被当成"没有名字的裸类型"，随后在 `v` 处报 "期望 ')'"。
+                if self.at(Kind.IDENT) and self.kind(1) in (Kind.COMMA, Kind.RPAREN):
+                    nm = self.advance().text
+                else:
+                    nm = self.expect_ident("参数名").text
+                _p = Node("param", pt.line, pt.col, name=nm).add(typ)
+                if _is_const:
+                    # **`const T& xs` 的 const 以前被丢掉**（AST 里查不到），
+                    # 于是"不可变借用"这条承诺在运行期无从检查。
+                    _p.value = {"const": True}
+                params.add(_p)
                 if not self.accept(Kind.COMMA):
                     break
                 continue
@@ -964,7 +976,15 @@ class Parser:
                 p = Node("param", pt.line, pt.col, name=pt.text).add(typ)
                 params.add(p)
             else:
-                params.add(self.parse_type())
+                _bt = self.peek()
+                _bty = self.parse_type()
+                # **泛型按值形参** `FixedVec<u64, 3> v`：以前这里一律当"裸类型"，
+                # 随后在 `v` 处报 "期望 ')'"。
+                if self.at(Kind.IDENT) and self.kind(1) in (Kind.COMMA, Kind.RPAREN):
+                    _nm = self.advance().text
+                    params.add(Node("param", _bt.line, _bt.col, name=_nm).add(_bty))
+                else:
+                    params.add(_bty)
             if not self.accept(Kind.COMMA):
                 break
         return params
@@ -1033,6 +1053,53 @@ class Parser:
         return False
 
     # ---------------------------------------------------------- 类型
+
+    def _parse_type_args(self, line: int, col: int) -> Node:
+        """解析类型实参（**唯一实现**，两处共用）。
+
+        以前 `parse_type()` 与表达式里的 `FixedVec<...>::make()` 各写了一遍，
+        改一处另一处不动——`FixedVec<u64, N + 1>` 就只在其中一边报错。
+        """
+        args = Node("type-args", line, col)
+        while not self.at(Kind.GT) and not self.at(Kind.EOF):
+            if self.at(Kind.INT):
+                nt = self.advance()
+                left = Node("lit-int", nt.line, nt.col, value=nt.value)
+            elif self.at(Kind.IDENT) and self.kind(1) in (
+                    Kind.PLUS, Kind.MINUS, Kind.STAR, Kind.SLASH):
+                it = self.advance()
+                left = Node("path", it.line, it.col, name=it.text)
+            else:
+                args.add(self.parse_type())
+                if not self.accept(Kind.COMMA):
+                    break
+                continue
+            left = self._type_const_expr_tail(left)
+            args.add(left if left.kind == "binary"
+                     else Node("type-const", left.line, left.col, value=left.value))
+            if not self.accept(Kind.COMMA):
+                break
+        self.expect(Kind.GT, "'>'")
+        return args
+
+    def _type_const_expr_tail(self, left: Node) -> Node:
+        """把类型实参里的 `+ - * /` 尾巴吃成 `binary` 树（只认字面量与常量名）。"""
+        while self.peek().text in ("+", "-", "*", "/"):
+            op = self.advance()
+            if self.at(Kind.INT):
+                nt = self.advance()
+                right = Node("lit-int", nt.line, nt.col, value=nt.value)
+            elif self.at(Kind.IDENT):
+                it = self.advance()
+                right = Node("path", it.line, it.col, name=it.text)
+            else:
+                self.error("E-Type-ConstExpr", "常量表达式右边要是数字或常量名", op)
+                break
+            b = Node("binary", left.line, left.col, value=op.text)
+            b.add(left)
+            b.add(right)
+            left = b
+        return left
 
     def parse_type(self) -> Node:
         t = self.peek()
@@ -1105,16 +1172,7 @@ class Parser:
             # C++ 风格泛型：Vec<T> / FixedVec<T, N> / Opt<T>
             if self.at(Kind.LT) and self._is_generic_open():
                 self.advance()
-                args = Node("type-args", t.line, t.col)
-                while not self.at(Kind.GT) and not self.at(Kind.EOF):
-                    if self.at(Kind.INT):
-                        nt = self.advance()
-                        args.add(Node("type-const", nt.line, nt.col, value=nt.value))
-                    else:
-                        args.add(self.parse_type())
-                    if not self.accept(Kind.COMMA):
-                        break
-                self.expect(Kind.GT, "'>'")
+                args = self._parse_type_args(t.line, t.col)
                 node = node.add(args)
                 # `FixedVec<T, N>::make()` —— 静态成员调用，等价于 `.make`
                 if self.at(Kind.PATHSEP):
@@ -1231,6 +1289,13 @@ class Parser:
             return self.parse_if()
         if k == Kind.WHILE:
             return self.parse_while()
+        if k in (Kind.BREAK, Kind.CONTINUE):
+            # **`break;` / `continue;`**（v0.72）：词法以前根本没有这两个关键字，
+            # parser 把它们当路径，运行期报"未绑定的名字 break"。
+            kw = self.advance()
+            self.expect(Kind.SEMI, "';'")
+            return Node("break" if kw.kind == Kind.BREAK else "continue",
+                        kw.line, kw.col)
         if k == Kind.PARALLEL:
             return self.parse_parallel()
         if k == Kind.FOR:
@@ -1452,6 +1517,12 @@ class Parser:
 
     def parse_pattern(self) -> Node:
         t = self.peek()
+        # **字面量模式**：`0 => …` / `true => …`。
+        # 以前这里只认路径，`match (n) { 0 => … }` 会以 E-Parse-ExpectedPath 失败，
+        # 而失败之后整条 match 被丢掉、κ 却照样算出 0（"假上界"）。
+        if self.kind() in (Kind.INT, Kind.TRUE, Kind.FALSE):
+            lit = self.advance()
+            return Node("pattern-literal", lit.line, lit.col, value=lit.text)
         if self.at(Kind.UNDERSCORE) if hasattr(Kind, "UNDERSCORE") else False:
             self.advance()
             return Node("pattern-wildcard", t.line, t.col)
@@ -1579,26 +1650,7 @@ class Parser:
             # v0.68：`FixedVec<T, N>::make()` —— 泛型类型实参先挂上来
             if self.at(Kind.LT) and self._generic_tail(0):
                 self.advance()
-                args = Node("type-args", t0.line, t0.col)
-                depth = 1
-                while self.kind() != Kind.EOF:
-                    if self.at(Kind.LT):
-                        depth += 1
-                    elif self.at(Kind.GT):
-                        depth -= 1
-                        if depth == 0:
-                            self.advance()
-                            break
-                    elif depth == 1 and self.at(Kind.COMMA):
-                        self.advance()
-                        continue
-                    else:
-                        args.add(self.parse_type() if not self.at(Kind.INT)
-                                 else Node("type-const", self.peek().line,
-                                           self.peek().col,
-                                           value=self.advance().value))
-                        continue
-                    self.advance()
+                args = self._parse_type_args(t0.line, t0.col)
                 node = Node("type-name", t0.line, t0.col, name=t0.text).add(args)
             return node
 
@@ -1764,6 +1816,13 @@ def parse_source(src: str, src_name: str = "<input>") -> ParseResult:
         for d in lex.diagnostics
     ]
     diags.extend(p.diags)
+    # **把诊断挂到 module 上**（2026-11-01）：下游（`CostInterp`）要知道
+    # "这棵树是不是没解析干净"——不干净就不许给出一个数（见 cost_interp）。
+    if mod is not None:
+        try:
+            mod._parse_diags = list(diags)
+        except AttributeError:
+            pass
     return ParseResult(module=mod, diagnostics=diags, tokens=toks, soft=p.soft)
 
 

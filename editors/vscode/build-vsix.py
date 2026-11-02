@@ -95,11 +95,26 @@ def main() -> int:
 
         # **内置解释器**：python/ 下所有 .py 一起打进去，
         # 装好后不依赖用户先 clone 仓库。
+        #
+        # **必须递归**：`cost_domain/` 是包（2026-11 起成本模块合并进来），
+        # 早先只 `listdir` 顶层 .py，包目录被整段漏掉——装好的扩展一算成本
+        # 就 ImportError，而 .vsix 里看不出来。`__pycache__` 一律跳过。
         py_dir = os.path.join(HERE, "python")
         if os.path.isdir(py_dir):
-            for name in sorted(os.listdir(py_dir)):
-                if name.endswith(".py"):
-                    z.write(os.path.join(py_dir, name), f"extension/python/{name}")
+            for root, dirs, files in os.walk(py_dir):
+                dirs[:] = sorted(d for d in dirs if d != "__pycache__")
+                for fname in sorted(files):
+                    if not fname.endswith(".py"):
+                        continue
+                    src = os.path.join(root, fname)
+                    rel = os.path.relpath(src, py_dir).replace(os.sep, "/")
+                    z.write(src, f"extension/python/{rel}")
+
+        # **命令行启动器**：bin/ 下的 elench(.cmd)
+        bin_dir = os.path.join(HERE, "bin")
+        if os.path.isdir(bin_dir):
+            for name in sorted(os.listdir(bin_dir)):
+                z.write(os.path.join(bin_dir, name), f"extension/bin/{name}")
     size = os.path.getsize(out) / 1024
     with zipfile.ZipFile(out) as z:
         names = z.namelist()

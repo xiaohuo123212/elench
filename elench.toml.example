@@ -1,0 +1,9 @@
+[build]
+# true：缺 <模块>.dispatch.yaml 时 build 失败（等价于每次 --require-measured）
+# false（默认）：缺表按**静态分段**放行，只打警告
+require_measured = false
+
+[cost]
+# true：cost 一律按 --promise（全候选取 max 的保守界）输出
+# false（默认）：按分段逐段取最优
+promise = false

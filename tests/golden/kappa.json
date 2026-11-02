@@ -2,45 +2,45 @@
   "note": "κ 的 golden 基准。改 κ 后必须 --freeze 并在提交信息里写理由。",
   "programs": {
     "calculator": {
-      "apply_top": "43",
-      "digit_value": "5",
-      "evaluate": "1 + 1 + 1 + 9 + n(text)×20 + 20 + 9 + 2 + 21394299",
+      "apply_top": "48",
+      "digit_value": "6",
+      "evaluate": "1 + 1 + 1 + 9 + n(text)×18 + 18 + 10 + 2 + 1 + 27523803",
       "is_digit": "8",
-      "pop_until_open": "n(operators)×74 + 74 + 2",
-      "precedence": "1",
-      "read_number": "11 + n(text)×49 + 49 + 6 + 1",
-      "reduce": "11 + n(tokens)×5221 + 5221 + 3835 + 9 + 5",
-      "should_reduce": "26",
-      "tokenize": "9 + n(text)×20 + 20 + 9 + 2"
+      "pop_until_open": "n(operators)×86 + 86 + 2",
+      "precedence": "5",
+      "read_number": "11 + n(text)×57 + 57 + 8 + 4",
+      "reduce": "11 + n(tokens)×6717 + 6717 + 4225 + 10 + 5",
+      "should_reduce": "41",
+      "tokenize": "9 + n(text)×18 + 18 + 10 + 2"
     },
     "count": {
-      "count": "11 + 1 + 1 + 9 + n(text)×25 + 25 + 2 + 2 + 3598 + 2"
+      "count": "{1≤n(text)≤4096: 12 + 1 + 1 + 9 + n(text)×23 + 23 + 2 + 2 + 4626 + 2；越界: 12 + 1 + 1 + 9 + n(text)×23 + 23 + 2 + 2 + 4626 + 2}"
     },
     "lcs": {
-      "lcs": "26 + n(a)×(9 + 2 + n(b)×65 + 65 + 5) + 9 + 2 + n(b)×65 + 65 + 5 + 14"
+      "lcs": "27 + n(a)×(7 + 2 + n(b)×63 + 63 + 5) + 7 + 2 + n(b)×63 + 63 + 5 + 14"
     },
     "matmul": {
-      "matmul": "27 + n(dim)×(6 + 2 + n(dim)×(6 + 4 + n(dim)×24 + 24 + 4 + 5) + 6 + 4 + n(dim)×24 + 24 + 4 + 5 + 5) + 6 + 2 + n(dim)×(6 + 4 + n(dim)×24 + 24 + 4 + 5) + 6 + 4 + n(dim)×24 + 24 + 4 + 5 + 5 + 2"
+      "matmul": "29 + n(dim)×(4 + 2 + n(dim)×(4 + 4 + n(dim)×30 + 30 + 5 + 5) + 4 + 4 + n(dim)×30 + 30 + 5 + 5 + 5) + 4 + 2 + n(dim)×(4 + 4 + n(dim)×30 + 30 + 5 + 5) + 4 + 4 + n(dim)×30 + 30 + 5 + 5 + 5 + 2"
     },
     "merge": {
       "earlier": "6",
-      "merge": "14 + n(xs)×log2(n(xs))×6 + 6 + 6 + 2 + n(xs)×37 + 37 + 4 + 2"
+      "merge": "14 + 1 + 2 + n(xs)×log2(n(xs))×6 + 1 + 6 + 6 + 2 + n(xs)×36 + 36 + 5 + 2"
     },
     "paren": {
-      "paren": "9 + n(text)×33 + 33 + 9 + 2"
+      "paren": "9 + n(text)×33 + 33 + 10 + 2"
     },
     "search": {
-      "binary_search": "11 + 1 + 1 + 1 + max(2 + n(xs)×20 + 20 + 2, 4 + log2(n(xs))×37 + 37 + 2) + 1 + max(2 + n(xs)×20 + 20 + 2, 4 + log2(n(xs))×37 + 37 + 2) + 2",
+      "binary_search": "12 + 1 + 1 + 1 + max(2 + n(xs)×18 + 18 + 3, 4 + log2(n(xs))×37 + 37 + 3) + 1 + max(2 + n(xs)×18 + 18 + 3, 4 + log2(n(xs))×37 + 37 + 3) + 2",
       "in_range": "4"
     },
     "stats": {
-      "summarize": "11 + 1 + 1 + 1 + 9 + n(xs)×19 + 19 + 2 + 1 + 9 + n(xs)×19 + 19 + 2 + 5 + 2 + 5 + 5 + 2 + n(xs)×38 + 38 + 5 + 1"
+      "summarize": "12 + 1 + 1 + 1 + max(9 + n(xs)×17 + 17 + 2, 9 + n(xs)×21 + 21 + 2) + 1 + max(9 + n(xs)×17 + 17 + 2, 9 + n(xs)×21 + 21 + 2) + 5 + 2 + 5 + 5 + 2 + n(xs)×42 + 42 + 5 + 2"
     },
     "sum": {
-      "average": "11 + 1 + 1 + 1 + 2 + n(scores)×7 + 2 + 1 + 2 + n(scores)×7 + 2 + 4"
+      "average": "{1≤n(scores)≤4096: 12 + 1 + 1 + 1 + 2 + n(scores)×7 + 2 + 1 + 2 + n(scores)×7 + 2 + 4；越界: 12 + 1 + 1 + 1 + 4 + n(scores)×17 + 17 + 2 + 1 + 4 + n(scores)×17 + 17 + 2 + 4}"
     },
     "topk": {
-      "topk": "23 + 1 + 1 + max(21 + n(xs)×408 + 408 + 5, 27 + n(k)×(6 + 9 + n(xs)×40 + 40 + 3 + 3 + n(xs)×23 + 23 + 3 + 22) + 6 + 9 + n(xs)×40 + 40 + 3 + 3 + n(xs)×23 + 23 + 3 + 22 + 2)"
+      "topk": "26 + 1 + 1 + max(21 + n(xs)×393 + 393 + 5, 27 + n(k)×(4 + 9 + n(xs)×38 + 38 + 3 + 3 + n(xs)×21 + 21 + 3 + 22) + 4 + 9 + n(xs)×38 + 38 + 3 + 3 + n(xs)×21 + 21 + 3 + 22 + 2)"
     }
   }
 }

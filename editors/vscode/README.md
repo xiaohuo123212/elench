@@ -42,9 +42,9 @@ python src/test_editors.py
 
 | 命令 | 背后跑什么 | 结果去哪 |
 |---|---|---|
-| **`Elench: 检查当前文件`** | `dsh check` | **Problems 面板**（带行号列号与错误码） |
-| **`Elench: 显示成本上界`** | `dsh cost` | 输出面板（κ 表达式 + 是否达成） |
-| **`Elench: 构建（门禁）`** | `dsh build` | 失败就弹错误——**这是它的职责** |
+| **`Elench: 检查当前文件`** | `elench check` | **Problems 面板**（带行号列号与错误码） |
+| **`Elench: 显示成本上界`** | `elench cost` | 输出面板（κ 表达式 + 是否达成） |
+| **`Elench: 构建（门禁）`** | `elench build` | 失败就弹错误——**这是它的职责** |
 
 **保存时自动检查**是可选的（默认开）。
 
@@ -52,9 +52,9 @@ python src/test_editors.py
 
 | 设置 | 默认 | 说明 |
 |---|---|---|
-| `elench.pythonPath` | `python` | 跑 `dsh.py` 的 Python |
-| `elench.dshPath` | 空 | 留空则在工作区里自动找 `src/dsh.py` |
-| `elench.checkOnSave` | `true` | 保存时自动 `dsh check` |
+| `elench.pythonPath` | `python` | 跑 `elench.py` 的 Python |
+| `elench.dshPath` | 空 | 留空则在工作区里自动找 `src/elench.py` |
+| `elench.checkOnSave` | `true` | 保存时自动 `elench check` |
 
 ## 为什么是"调子进程"而不是"内嵌一套逻辑"
 
@@ -78,7 +78,7 @@ code --install-extension elench-0.3.0.vsix
 node test/parse.test.js       # 诊断解析的单元测试（8 项）
 ```
 
-**为什么单独测解析**：`dsh check` 的输出格式如果有天变了，
+**为什么单独测解析**：`elench check` 的输出格式如果有天变了，
 **这个测试会先红**——而不是等到用户在编辑器里发现诊断跑到了错的行。
 
 ## 安装（拖动即可）
@@ -94,6 +94,20 @@ node test/parse.test.js       # 诊断解析的单元测试（8 项）
 | **Elench: 检查当前文件** | `check`，结果进 Problems |
 | **Elench: 显示成本上界** | `cost`，输出面板看 κ |
 | **Elench: 构建（门禁）** | `build`，失败就是真的失败 |
+| **Elench: 环境诊断** | 打印 Python / 脚本路径 / 版本（排错用） |
 
 **前置**：机器上有 **Python 3.10+**（扩展不捆绑 Python 运行时）。
+扩展会**自动探测** `python` → `python3` → `py`，通常不用手动设置；
+要强制指定就填 `elench.pythonPath`。
 Windows 上若 `python` 不在 PATH，把设置 `elench.pythonPath` 改成 `py`。
+
+## 让终端里也能用 `elench`
+
+装扩展**不会**自动改 PATH（这是 VS Code 的规矩，不是我们的 bug）。装完做一次：
+
+1. `Ctrl+Shift+P` → **`Elench: 安装命令行（加入 PATH）`**
+2. **重开一个终端**（PowerShell / cmd / bash 都行）
+3. 输入 `elench --version` → 应显示 `elench 1.0.0`
+
+如果显示的是别的版本（例如 conda 里装过旧版），点 **`Elench: 验证命令行`**，
+它会列出 PATH 上所有同名命令，把旧的那个删掉或调后即可。

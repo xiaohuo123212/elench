@@ -17,6 +17,15 @@ Thumbs.db
 *.bak
 *~
 
+# Word/Office 锁文件（~$ 开头）——v0.71-publication tag 里混进过一个
+~$*
+
+# 命令行误产生的怪文件（例如 `pip ... -o` 写出的空文件 `-o`）
+-o
+
+# 实验脚本的临时拷贝
+_tensor2.py
+
 # 编辑器扩展打包产物
 *.vsix
 

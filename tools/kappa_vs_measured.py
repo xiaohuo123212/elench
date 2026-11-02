@@ -93,7 +93,7 @@ def _struct_fields(tu, type_name):
     return []
 
 
-def measure_one(prog, n, runs):
+def measure_one(prog, n, runs, args_override=None):
     """返回该程序里有 target 的函数的对照行。"""
     from bench import make_u8s, random_u64s
     from cost_check import evaluate
@@ -101,8 +101,15 @@ def measure_one(prog, n, runs):
     from interp import Interp
     from parser import parse_source
 
-    tu_p = os.path.join(SAMPLES, prog + ".tu")
-    ch_p = os.path.join(SAMPLES, prog + ".eln")
+    # **`prog` 可以是名字（在样例目录里找），也可以是路径**（任意模块）。
+    # 以前只认名字，于是 `文档/入门/例子/crossover.tu` 报"没有可对照的函数"。
+    if prog.endswith(".tu") or os.path.sep in prog or "/" in prog:
+        _base = prog[:-3] if prog.endswith(".tu") else prog
+        tu_p = _base + ".tu"
+        ch_p = _base + ".eln"
+    else:
+        tu_p = os.path.join(SAMPLES, prog + ".tu")
+        ch_p = os.path.join(SAMPLES, prog + ".eln")
     if not (os.path.exists(tu_p) and os.path.exists(ch_p)):
         return []
 
@@ -121,10 +128,29 @@ def measure_one(prog, n, runs):
         params = next((c for c in ci.fns[fn].children if c.kind == "params"), None)
         kinds = [param_kind(p) for p in (params.children if params else [])]
 
+        # **数据从哪来**：模块写了 `benchmodel.data` 就用它（与 `measure` 同一份），
+        # 否则才退回「按形参类型造」。以前一律按类型造，于是同一个样例
+        # （如 `count` 声明了 `make_texts`）在 `measure` 与这里吃两套数据。
+        _bm = None
+        try:
+            from bench import _bench_plan, _build_args
+            _bm = _bench_plan(tu)
+        except Exception:                              # noqa: BLE001
+            _bm = None
+
         acts, ops_seen, err = [], [], None
         for seed in range(1, runs + 1):
             args = []
-            for kind in kinds:
+            if _bm is not None and args_override is None:
+                _data, _sized, _seed0 = _bm
+                args = _build_args(_data, _sized, n, seed)
+            if args_override is not None:
+                # **对抗输入**（tools/worstcase.py）复用同一条测量口径：
+                # 同一份解释器、同一种计数、同一条 requires 修正逻辑。
+                import copy as _copy
+                args = [_copy.deepcopy(a) for a in args_override]
+            # 给了 args_override 就**不再**按 param_kind 构造（否则会多出实参）
+            for kind in ([] if (args_override is not None or _bm is not None) else kinds):
                 if kind == "u8vec":
                     args.append(make_u8s(seed, n))
                 elif kind == "u64vec":
@@ -174,9 +200,16 @@ def measure_one(prog, n, runs):
         except Exception:                                  # noqa: BLE001
             pass
         kv = evaluate(kappa, {v: _env.get(v, n) for v in kappa.variables()})
+        _tgt = ci.target_cost(fn)
+        try:
+            _tv = float(evaluate(_tgt, {v: _env.get(v, n) for v in _tgt.variables()})) \
+                if _tgt is not None else None
+        except Exception:                                  # noqa: BLE001
+            _tv = None
         rows.append({
             "program": prog, "function": fn,
             "kappa": kappa.render(), "kappa_at_n": kv,
+            "target_at_n": _tv,
             "max_actual": max(acts), "min_actual": min(acts),
             "runs": len(acts),
             "holds": kv >= max(acts),

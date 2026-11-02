@@ -1,6 +1,13 @@
-func rank(const Vec<u64>& xs) -> u64! {
+// 两个候选都是 O(n)，只是常数不同 —— `?!` 才有意义。
+func rank(
+          const Vec<u64>& xs) -> u64! {
+    // 宿主必须有自己的逻辑（B-15），不能只写一句 return ?!kernel(xs);
+    if (xs.length() == 0) {
+        return 0;
+    }
     return ?!kernel(xs);
-} kernels kernel(const Vec<u64>& xs) -> u64! {
+} kernels kernel(
+                 const Vec<u64>& xs) -> u64! {
     by_scan {
         u64 best = 0;
         u64 i = 0;
@@ -10,15 +17,13 @@ func rank(const Vec<u64>& xs) -> u64! {
         }
         return best;
     }
-    by_pairs {
+    by_scan_rev {
+        // 循环上界必须能静态推出：条件直接写 `i < xs.length()`，
+        // 倒着取下标用 `xs.length() - 1 - i`，不要写 `while (i > 0)`。
         u64 best = 0;
         u64 i = 0;
         while (i < xs.length()) {
-            u64 j = 0;
-            while (j < xs.length()) {
-                best = max(best, xs.at(j));
-                j = j + 1;
-            }
+            best = max(best, xs.at(xs.length() - 1 - i));
             i = i + 1;
         }
         return best;

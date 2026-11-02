@@ -3,9 +3,19 @@
 # Copyright 2026 Elench contributors
 
 # -*- coding: utf-8 -*-
-"""bench.py —— 真实计时（动态分析的第 ③ 步）。
+"""bench.py —— 真实测量（动态分析的第 ③ 步）。
 
 **测什么**：按 `benchmodel` 造出数据，把函数跑 N 次，取**中位数**纳秒。
+
+## 两把尺子（实参构造共用一份）
+
+| 函数 | 量 | 单位 | 和 κ 的关系 |
+|---|---|---|---|
+| `measure` | 墙钟时间 | 纳秒 | **不同单位**：只能归一化后比斜率（`--timing`） |
+| `measure_ops` | `interp` 的操作数计数器 | 操作 | **同单位**：可直接判 `实测 ≤ κ`（默认） |
+
+两者的实参都来自 `_bench_plan` + `_build_args`——**夹具只有一套**，
+否则两个口径量的不是同一个输入。
 
 ## 为什么用中位数
 
@@ -215,22 +225,42 @@ def any_of(container: Any, seed: int = 0, type_name: str = "u64") -> Any:
 
 # ---------------------------------------------------------------- 测量
 
+def _bench_plan(decl_mod: Optional[Node]):
+    """造实参所需的上下文：`(data, sized, seed)`。
+
+    **`measure` 与 `measure_ops` 必须共用这一份**：一个测纳秒、一个测操作数，
+    量的是同一个函数，输入也必须是同一组（否则两个口径对不上）。
+    `sized` = 规模驱动的参数：`scale` 里出现的那些；没有 `scale` 就取第一个参数。
+    """
+    data, scale_map, seed = (read_benchmodel(decl_mod) if decl_mod is not None
+                             else ({}, {}, 0))
+    if not data:
+        raise RuntimeError("没有 benchmodel.data，无法造数据")
+    sized = {p: 0 for p in scale_map} or {next(iter(data)): 0}
+    return data, sized, seed
+
+
+def _build_args(data: Dict[str, str], sized: Dict[str, int], size: int,
+                seed: int) -> List[Any]:
+    """按 benchmodel 造**某一档**的实参。
+
+    **两个测量口径唯一的实参来源**：`measure`（纳秒）与 `measure_ops`（操作数）
+    都从这里取实参。换实现时**只许改这里**，不许各写一套夹具——
+    夹具一分叉，两个口径比的就不是同一个输入了。
+    """
+    return make_args(data, sized, size, seed)
+
+
 def measure(impl_mod: Node, decl_mod: Optional[Node], fn_name: str,
             sizes: List[int], repeats: int = 5,
             force: Optional[Dict[str, str]] = None,
             table_path: Optional[str] = None) -> Dict[int, float]:
     """跑 N 次，返回 {规模: 中位数纳秒}。"""
-    data, scale_map, seed = (read_benchmodel(decl_mod) if decl_mod is not None
-                             else ({}, {}, 0))
-    if not data:
-        raise RuntimeError("没有 benchmodel.data，无法造数据")
-
-    # 哪些参数是规模驱动的：scale 里出现的那些
-    sized = {p: 0 for p in scale_map} or {next(iter(data)): 0}
+    data, sized, seed = _bench_plan(decl_mod)
 
     out: Dict[int, float] = {}
     for size in sizes:
-        args = make_args(data, sized, size, seed)
+        args = _build_args(data, sized, size, seed)
         samples = []
         for _ in range(max(3, repeats)):
             it = Interp(impl_mod, decl_mod, table_path=table_path)
@@ -240,6 +270,47 @@ def measure(impl_mod: Node, decl_mod: Optional[Node], fn_name: str,
             samples.append(float(t1 - t0))
         samples.sort()
         out[size] = samples[len(samples) // 2]
+    return out
+
+
+def measure_ops(impl_mod: Node, decl_mod: Optional[Node], fn_name: str,
+                sizes: List[int],
+                force: Optional[Dict[str, str]] = None,
+                table_path: Optional[str] = None) -> Dict[int, int]:
+    """跑一遍，返回 {规模: 操作数}。
+
+    ## 为什么不再用纳秒
+
+    κ 的单位是「操作」。拿纳秒去和 κ 比，只能靠**各自归一化**看斜率——
+    那是"两条线长得像不像"，不是"上界成立不成立"。
+    操作数和 κ **同单位**，所以可以直接判 `实测 ≤ κ`，**不需要归一化**。
+
+    ## 口径必须与 `measure` 一致
+
+    - 实参：同一个 `_bench_plan` + `_build_args`（**不是另写一套夹具**）；
+    - 同一个 `Interp(impl_mod, decl_mod, table_path=...)`、同一份 `force`；
+    - 每个规模点新建一个解释器、`ops_reset()` 后跑一次。
+
+    **只跑一次**：操作数是确定性的（同一输入、同一分档表 → 同一个数），
+    取中位数没有意义。函数是整棵调用树（含嵌套调用），与 κ(f) 的口径相同。
+    """
+    from interp import (ops_enable, ops_enabled, ops_of, ops_reset)
+
+    data, sized, seed = _bench_plan(decl_mod)
+
+    was_on = ops_enabled()
+    out: Dict[int, int] = {}
+    try:
+        ops_enable(True)
+        for size in sizes:
+            args = _build_args(data, sized, size, seed)
+            it = Interp(impl_mod, decl_mod, table_path=table_path)
+            # **每次测量前清零**：计数器是进程级的，不清零就会把上一档累加进来
+            ops_reset()
+            it.call(fn_name, args, force=force)
+            out[size] = ops_of(fn_name)
+    finally:
+        ops_enable(was_on)
     return out
 
 

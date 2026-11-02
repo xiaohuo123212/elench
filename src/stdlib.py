@@ -41,6 +41,36 @@ def _register(name: str, arity: int, impl: Callable[..., Any], cost: str,
               ret: str = "u64", empty: str = "") -> None:
     FNS[name] = {"arity": arity, "impl": impl, "cost": cost,
                  "ret": ret, "empty": empty}
+#: **已弃用的内建**：名字 → 手写等价代码（v0.73 真正移除）。
+#:
+#: 判据：能用一个 `for` 循环写出来、且 κ 照样数得出来 → 不值得做成内建。
+#: 保留实现只为**不打断现有代码**；调用会得到 `W-Builtin-Deprecated`，
+#: 消息里直接给出该改写成什么。
+REPLACEMENTS: Dict[str, str] = {
+    "sum_of": "for (x in xs) { s = s + x; }",
+    "count_of": "for (x in xs) { if (x == v) { c = c + 1; } }",
+    "contains": "for (x in xs) { if (x == v) { return 1; } }",
+    "index_of": "for (i in 0..xs.length()) { if (xs[i] == v) { return i; } }",
+    "is_sorted": "for (i in 0..xs.length() - 1) { if (xs[i] > xs[i + 1]) { return 0; } }",
+    "reverse": "for (i in 0..xs.length() / 2) { u64 t = xs[i]; xs[i] = xs[xs.length() - 1 - i]; xs[xs.length() - 1 - i] = t; }",
+    "fill": "for (i in 0..xs.length()) { xs[i] = v; }",
+    "fill_range": "for (i in lo..hi) { xs[i] = v; }",
+    "rotate": "先 reverse 整体、再分两段 reverse（或按 k 取模搬移）",
+    "copy": "Vec<u64> out = []; for (x in xs) { out.push(x); }",
+    "for_each": "for (k in m) { visit(k); }",
+}
+
+#: 弃用内建的注册表（**不在 `FNS` 里**，`is_stdlib` 仍认它们，以便老代码可跑）
+DEPRECATED_BUILTINS: Dict[str, Dict[str, Any]] = {}
+
+
+def _register_deprecated(name: str, arity: int, impl: Callable[..., Any],
+                         cost: str, ret: str = "u64", empty: str = "") -> None:
+    DEPRECATED_BUILTINS[name] = {
+        "arity": arity, "impl": impl, "cost": cost, "ret": ret,
+        "empty": empty, "deprecated": True,
+        "replacement": REPLACEMENTS.get(name, ""),
+    }
 
 
 def _n_of(xs: Any) -> int:
@@ -89,11 +119,11 @@ def _count_of(args: List[Any]) -> int:
     return sum(1 for x in xs if x == v)
 
 
-_register("reverse", 1, _reverse, "n")
-_register("fill", 2, _fill, "n")
+_register_deprecated("reverse", 1, _reverse, "n")
+_register_deprecated("fill", 2, _fill, "n")
 _register("dedup", 1, _dedup, "n")
-_register("contains", 2, _contains, "n", empty="空 → 0（不含）")
-_register("count_of", 2, _count_of, "n", empty="空 → 0 次")
+_register_deprecated("contains", 2, _contains, "n", empty="空 → 0（不含）")
+_register_deprecated("count_of", 2, _count_of, "n", empty="空 → 0 次")
 
 
 def _index_of(args: List[Any]) -> int:
@@ -134,10 +164,10 @@ def _is_sorted(args: List[Any]) -> int:
     return 1
 
 
-_register("index_of", 2, _index_of, "n", empty="未找到 → len(xs)")
+_register_deprecated("index_of", 2, _index_of, "n", empty="未找到 → len(xs)")
 _register("binary_search", 2, _binary_search, "log", empty="未找到 → len(xs)；表须已排序")
-_register("sum_of", 1, _sum_of, "n", empty="空 → 0")
-_register("is_sorted", 1, _is_sorted, "n", empty="空 → 1")
+_register_deprecated("sum_of", 1, _sum_of, "n", empty="空 → 0")
+_register_deprecated("is_sorted", 1, _is_sorted, "n", empty="空 → 1")
 
 
 def _slice(args: List[Any]) -> int:
@@ -173,8 +203,8 @@ def _fill_range(args: List[Any]) -> int:
 
 
 _register("slice", 3, _slice, "n", empty="lo==hi → 清空")
-_register("rotate", 2, _rotate, "n", empty="空 → 0")
-_register("fill_range", 4, _fill_range, "n", empty="lo==hi → 0 个")
+_register_deprecated("rotate", 2, _rotate, "n", empty="空 → 0")
+_register_deprecated("fill_range", 4, _fill_range, "n", empty="lo==hi → 0 个")
 
 
 # ------------------------------------------------------------------ 哈希表（有界探测）
@@ -371,19 +401,19 @@ def effects_of(name: str) -> set:
 
 
 def is_stdlib(name: str) -> bool:
-    return name in FNS
+    return name in FNS or name in DEPRECATED_BUILTINS
 
 
 def arity(name: str) -> int:
-    return FNS[name]["arity"]
+    return _entry(name)["arity"]
 
 
 def call(name: str, args: List[Any]) -> Any:
-    return FNS[name]["impl"](args)
+    return _entry(name)["impl"](args)
 
 
 def ret_kind(name: str) -> str:
-    return FNS[name].get("ret", "u64")
+    return _entry(name).get("ret", "u64")
 
 
 #: 内建 → **分配次数**（`0` / `1` / `n`）。E36 用。
@@ -550,21 +580,36 @@ def failure_mode(name: str) -> str:
     return FAIL_MODE.get(n) or NATIVE.get(n, "")
 
 
+def _entry(name: str) -> Dict[str, Any]:
+    """统一查表：现役 + 已弃用（弃用的仍能跑，只是要给警告）。"""
+    if name in FNS:
+        return FNS[name]
+    return DEPRECATED_BUILTINS[name]
+
+
+def is_deprecated(name: str) -> bool:
+    return name in DEPRECATED_BUILTINS
+
+
+def replacement_for(name: str) -> str:
+    return DEPRECATED_BUILTINS.get(name, {}).get("replacement", "")
+
+
 def all_builtins() -> list:
     """注册表里的 + 解释器直接实现的（测试用它查"有没有漏"。）"""
-    return sorted(set(FNS) | set(NATIVE))
+    return sorted(set(FNS) | set(NATIVE) | set(DEPRECATED_BUILTINS))
 
 
 def alloc_kind(name: str) -> str:
     """内建的分配次数：`0` / `1` / `n`。"""
-    fn = FNS.get(name or "")
+    fn = FNS.get(name or "") or DEPRECATED_BUILTINS.get(name or "")
     if fn is None:
         return "0"
     return _ALLOC.get(name or "", "0")
 
 
 def cost_kind(name: str) -> str:
-    return FNS[name]["cost"]
+    return _entry(name)["cost"]
 
 
 def n_of(xs: Any) -> int:
@@ -800,7 +845,7 @@ def _copy(args: List[Any]) -> list:
     return list(args[0]) if isinstance(args[0], list) else []
 
 
-_register("copy", 1, _copy, "n", ret="vec-u64", empty="空 → 空")
+_register_deprecated("copy", 1, _copy, "n", ret="vec-u64", empty="空 → 空")
 
 
 def _copy_slice(args: List[Any]) -> Any:

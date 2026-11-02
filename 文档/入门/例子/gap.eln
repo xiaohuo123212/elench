@@ -1,0 +1,38 @@
+﻿func top(const Vec<u64>& xs) -> u64! {
+    if (xs.length() == 0) {
+        return 0;
+    }
+    return ?!kernel(xs);
+} kernels kernel(const Vec<u64>& xs) -> u64! {
+    by_scan_heavy {
+        u64 b = 0;
+        u64 i = 0;
+        while (i < xs.length()) {
+            b = max(b, xs.at(i));
+            b = max(b, xs.at(i));
+            b = max(b, xs.at(i));
+            b = max(b, xs.at(i));
+            b = max(b, xs.at(i));
+            b = max(b, xs.at(i));
+            b = max(b, xs.at(i));
+            b = max(b, xs.at(i));
+            b = max(b, xs.at(i));
+            b = max(b, xs.at(i));
+            i = i + 1;
+        }
+        return b;
+    }
+    by_scan_setup {
+        u64 warm = 0;
+        while (warm < 20000) {
+            warm = warm + 1;
+        }
+        u64 b = 0;
+        u64 i = 0;
+        while (i < xs.length()) {
+            b = max(b, xs.at(i));
+            i = i + 1;
+        }
+        return b;
+    }
+}

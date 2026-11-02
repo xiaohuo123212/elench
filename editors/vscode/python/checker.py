@@ -38,6 +38,27 @@ from parser import Node, parse_source
 # ---------------------------------------------------------------- 诊断
 
 @dataclass
+class Restart:
+    """**修法的一条具体动作**（Common Lisp 里 restart 的思路）。
+
+    以前诊断只给一句 `修法：…` 文本——读者还得自己翻译成命令、自己敲。
+    restart 把"能做什么"结构化成**可执行的一条**，`--apply=N` 就能直接跑。
+
+    **硬规则：任何 restart 都不许修改 `.tu` 里的 `target`。**
+    契约是持久的，实现是一次性的；"不达标就改承诺"这条路必须不存在
+    （`test_restarts.py` 有一条断言专门守这个）。
+    """
+    kind: str                    # "command"（能执行）| "edit"（只打印 diff）| "info"（只说明）
+    label: str                   # 一句话：如「重测并生成分档表」
+    argv: List[str] = field(default_factory=list)      # kind=command
+    patch: Dict[str, Any] = field(default_factory=dict)  # kind=edit：{file,line,text}
+
+    def to_dict(self) -> dict:
+        return {"kind": self.kind, "label": self.label,
+                "argv": list(self.argv), "patch": dict(self.patch)}
+
+
+@dataclass
 class Diag:
     code: str
     message: str
@@ -46,12 +67,14 @@ class Diag:
     start: int = 0
     end: int = 0
     severity: str = "error"
+    actions: List[Restart] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {"code": self.code, "message": self.message,
                 "line": self.line, "col": self.col,
                 "start": self.start, "end": self.end,
-                "severity": self.severity}
+                "severity": self.severity,
+                "actions": [a.to_dict() for a in self.actions]}
 
 
 # ---------------------------------------------------------------- 结果
@@ -338,7 +361,17 @@ def _cond_can_bound(cond: Node, const_sizes: set = frozenset()) -> bool:
         if op in ("and", "or"):
             return any(_cond_can_bound(c, const_sizes) for c in cond.children)
         if op in ("<", "<=", ">", ">="):
-            return any(_is_size_expr(c, const_sizes) for c in cond.children)
+            if any(_is_size_expr(c, const_sizes) for c in cond.children):
+                return True
+            # **常量上界**：`while (k < 3000)` / `while (k < LIMIT)`（LIMIT 是 const）
+            # 也算可推——`bound_of_condition` 已经会把它算成 const 界，
+            # 检查器不该在这里唱反调。
+            for c in cond.children:
+                if getattr(c, "kind", "") == "lit-int":
+                    return True
+                if getattr(c, "kind", "") == "path" and c.name and c.name.isupper():
+                    return True
+            return False
 
         return False
         return False
@@ -628,6 +661,70 @@ def _check_sort_calls(res, all_fns) -> None:
                     cmp_node.line, cmp_node.col))
 
 
+def _has_recursion_depth(spec: Node) -> bool:
+    """`.tu` 里是否写了 `recursion depth <= N;`（规格 C11-b）。"""
+    return any((c.name or "") == "recursion" for c in _clauses(spec))
+
+
+def _recursion_cycles(fns: Dict[str, Node]) -> Dict[str, List[str]]:
+    """普通调用图上的**递归**：`{函数名: 一条回到自己的路径}`。
+
+    只走 `call` 边；`?!` 的候选环是另一套规则（见 `_check_cycles`）。
+    环上**每个**成员都会出现在返回值的键里（互递归 a→b→a 时两个都算）。
+    """
+    edges: Dict[str, Set[str]] = {}
+    for name, fn in fns.items():
+        out = set()
+        for call in walk(fn, "call"):
+            nm = callee_name(call)
+            if nm and nm in fns:
+                out.add(nm)
+        edges[name] = out
+
+    cyc: Dict[str, List[str]] = {}
+    for start in sorted(edges):
+        # 从 start 的后继出发，看能否沿 `call` 边走回 start
+        stack: List[Tuple[str, List[str]]] = [
+            (m, [start, m]) for m in sorted(edges[start], reverse=True)]
+        seen = set()
+        while stack:
+            node, path = stack.pop()
+            if node == start:
+                cyc[start] = path
+                break
+            if node in seen:
+                continue
+            seen.add(node)
+            for m in sorted(edges.get(node, ()), reverse=True):
+                stack.append((m, path + [m]))
+    return cyc
+
+
+def check_recursion_depth(impls: Dict[str, Node],
+                          specs: Dict[str, Node]) -> List[Diag]:
+    """C11-b：**有递归就必须声明 `recursion depth <= N`**，否则编译期报错。
+
+    为什么要报错而不是警告：深度是契约的一部分。不声明时 κ 只算**一层**，
+    于是"承诺上界"会**沉默地**小于真实成本（`down(xs,8)`：κ=33 / ops=104）。
+    这类错误在成本表上看起来一切正常，是最坏的一种。
+    """
+    diags: List[Diag] = []
+    for name, path in sorted(_recursion_cycles(impls).items()):
+        spec = specs.get(name)
+        if spec is None:
+            continue        # 没有 spec 由别的诊断负责（E-Spec-Missing）
+        if _has_recursion_depth(spec):
+            continue
+        diags.append(Diag(
+            "E-Recursion-Unbounded",
+            f"`{name}` 有递归（{' → '.join(path)}），但 `.tu` 没有 "
+            f"`recursion depth <= N`：κ 只能按一层计，**会小于真实成本**（C11-b）。"
+            f"出路：① 在 `spec {name}` 里补 `recursion depth <= 8;`（写真实上界）；"
+            f"② 改写成循环；③ 若确实无界，这个函数不能带 `target` 承诺",
+            spec.line, spec.col))
+    return diags
+
+
 def _check_while_bounds(res, all_fns, specs, strict: bool) -> None:
     """给每个 `while` 判定上界来源；③ 类按严格模式分档处理。"""
     from bound import progresses
@@ -882,6 +979,36 @@ def check_module(tu_src: str, ai_src: Optional[str], module: str = "<module>",
     tu_items = tu.module.children if tu.module else []
     ai_items = ai.module.children if (ai is not None and ai.module is not None) else []
 
+    # ---- `guarantees`：可检查 / 不可检查（v0.72）
+    #
+    # 以前 `guarantees` 是"能写、没人看"——一个**假的承诺位**。
+    # 现在分两类：可检查的进运行时校验（`I-Guarantee-Runtime`），
+    # 不可检查的**必须**报出来（`E-Guarantee-Uncheckable`），要求改写或降级成 `assume`。
+    try:
+        import guarantees as _gt
+        for _it in tu_items:
+            if _it.kind != "spec" or not _gt.has_guarantees(_it):
+                continue
+            _ok, _bad = _gt.classify(_it)
+            if _bad:
+                res.diagnostics.append(Diag(
+                    "E-Guarantee-Uncheckable",
+                    f"{_it.name} 的 guarantees 无法检查：{_bad[0]}；"
+                    f"可检查的谓词只有 {', '.join(sorted(_gt.CHECKABLE))}，"
+                    f"否则请改写（或降级写成 `assume`）",
+                    _it.line, _it.col, severity="warning",
+                    actions=[Restart(
+                        "info", "降级成 `assume`（把承诺说成假设）",
+                        patch={"file": module + ".tu", "line": _it.line,
+                               "text": "assume <原来的条件>;"})]))
+            elif _ok:
+                res.diagnostics.append(Diag(
+                    "I-Guarantee-Runtime",
+                    f"{_it.name} 的 guarantees（{_gt.describe(_ok)}）将在 run 时校验",
+                    _it.line, _it.col, severity="info"))
+    except Exception:                                      # noqa: BLE001
+        pass        # 分类失败不该让整个检查崩掉
+
     # ---- 严格模式：L3 / L4 / L5
     if strict:
         res.diagnostics.extend(strict_lints(tu_src, tu, ".tu"))
@@ -896,6 +1023,33 @@ def check_module(tu_src: str, ai_src: Optional[str], module: str = "<module>",
             code = "E-Ai-HasUse" if it.kind == "use" else "E-Ai-HasDecl"
             res.diagnostics.append(Diag(
                 code, f".ai 中不得出现 {it.kind}（F-4/F-8）", it.line, it.col))
+
+    # ---- 用户函数调用的 arity（v0.72）
+    #
+    # 以前只校验内建（`stdlib.arity`），**用户函数完全不查**：
+    # `g(1)` 传给两参函数，`check` 零诊断，直到运行期才炸。
+    try:
+        _spec_params = {}
+        for _it in tu_items:
+            if _it.kind != "spec" or not _it.name:
+                continue
+            _ps = next((c for c in _it.children if c.kind == "params"), None)
+            _spec_params[_it.name] = len(_ps.children) if _ps else 0
+        if ai is not None and ai.module is not None:
+            for _call in walk(ai.module, "call"):
+                _nm = (_call.name or "").split(".")[-1]
+                if _nm not in _spec_params:
+                    continue
+                _an = next((c for c in _call.children if c.kind == "args"), None)
+                _got = len(_an.children) if _an else 0
+                _want = _spec_params[_nm]
+                if _got != _want:
+                    res.diagnostics.append(Diag(
+                        "E-Call-Arity",
+                        f"{_nm} 需要 {_want} 个实参，给了 {_got} 个",
+                        _call.line, _call.col))
+    except Exception:                                      # noqa: BLE001
+        pass
 
     # ---- 收集声明
     specs: Dict[str, Node] = {}
@@ -1286,6 +1440,9 @@ def check_module(tu_src: str, ai_src: Optional[str], module: str = "<module>",
     _check_while_bounds(res, all_fns, specs, strict)
     _check_sort_calls(res, all_fns)
 
+    # ---- C11-b：递归必须有 `recursion depth` 声明（否则 κ 沉默地偏小）
+    res.diagnostics.extend(check_recursion_depth(impls, specs))
+
     # ---- span 兜底：checker 自己造的诊断只有 line/col，这里换算成偏移
     _resolve_spans(res.diagnostics, tu_src, ai_src)
 
@@ -1320,6 +1477,9 @@ def check_module(tu_src: str, ai_src: Optional[str], module: str = "<module>",
     # **并行任务之间不许共享可变状态**
     res.diagnostics.extend(_check_parallel_share(ai.module if ai is not None else None))
 
+    # **浮点字面量赋给整数类型**（§12.2：以前零诊断通过）
+    res.diagnostics.extend(_check_float_to_int(ai.module if ai is not None else None))
+
 
     # **requires 调用点验证**：证明不了就报错（不靠运行期断言兜底）
     import requires as _requires
@@ -1327,6 +1487,42 @@ def check_module(tu_src: str, ai_src: Optional[str], module: str = "<module>",
                                              ai.module if ai is not None else None):
         res.diagnostics.append(Diag(_c, _m, _ln, _col))
     return res
+
+
+def _check_float_to_int(mod) -> List[Diag]:
+    """**浮点字面量赋给整数类型 MUST 报错**（§12.2）。
+
+    以前 `u64 y = 1.5;` 零诊断通过 —— 类型检查的洞：
+    静默截断在成本契约语言里尤其危险（数字看着对，实际少了半截）。
+    """
+    if mod is None:
+        return []
+    int_types = {"u8", "u16", "u32", "u64", "i8", "i16", "i32", "i64",
+                 "usize", "isize", "byte"}
+    out: List[Diag] = []
+
+    def walk(n) -> None:
+        if n is None:
+            return
+        k = getattr(n, "kind", "")
+        if k in ("var-decl", "val-decl", "const-decl"):
+            kids = getattr(n, "children", []) or []
+            if len(kids) >= 2:
+                tn = kids[0]
+                tname = (getattr(tn, "name", "") or "").split("<")[0].strip()
+                expr = kids[1]
+                if tname in int_types and getattr(expr, "kind", "") == "lit-float":
+                    out.append(Diag(
+                        "E-Type-FloatToInt",
+                        f"浮点字面量不能赋给整数类型 {tname}（隐式截断）；"
+                        f"请写成整数，或把变量类型改成 f64",
+                        getattr(expr, "line", 0) or getattr(n, "line", 0),
+                        getattr(expr, "col", 0) or getattr(n, "col", 0)))
+        for c in getattr(n, "children", []) or []:
+            walk(c)
+
+    walk(mod)
+    return out
 
 
 def _check_immutability(body: Node) -> List[Diag]:

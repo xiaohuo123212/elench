@@ -1,0 +1,32 @@
+{
+  "scan_until": [
+    {
+      "n": 16,
+      "function": "scan_until",
+      "ops_worst_obs": 250,
+      "recipe": "shape=alternating",
+      "converged": false
+    },
+    {
+      "n": 64,
+      "function": "scan_until",
+      "ops_worst_obs": 970,
+      "recipe": "shape=alternating",
+      "converged": false
+    },
+    {
+      "n": 256,
+      "function": "scan_until",
+      "ops_worst_obs": 3850,
+      "recipe": "shape=alternating",
+      "converged": false
+    },
+    {
+      "n": 1024,
+      "function": "scan_until",
+      "ops_worst_obs": 15370,
+      "recipe": "shape=alternating",
+      "converged": false
+    }
+  ]
+}

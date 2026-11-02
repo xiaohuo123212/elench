@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "elench"
-version = "0.69.0"
+version = "1.0.0"
 description = "Elench: a cost-contract language and static verification framework for AI-generated code"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -38,6 +38,7 @@ py-modules = [
     "cost_interp",
     "dispatch",
     "dsh",
+    "elench",
     "dup_scan",
     "formatter",
     "highlight",
@@ -57,4 +58,4 @@ py-modules = [
 package-dir = { "" = "src" }
 
 [project.scripts]
-"elench" = "dsh:main"
+"elench" = "elench:main"

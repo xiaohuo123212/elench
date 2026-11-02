@@ -71,7 +71,7 @@
     "keyword": {
       "comment": "= lexer.KEYWORDS（40 个）。改一边不改另一边，test_editors.py 会失败。",
       "name": "keyword.control.elench",
-      "match": "\\b(?:and|as|asm|assume|char|choose|const|dyn|else|enum|eof|error|extern|external|false|float|for|func|ident|if|impl|in|int|kernels|match|parallel|not|or|pub|return|rewrite|scope|self|spawn|spec|string|struct|trait|true|unsafe|use|while)\\b"
+      "match": "\\b(?:and|break|continue|as|asm|assume|char|choose|const|dyn|else|enum|eof|error|extern|external|false|float|for|func|ident|if|impl|in|int|kernels|match|parallel|not|or|pub|return|rewrite|scope|self|spawn|spec|string|struct|trait|true|unsafe|use|while)\\b"
     },
     "removed": {
       "comment": "v0.68/v0.69 下线：词法仍识别，parser 报精确诊断。高亮成 deprecated，让读者看出不能再用。",

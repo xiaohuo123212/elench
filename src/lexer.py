@@ -56,6 +56,8 @@ class Kind(str, Enum):
     ASSUME = "assume"        # 模块级环境假设：`assume n <= xs.length();`
     KERNELS = "kernels"      # 上下文关键字：出现在 func 体之后
     ERROR_DECL = "error"     # 模块级错误类型声明：`error CalcError;`
+    BREAK = "break"          # v0.72：循环提前退出
+    CONTINUE = "continue"    # v0.72：跳过本轮
 
     # 非行首但仍是关键字
     END = "end"          # v0.68 起废弃（块只用 `{}`），仅用于给出精确诊断
@@ -231,6 +233,10 @@ class LexResult:
 
 class Lexer:
     def __init__(self, src: str):
+        # **去掉 UTF-8 BOM**：Windows 记事本 / PowerShell 5 的 `Out-File -Encoding UTF8`
+        # 都会在文件头写 U+FEFF；不剥掉的话第一个 token 就是"无法识别的字符"。
+        if src.startswith("\ufeff"):
+            src = src[1:]
         self.src = src
         self.i = 0
         self.line = 1

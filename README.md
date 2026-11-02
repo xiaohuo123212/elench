@@ -100,8 +100,8 @@ val idx = ?!search_impl(xs, key);      // 只有这一步未定
 
 | 命令 | 含未实现时 |
 |---|---|
-| `dsh check` | **通过**（骨架合法、可审） |
-| `dsh build` | **失败**（不能测量没写的候选） |
+| `elench check` | **通过**（骨架合法、可审） |
+| `elench build` | **失败**（不能测量没写的候选） |
 
 **检查器能算出"谁没写"，但算不出"这是故意的还是漏的"**——`pending` 就是让作者承认。
 
@@ -142,9 +142,9 @@ ai-lang-design/
 │   ├── lexer.py             词法分析
 │   ├── parser.py            解析（宽松超集，带 span 诊断）
 │   ├── checker.py           契约检查（F-1…F-9、B-3…B-16、可选性、目标）
-│   ├── formatter.py         dsh fmt（幂等、注释保留）
+│   ├── formatter.py         elench fmt（幂等、注释保留）
 │   ├── highlight.py         语法高亮（ANSI + token 分类）
-│   ├── dsh.py               命令行入口
+│   ├── elench.py               命令行入口
 │   ├── check_docs.py        文档语法漂移检查
 │   └── test_*.py            368 项测试
 ├── editors/                 VSCode 扩展（语法高亮）
@@ -174,7 +174,7 @@ ai-lang-design/
 | 参与实现 | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
 | **下一步做什么** | [`CHANGELOG.md`](CHANGELOG.md) |
 | 看条款（给实现者） | [`文档/语法清单.md`](文档/语法清单.md) |
-| 看哪些是原创判断 | [`文档/设计/目前设计/创新点登记.md`](文档/设计/目前设计/创新点登记.md) |
+| 看哪些是原创判断 | [`文档/设计/目前设计/评估/创新点登记.md`](文档/设计/目前设计/评估/创新点登记.md) |
 
 ---
 
@@ -256,3 +256,22 @@ elench export count --push
 ```
 
 **看板**：`python tools\otel_dashboard.py --file otel.ndjson --port 8080` → <http://127.0.0.1:8080>
+
+## 安装（Linux / macOS 一键）
+
+```bash
+git clone https://github.com/xiaohuo123212/elench.git
+cd elench
+./install.sh              # 先看要做什么： ./install.sh --dry-run
+elench --version          # 重开终端后
+```
+
+脚本做两件事之一，**不需要 sudo、不动系统 PATH**：
+
+| 情况 | 做法 |
+|---|---|
+| 有 `pip` | `python3 -m pip install --user .`，装成真正的控制台命令 |
+| 没 `pip` | 在 `~/.local/bin/elench` 放一个启动器，指向仓库里的 `src/elench.py` |
+
+卸载：`./install.sh --uninstall`。
+**Windows** 用 VS Code 扩展里的 `Elench: 安装命令行（加入 PATH）`。

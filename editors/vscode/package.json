@@ -1,8 +1,8 @@
 {
   "name": "elench",
   "displayName": "Elench",
-  "description": "Elench（.eln / .tu）：语法高亮 + 内置解释器。拖进 VS Code 即可检查、算成本、跑门禁、直接运行。",
-  "version": "0.4.0",
+  "description": "Elench（.eln / .tu）：语法高亮 + 内置解释器。拖进 VS Code 即可检查、算成本、跑门禁、直接运行；带环境诊断。",
+  "version": "0.6.18",
   "publisher": "elench",
   "license": "Apache-2.0",
   "engines": {
@@ -53,6 +53,18 @@
       {
         "command": "elench.build",
         "title": "Elench: 构建（门禁）"
+      },
+      {
+        "command": "elench.diagnose",
+        "title": "Elench: 环境诊断"
+      },
+      {
+        "command": "elench.installCli",
+        "title": "Elench: 安装命令行（加入 PATH）"
+      },
+      {
+        "command": "elench.verifyCli",
+        "title": "Elench: 验证命令行"
       }
     ],
     "menus": {
@@ -66,6 +78,11 @@
           "command": "elench.check",
           "when": "resourceExtname == .eln || resourceExtname == .tu",
           "group": "navigation@2"
+        },
+        {
+          "command": "elench.diagnose",
+          "when": "resourceExtname == .eln || resourceExtname == .tu",
+          "group": "navigation@3"
         }
       ]
     },
@@ -74,13 +91,13 @@
       "properties": {
         "elench.pythonPath": {
           "type": "string",
-          "default": "python",
-          "description": "运行内置解释器用的 Python（3.10+）；Windows 上如果 python 不在 PATH，可填 py 或 python3"
+          "default": "",
+          "description": "运行内置解释器用的 Python（3.10+）。**留空自动探测** python / python3 / py；填了就用填的值（例：py、python3、C:\\Python312\\python.exe）"
         },
         "elench.dshPath": {
           "type": "string",
           "default": "",
-          "description": "src/dsh.py 的路径；留空则在当前工作区里自动找"
+          "description": "elench.py 的路径；留空则依次找工作区 src/ 与扩展自带的 python/"
         },
         "elench.checkOnSave": {
           "type": "boolean",

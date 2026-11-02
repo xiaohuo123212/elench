@@ -8,6 +8,7 @@ import stdlib
 import sys
 
 import os
+import threading
 import re
 """interp.py —— 具体值解释器（动态闭环的执行器）。
 
@@ -46,8 +47,124 @@ from typing import Any, Dict, List, Optional
 
 from parser import Node
 from ast_util import descendants as _descendants
+from kinds import INTERP_EXPR, INTERP_STMT
 
 DEFAULT_WIDTH = 64
+
+
+# ---------------------------------------------------------------- 操作数计数器
+#
+# **它要回答的问题**：`κ` 是不是上界？——只有把两边换成**同一单位**才谈得上比大小。
+# 这个计数器数的是「**操作数**」，不是纳秒；它与 `cost_interp` 的计费点**一一对应**：
+#
+# | 计 1 的东西 | 这里的计费点 | 对应的 `cost_interp` 计费点 |
+# |---|---|---|
+# | 一次**表达式求值** | `_eval`（每个非 `None` 节点，含叶子与 `paren` 包裹） | `_expr` 的每个节点 |
+# | 一次**语句执行** | `_stmt`（每条语句每次执行都算） | `_stmt` 的每次调用 |
+# | 一次**内建调用** | `_call` / `_method` 的内建分派 | `_call` 里那几个 `OP_COST` |
+#
+# **粒度**：进入 `_run_fn` 记下起点、返回时结算，所以 `ops_of(f)` 是
+# **整棵调用树**（含嵌套调用）的操作数——这正是能和 `κ(f)`（它也含被调函数）比的那个数。
+#
+# **默认关闭**：`ELENCH_COUNT_OPS=1`（或编程调用 `ops_enable()`）才开。
+# 热路径上只有单分支 `if _COUNT:`，不建对象、不改语义（计数只加不查）。
+#
+# **线程模式下不精确**：`parallel { … } threads` 里的 `_bump()
+# 会**少量少计**。要做"ops ≤ κ"的判定请用顺序模式（`parallel="seq"`，默认），
+# `tools/kappa_vs_ops.py` 就是这么跑的。
+#
+# **已知的口径差**（不要为了凑 `ops ≤ κ` 去改小计数，见 §8.5）：
+#   · `min` / `max`：`cost_interp` 记 1 且**完全不计实参**，这里记 1 + 实参数 —— κ 偏小；
+#   · `print`：κ 记 `1 + 实参`，这里记 `1 + 实参 + 内建 1` —— κ 少 1；
+#   · `Ok(...)` / `Err(...)`：κ 记 1、不计实参，这里记 1 + 实参 —— κ 偏小；
+#   · `expr-stmt`：κ 只记表达式本身，这里还有 `_stmt` 的 1 —— 每句多 1；
+#   · `paren`：κ 记 0（只算里面的），这里算 1 个节点 —— 每层多 1。
+# 这些差**两个方向都有**；哪一边是错的要逐条查（`min`/`max`、`Ok`/`Err` 是 κ 少算，
+# `expr-stmt`/`paren` 是计数多算）。它们会不会真的破界，由
+# `tools/kappa_vs_ops.py` 逐函数实测，不许猜。
+
+#: 计数开关：默认关。**只读一次环境变量**，之后由 `ops_enable()` 改。
+_COUNT = os.environ.get("ELENCH_COUNT_OPS", "") not in ("", "0", "false", "False", "off")
+
+#: **per-thread 计数器**：每个线程只写自己的槽位，读的时候再汇总。
+#:
+#: 为什么不用 `_bump()
+#: 两步之间别的线程可以插进来，于是两个线程各加 1、结果只加了 1（丢增量）。
+#: 丢的量补不回来 ⇒ 线程模式只会**少计** ⇒ `ops ≤ κ` 变成假阳性。
+#:
+#: 代价：热路径多一次 `threading.local()` 属性读（无锁、无竞争）。
+_LOCAL = threading.local()
+
+#: 所有线程的槽位（`{"n": 总操作数, "by": {函数名: 操作数}}`）。
+_SLOTS: List[dict] = []
+
+
+def _slot() -> dict:
+    s = getattr(_LOCAL, "slot", None)
+    if s is None:
+        s = {"n": 0, "by": {}}
+        _LOCAL.slot = s
+        _SLOTS.append(s)
+    return s
+
+
+def _bump() -> None:
+    """+1（本线程）。**热路径**：不做任何跨线程写。"""
+    _slot()["n"] += 1
+
+
+def _bump_fn(name: str, delta: int) -> None:
+    if delta:
+        b = _slot()["by"]
+        b[name] = b.get(name, 0) + delta
+
+
+def _total() -> int:
+    return sum(s["n"] for s in _SLOTS)
+
+
+def _total_of(name: str) -> int:
+    return sum(s["by"].get(name, 0) for s in _SLOTS)
+
+
+def ops_enabled() -> bool:
+    """计数开关当前是否打开。"""
+    return _COUNT
+
+
+def ops_enable(on: bool = True) -> None:
+    """打开/关闭计数（`--ops` 与 `ELENCH_COUNT_OPS=1` 之外的编程入口）。"""
+    global _COUNT
+    _COUNT = bool(on)
+
+
+def ops_reset() -> None:
+    """清零：所有线程槽位。**每次测量前调一次**（否则数字会累加）。"""
+    for s in _SLOTS:
+        s["n"] = 0
+        s["by"].clear()
+
+
+def ops_of(fn: Optional[str] = None) -> int:
+    """**实测操作数**（所有线程汇总）。
+
+    `fn` 给名字 → 该函数整棵调用树的操作数（含嵌套调用）；
+    `fn` 缺省 → 本进程自 `ops_reset()` 以来的总操作数。
+
+    **单位是「操作」，不是纳秒**——它只和 `κ`（也是操作数）可比。
+    """
+    if fn is None:
+        return _total()
+    return _total_of(fn)
+
+
+def ops_by_fn() -> Dict[str, int]:
+    """每函数一份（**含嵌套调用**，因此各项之和 ≥ 总数）。"""
+    out: Dict[str, int] = {}
+    for s in _SLOTS:
+        for k, v in s["by"].items():
+            out[k] = out.get(k, 0) + v
+    return out
 
 
 # ---------------------------------------------------------------- 值
@@ -311,6 +428,21 @@ class InterpBudgetExceeded(InterpError):
     """步数超限：多半是死循环。"""
 
 
+#: **会改动接收者的方法**：对 `const T&` 形参调用它们一律拒绝。
+MUTATING_METHODS = {
+    "push", "pop", "set", "insert", "remove", "clear", "append",
+    "extend", "sort", "sort_by", "reverse", "fill", "swap", "resize",
+}
+
+
+class _Break(Exception):
+    """`break;` —— 只跳出一层循环（由 while / for 捕获）。"""
+
+
+class _Continue(Exception):
+    """`continue;` —— 结束本轮，进入下一轮。"""
+
+
 class _Return(Exception):
     def __init__(self, value):
         self.value = value
@@ -328,7 +460,8 @@ class Interp:
         # **运行期按表选候选**（2026-10-30 用户决定，方案甲）
         self.table_path = table_path
         self.tables = load_dispatch_table(table_path)
-        self.last_candidates: Dict[str, str] = {}   # label → 实际走的候选（测试用）
+        # label → 实际走的候选（**per-thread**：每个线程各记各的，见 `last_candidates` 属性）
+        self._lc_slot: Dict[str, str] = {}
         self.dispatch_warnings: List[str] = []
         # **并行执行模式**：`seq`（默认，顺序）或 `threads`（真线程）。
         # 注意：原型是 Python，受 GIL 限制**没有 CPU 加速**；
@@ -359,8 +492,10 @@ class Interp:
         # **随机基种子**：ELENCH_SEED 优先，否则时钟（每次运行不同）。
         self.rand_seed = stdlib.reset_base()
         self.steps = 0
-        # **与 κ 同口径的操作计数**（语句 + 表达式节点）——用于同单位对照，
-        # 避免拿 ns 去比 operations。
+        # **与 κ 同口径的操作计数**（`_eval` + `_stmt` + 内建调用，见文件头的计数器一节）。
+        # 它**不是** `evaluation_steps`：后者多了「每轮循环」的 `_tick`，
+        # 两者不能混用（拿 ns 去比 operations 更是单位错配）。
+        # 只有 `_COUNT` 打开时才写；默认 0。
         self.ops = 0
         # 计数（M1 验收③）：调用数 / 分配数 / 迭代数
         self.calls: Dict[str, int] = {}
@@ -414,14 +549,37 @@ class Interp:
                 "allocations": self.allocs,
                 "iterations": self.iters,
                 "evaluation_steps": self.steps,
+                # **操作数**（本次 `call()` 的整棵调用树；计数关闭时恒为 0）
                 "operations": self.ops,
+                "operations_by_function": ops_by_fn(),
                 "builtin_calls": dict(self.builtin_calls)}
+    @property
+    def last_candidates(self) -> Dict[str, str]:
+        """**本线程**这一轮 `?!label` 实际走的候选。
+
+        为什么 per-thread：`parallel { … } threads` 里所有任务共用同一个 `Interp`，
+        而"选段"是按**各自实参规模**算的——线程 A 可能选 `by_iter`、线程 B 选 `by_index`。
+        用一个全局槽会让后写的覆盖先写的，于是"报告说跑了 X、实际跑了 Y"。
+        """
+        return self._lc_slot
+
+    @last_candidates.setter
+    def last_candidates(self, val: Dict[str, str]) -> None:
+        self._lc_slot = dict(val)
+
     def call(self, fn_name: str, args: List[Any],
              force: Optional[Dict[str, str]] = None) -> Any:
         fn = self.fns.get(fn_name)
         if fn is None:
             raise InterpError(f"找不到函数 {fn_name}")
-        return self._run_fn(fn, args, force or {}, {})
+        if not _COUNT:
+            return self._run_fn(fn, args, force or {}, {})
+        # 一次 `call()` = 一次测量窗口：`self.ops` 记这次调用树的操作数。
+        _before = _total()
+        try:
+            return self._run_fn(fn, args, force or {}, {})
+        finally:
+            self.ops = _total() - _before
 
     def _check_requires(self, fn: Node, env: Dict[str, Any], force: Dict[str, str]) -> None:
         """断言 spec 里的 `requires`（若写了）。"""
@@ -455,6 +613,15 @@ class Interp:
         for nm, v in zip(pnames, args):
             env[nm] = v
 
+        # **const 形参登记**（v0.72）：这一帧里这些名字不许被变更方法写
+        _consts = set()
+        for _p in (params.children if params else []):
+            if isinstance(_p.value, dict) and _p.value.get("const"):
+                _consts.add(_p.name)
+        if not hasattr(self, "_const_stack"):
+            self._const_stack = []
+        self._const_stack.append(_consts)
+
         # **`requires` 在入口断言**（v0.71）。它是"调用方必须保证"的前提，
         # 不成立就立刻失败——**而不是让函数带着坏输入继续算**。
         self._check_requires(fn, env, force)
@@ -463,14 +630,50 @@ class Interp:
         if block is None:
             raise InterpError(f"{fn.name} 没有函数体（可能还是 pending）")
         fallible = bool((fn.value or {}).get("fallible"))
+        # **进入函数记账、返回时结算**：`ops_of(f)` 于是是整棵调用树的量。
+        _mark = _slot()["n"] if _COUNT else 0
         try:
             self._block(block, env, force)
-            return Ok(None) if fallible else None
+            result = Ok(None) if fallible else None
         except _Return as r:
             if fallible:
                 v = r.value
-                return v if isinstance(v, (Ok, Err)) else Ok(v)
-            return r.value
+                result = v if isinstance(v, (Ok, Err)) else Ok(v)
+            else:
+                result = r.value
+        finally:
+            if _COUNT:
+                _bump_fn(fn.name, _slot()["n"] - _mark)
+            if getattr(self, "_const_stack", None):
+                self._const_stack.pop()
+        # **`guarantees` 在返回时断言**（v0.72）：可检查的那部分真的求值，
+        # 不可检查的已在 `check` 里报 `E-Guarantee-Uncheckable`（不会到这里）。
+        self._check_guarantees(fn, env, result, force)
+        return result
+
+    def _check_guarantees(self, fn: Node, env: Dict[str, Any], result: Any,
+                          force: Dict[str, str]) -> None:
+        """返回后校验 `guarantees`（只校验可判定的那部分）。"""
+        import guarantees as _gt
+        spec = self.specs.get(fn.name) if getattr(self, "specs", None) else None
+        if spec is None or not _gt.has_guarantees(spec):
+            return
+        ok_exprs, _bad = _gt.classify(spec)
+        if not ok_exprs:
+            return
+        e2 = dict(env)
+        e2["ret"] = result
+        e2["result"] = result
+        for expr in ok_exprs:
+            try:
+                good = self._eval(expr, e2, force)
+            except Exception as exc:                       # noqa: BLE001
+                raise InterpError(
+                    f"{fn.name} 的 guarantees 无法求值：{type(exc).__name__}: {exc}")
+            if not good:
+                raise InterpError(
+                    f"E-Guarantee-Violated：{fn.name} 返回后不满足 "
+                    f"{_gt.describe([expr])}")
 
     # ---------- 语句
     def _tick(self) -> None:
@@ -484,18 +687,20 @@ class Interp:
             self._stmt(st, env, force)
 
     def _stmt(self, st: Node, env: Dict[str, Any], force: Dict[str, str]):
-        self.ops += 1
+        if _COUNT:
+            _bump()
         if getattr(st, "kind", None) == "assign-op":
             target = st.children[0]
-            val = self._eval(st.children[1], env, True)
-            cur = self._eval(target, env, True)
+            # **第三参是 `force`（dict），以前错传 `True`**（v0.72 修）
+            val = self._eval(st.children[1], env, force)
+            cur = self._eval(target, env, force)
             op = st.value or ""
             if op == "+=":
-                new = cur + val
+                new = _wrap(cur + val)
             elif op == "-=":
-                new = cur - val
+                new = _wrap(cur - val)
             elif op == "*=":
-                new = cur * val
+                new = _wrap(cur * val)
             elif op == "/=":
                 new = cur // val
             elif op == "%=":
@@ -518,136 +723,155 @@ class Interp:
         self._tick()
         k = st.kind
 
-        if k in ("const-decl", "var-decl"):
-            # children[0] 是类型，最后一个是初值
-            _v = self._eval(st.children[-1], env, force)
-            # **声明类型是"不可失败"时，把 `Ok(x)` 解包**：
-            # `/` 与 `%` 在实现里返回 `Ok(...)`（为了表达除零），于是
-            # `const u64 k = xs.at(i) % N;` 会把 `Ok(3)` 当成下标 → TypeError。
-            # 类型已经声明成 `u64`（不带 `!`），说明调用方**没打算处理失败**，
-            # 这里就应当解包；真出错（Err）才抛。
-            _ty = st.children[0] if st.children else None
-            _fallible = bool(_ty is not None and getattr(_ty, "kind", "") == "type-fail")
-            if not _fallible and isinstance(_v, Ok):
-                _v = _v.v
-            elif not _fallible and isinstance(_v, Err):
-                raise InterpError(f"{st.name} 的初值是 Err({_v.e})，但类型声明为不可失败")
-            env[st.name] = _v
+        _name = INTERP_STMT.get(k)
+        if _name is not None:
+            return getattr(self, _name)(st, env, force)
+        raise InterpError(f"未实现的语句：{k}")
+
+
+    def _k_stmt_const_decl(self, st, env, force):
+        # children[0] 是类型，最后一个是初值
+        _v = self._eval(st.children[-1], env, force)
+        # **声明类型是"不可失败"时，把 `Ok(x)` 解包**：
+        # `/` 与 `%` 在实现里返回 `Ok(...)`（为了表达除零），于是
+        # `const u64 k = xs.at(i) % N;` 会把 `Ok(3)` 当成下标 → TypeError。
+        # 类型已经声明成 `u64`（不带 `!`），说明调用方**没打算处理失败**，
+        # 这里就应当解包；真出错（Err）才抛。
+        _ty = st.children[0] if st.children else None
+        _fallible = bool(_ty is not None and getattr(_ty, "kind", "") == "type-fail")
+        if not _fallible and isinstance(_v, Ok):
+            _v = _v.v
+        elif not _fallible and isinstance(_v, Err):
+            raise InterpError(f"{st.name} 的初值是 Err({_v.e})，但类型声明为不可失败")
+        env[st.name] = _v
+        return
+    def _k_stmt_assign(self, st, env, force):
+        val = self._eval(st.children[1], env, force)
+        self._store(st.children[0], val, env, force)
+        return
+    def _k_stmt_expr_stmt(self, st, env, force):
+        self._eval(st.children[0], env, force)
+        return
+    def _k_stmt_return(self, st, env, force):
+        if st.children:
+            raise _Return(self._eval(st.children[0], env, force))
+        raise _Return(None)
+    def _k_stmt_if(self, st, env, force):
+        cond = self._eval(st.children[0], env, force)
+        blocks = [c for c in st.children[1:] if c.kind == "block"]
+        if cond:
+            if blocks:
+                self._block(blocks[0], env, force)
             return
-
-        if k == "assign":
-            val = self._eval(st.children[1], env, force)
-            self._store(st.children[0], val, env, force)
+        # else / else if 链：`elif` 节点可能是 if 或 block
+        rest = [c for c in st.children[1:] if c.kind in ("block", "if")]
+        for c in rest[1:]:
+            if c.kind == "block":
+                self._block(c, env, force)
+                return
+            self._stmt(c, env, force)
             return
-
-        if k == "expr-stmt":
-            self._eval(st.children[0], env, force)
+        return
+    def _k_stmt_parallel(self, st, env, force):
+        body = next((c for c in st.children if c.kind == "block"), None)
+        if body is None:
             return
-
-        if k == "return":
-            if st.children:
-                raise _Return(self._eval(st.children[0], env, force))
-            raise _Return(None)
-
-        if k == "if":
-            cond = self._eval(st.children[0], env, force)
-            blocks = [c for c in st.children[1:] if c.kind == "block"]
-            if cond:
-                if blocks:
-                    self._block(blocks[0], env, force)
-                return
-            # else / else if 链：`elif` 节点可能是 if 或 block
-            rest = [c for c in st.children[1:] if c.kind in ("block", "if")]
-            for c in rest[1:]:
-                if c.kind == "block":
-                    self._block(c, env, force)
-                    return
-                self._stmt(c, env, force)
-                return
+        tasks = [c for c in body.children if c.kind == "block"]
+        if not tasks:
             return
+        if self.parallel_mode != "threads" or len(tasks) == 1:
+            for task in tasks:
+                self._block(task, env, force)
+            return
+        # **真线程**：每个任务一份**自己的绑定表**，跑完把"它改过的变量"合并回来。
+        # 任务之间不许共享可变状态（检查器已保证），所以浅拷贝绑定表就够——
+        # 共享的容器只读，写只发生在各自的新绑定上。
+        import concurrent.futures as _cf
+        import threading as _th
 
-        if k == "parallel":
-            body = next((c for c in st.children if c.kind == "block"), None)
-            if body is None:
-                return
-            tasks = [c for c in body.children if c.kind == "block"]
-            if not tasks:
-                return
-            if self.parallel_mode != "threads" or len(tasks) == 1:
-                for task in tasks:
-                    self._block(task, env, force)
-                return
-            # **真线程**：每个任务一份**自己的绑定表**，跑完把"它改过的变量"合并回来。
-            # 任务之间不许共享可变状态（检查器已保证），所以浅拷贝绑定表就够——
-            # 共享的容器只读，写只发生在各自的新绑定上。
-            import concurrent.futures as _cf
-            import threading as _th
+        results: List[Dict[str, Any]] = [{} for _ in tasks]
+        errors: List[BaseException] = []
 
-            results: List[Dict[str, Any]] = [{} for _ in tasks]
-            errors: List[BaseException] = []
+        def _run(i: int, task: Node) -> None:
+            local = dict(env)
+            # 每个任务一条**独立且确定**的随机流：由 (基种子, 任务下标) 导出，
+            # 于是同种子同程序 → 同结果，与调度无关。
+            stdlib.set_task_stream(self.rand_seed, i)
+            try:
+                self._block(task, local, force)
+            except BaseException as exc:            # noqa: BLE001
+                errors.append(exc)
+                return
+            for kk, vv in local.items():
+                if kk in env and vv is not env[kk]:
+                    results[i][kk] = vv
+            stdlib.clear_task_stream()
 
-            def _run(i: int, task: Node) -> None:
-                local = dict(env)
-                # 每个任务一条**独立且确定**的随机流：由 (基种子, 任务下标) 导出，
-                # 于是同种子同程序 → 同结果，与调度无关。
-                stdlib.set_task_stream(self.rand_seed, i)
+        with _cf.ThreadPoolExecutor(max_workers=len(tasks)) as pool:
+            futs = [pool.submit(_run, i, tsk) for i, tsk in enumerate(tasks)]
+            for f in futs:
+                f.result()
+        if errors:
+            raise errors[0]
+        for piece in results:
+            env.update(piece)
+        return
+    def _k_stmt_while(self, st, env, force):
+        cond, body = st.children[0], next(
+            (c for c in st.children[1:] if c.kind == "block"), None)
+        while self._eval(cond, env, force):
+            self._tick()
+            self.iters += 1
+            if body is not None:
                 try:
-                    self._block(task, local, force)
-                except BaseException as exc:            # noqa: BLE001
-                    errors.append(exc)
-                    return
-                for kk, vv in local.items():
-                    if kk in env and vv is not env[kk]:
-                        results[i][kk] = vv
-                stdlib.clear_task_stream()
-
-            with _cf.ThreadPoolExecutor(max_workers=len(tasks)) as pool:
-                futs = [pool.submit(_run, i, tsk) for i, tsk in enumerate(tasks)]
-                for f in futs:
-                    f.result()
-            if errors:
-                raise errors[0]
-            for piece in results:
-                env.update(piece)
-            return
-
-        if k == "while":
-            cond, body = st.children[0], next(
-                (c for c in st.children[1:] if c.kind == "block"), None)
-            while self._eval(cond, env, force):
-                self._tick()
-                self.iters += 1
-                if body is not None:
                     self._block(body, env, force)
-            return
+                except _Continue:
+                    continue
+                except _Break:
+                    break
+        return
+    def _k_stmt_break(self, st, env, force):
+        raise _Break()
 
-        if k == "for":
-            base = next((c for c in st.children if c.kind == "path"), None)
-            body = next((c for c in st.children if c.kind == "block"), None)
+    def _k_stmt_continue(self, st, env, force):
+        raise _Continue()
+
+    def _k_stmt_for(self, st, env, force):
+        body = next((c for c in st.children if c.kind == "block"), None)
+        var = st.name
+        base = next((c for c in st.children if c.kind != "block"), None)
+        # **区间 `for (i in a..b)`**（v0.72）：半开 `[a, b)`。
+        # 以前这里只找 `kind=="path"`，区间是 `binary("..")`，于是**静默 0 次**。
+        if base is not None and getattr(base, "kind", "") == "binary" \
+                and (base.value or "") == ".." and len(base.children) >= 2:
+            lo = int(self._eval(base.children[0], env, force))
+            hi = int(self._eval(base.children[1], env, force))
+            seq = list(range(lo, hi))
+        else:
             seq = self._eval(base, env, force) if base is not None else []
             if not isinstance(seq, list):
                 seq = list(seq) if seq is not None else []
-            var = st.name
-            for item in seq:
-                self._tick()
-                self.iters += 1
-                env[var] = item
-                if body is not None:
+        for item in seq:
+            self._tick()
+            self.iters += 1
+            env[var] = item
+            if body is not None:
+                try:
                     self._block(body, env, force)
-            return
+                except _Continue:
+                    continue
+                except _Break:
+                    break
+        return
+    def _k_stmt_match(self, st, env, force):
+        return self._match(st, env, force)
+    def _k_stmt_block(self, st, env, force):
+        self._block(st, env, force)
+        return
+    def _k_stmt_dispatch(self, st, env, force):
+        self._eval(st, env, force)
+        return
 
-        if k == "match":
-            return self._match(st, env, force)
-
-        if k == "block":
-            self._block(st, env, force)
-            return
-
-        if k == "dispatch":
-            self._eval(st, env, force)
-            return
-
-        raise InterpError(f"未实现的语句：{k}")
 
     def _store(self, target: Node, val: Any, env, force) -> None:
         if target.kind == "path":
@@ -659,6 +883,10 @@ class Interp:
             base = self._eval(target.children[0], env, force)
             if isinstance(base, list) and target.name is not None and target.name.isdigit():
                 base[int(target.name)] = val
+                return
+            if isinstance(base, StructVal):
+                # `p.x = 5`（v0.72）：以前只有 `p.x += 5` 能走，`=` 报"未实现"
+                base.fields[target.name] = val
                 return
             raise InterpError(f"未实现的赋值目标：{target.kind}/{target.name}")
         if target.kind == "index":
@@ -673,16 +901,24 @@ class Interp:
         arms = [c for c in st.children[1:] if c.kind == "arm"]
         for arm in arms:
             pat = next((c for c in arm.children if c.kind in
-                        ("pattern", "pattern-wildcard")), None)
+                        ("pattern", "pattern-wildcard", "pattern-literal")), None)
             # 臂的体：可能是 block，也可能是一条单语句（`Pat => return 1,`）
             body = next((c for c in arm.children if c.kind == "block"), None)
             single = [c for c in arm.children
-                      if c.kind not in ("pattern", "pattern-wildcard", "block")]
+                      if c.kind not in ("pattern", "pattern-wildcard",
+                                        "pattern-literal", "block")]
             if pat is None:
                 continue
             hit = False
             if pat.kind == "pattern-wildcard":
                 hit = True
+            elif pat.kind == "pattern-literal":
+                _lit = str(pat.value or "").strip()
+                _want = True if _lit == "true" else (False if _lit == "false" else None)
+                if _want is not None:
+                    hit = bool(val) == _want
+                else:
+                    hit = (val == int(_lit)) if isinstance(val, int) else False
             else:
                 want = (pat.name or "").split(".")[-1]
                 if isinstance(val, EnumVal) and val.variant == want:
@@ -721,8 +957,8 @@ class Interp:
 
     # ---------- 表达式
     def _eval(self, n: Optional[Node], env, force):
-        if n is not None:
-            self.ops += 1
+        if _COUNT and n is not None:
+            _bump()
         _k = getattr(n, "kind", None)
         if _k == "lit-float":
             return float(n.value if n.value is not None else 0.0)
@@ -738,74 +974,100 @@ class Interp:
         self._tick()
         k = n.kind
 
-        if k == "lit-int":
-            return int(n.value)
-        if k == "lit-string":
-            return Text(n.value or b"")
-
-        if k == "lit-char":
-            t = str(n.value)
-            return ord(t[1]) if len(t) >= 3 else ord(t)
-        if k == "lit-bool":
-            return n.value in (True, "true")
-        if k == "path":
-            if n.name in env:
-                return env[n.name]
-            # `Token::Plus` → path "Token.Plus"：类型命名空间里的变体（无载荷）
-            if "." in (n.name or ""):
-                ty, va = n.name.rsplit(".", 1)
-                return EnumVal(ty, va)
-            raise InterpError(f"未绑定的名字 {n.name}")
-        if k == "paren":
-            return self._eval(n.children[0], env, force)
-        if k == "tuple":
-            return tuple(self._eval(c, env, force) for c in n.children)
-        if k == "struct-literal":
-            fields = {}
-            for fi in n.children:
-                if fi.kind == "field-init" and fi.children:
-                    fields[fi.name] = self._eval(fi.children[0], env, force)
-            return StructVal(n.name or "", fields)
-        if k == "unary":
-            v = self._eval(n.children[0], env, force)
-            op = n.value or ""
-            if op == "not":
-                return not v
-            if op == "-":
-                return _wrap(-v)
-            raise InterpError(f"未实现的一元运算 {op}")
-        if k == "binary":
-            return self._binary(n, env, force)
-        if k == "call":
-            return self._call(n, env, force)
-        if k == "method-call":
-            return self._method(n, env, force)
-        if k == "field":
-            return self._field(n, env, force)
-        if k == "cast":
-            v = self._eval(n.children[0], env, force)
-            return int(v) if not isinstance(v, bool) else int(v)
-        if k == "try":
-            v = self._eval(n.children[0], env, force)
-            if isinstance(v, Err):
-                raise _Return(v)
-            if isinstance(v, Ok):
-                return v.v
-            return v
-        if k == "dispatch":
-            return self._dispatch(n, env, force)
-        if k == "index":
-            base = self._eval(n.children[0], env, force)
-            idx = self._eval(n.children[1], env, force)
-            return base[idx]
-
-        if k == "type-name":
-            return TypeRef(n.name or "")
-        if k == "ref":
-            # `&x` 只是"按引用传"的标记，值就是它指的东西
-            return self._eval(n.children[0], env, force) if n.children else None
-
+        _name = INTERP_EXPR.get(k)
+        if _name is not None:
+            return getattr(self, _name)(n, env, force)
         raise InterpError(f"未实现的表达式：{k}")
+
+
+    def _k_expr_lit_int(self, n, env, force):
+        return int(n.value)
+    def _k_expr_lit_string(self, n, env, force):
+        return Text(n.value or b"")
+    def _k_expr_lit_char(self, n, env, force):
+        t = str(n.value)
+        return ord(t[1]) if len(t) >= 3 else ord(t)
+    def _k_expr_lit_float(self, n, env, force):
+        # **浮点字面量也要有值**：解析器能产（`parser.py:1526`），
+        # 成本域早就按 1 个操作计，具体值域却抛「未实现的表达式」——
+        # 这就是 `walk.py` 报的那条 expr 侧漂移。语义上仍由类型检查器
+        # 拦截（`u64 y = 1.5;` → `E-Type-FloatToInt`），这里只是不再崩。
+        return float(n.value)
+    def _k_expr_lit_bool(self, n, env, force):
+        return n.value in (True, "true")
+    def _k_expr_path(self, n, env, force):
+        if n.name in env:
+            return env[n.name]
+        # `Token::Plus` → path "Token.Plus"：类型命名空间里的变体（无载荷）
+        if "." in (n.name or ""):
+            ty, va = n.name.rsplit(".", 1)
+            return EnumVal(ty, va)
+        raise InterpError(f"未绑定的名字 {n.name}")
+    def _k_expr_paren(self, n, env, force):
+        return self._eval(n.children[0], env, force)
+    def _k_expr_tuple(self, n, env, force):
+        return tuple(self._eval(c, env, force) for c in n.children)
+    def _k_expr_struct_literal(self, n, env, force):
+        fields = {}
+        for fi in n.children:
+            if fi.kind == "field-init" and fi.children:
+                fields[fi.name] = self._eval(fi.children[0], env, force)
+        return StructVal(n.name or "", fields)
+    def _k_expr_unary(self, n, env, force):
+        v = self._eval(n.children[0], env, force)
+        op = n.value or ""
+        if op == "not":
+            return not v
+        if op == "-":
+            return _wrap(-v)
+        raise InterpError(f"未实现的一元运算 {op}")
+    def _k_expr_binary(self, n, env, force):
+        return self._binary(n, env, force)
+    def _k_expr_call(self, n, env, force):
+        return self._call(n, env, force)
+    def _k_expr_method_call(self, n, env, force):
+        return self._method(n, env, force)
+    def _k_expr_field(self, n, env, force):
+        return self._field(n, env, force)
+    def _k_expr_cast(self, n, env, force):
+        v = self._eval(n.children[0], env, force)
+        v = int(v)
+        # **`as` 要真的截断**（v0.72）：`300 as u8` 以前返回 300。
+        ty = next((c for c in n.children[1:] if getattr(c, "kind", "").startswith("type")),
+                  None)
+        name = ""
+        if ty is not None:
+            name = getattr(ty, "name", None) or (
+                ty.children[0].name if getattr(ty, "children", None) else "") or ""
+        widths = {"u8": (8, False), "u16": (16, False), "u32": (32, False),
+                  "u64": (64, False), "i8": (8, True), "i16": (16, True),
+                  "i32": (32, True), "i64": (64, True)}
+        if name in widths:
+            w, signed = widths[name]
+            m = 1 << w
+            v %= m
+            if signed and v >= (m >> 1):
+                v -= m
+        return v
+    def _k_expr_try(self, n, env, force):
+        v = self._eval(n.children[0], env, force)
+        if isinstance(v, Err):
+            raise _Return(v)
+        if isinstance(v, Ok):
+            return v.v
+        return v
+    def _k_expr_dispatch(self, n, env, force):
+        return self._dispatch(n, env, force)
+    def _k_expr_index(self, n, env, force):
+        base = self._eval(n.children[0], env, force)
+        idx = self._eval(n.children[1], env, force)
+        return base[idx]
+    def _k_expr_type_name(self, n, env, force):
+        return TypeRef(n.name or "")
+    def _k_expr_ref(self, n, env, force):
+        # `&x` 只是"按引用传"的标记，值就是它指的东西
+        return self._eval(n.children[0], env, force) if n.children else None
+
 
     def _binary(self, n: Node, env, force) -> Any:
         op = n.value or ""
@@ -826,16 +1088,17 @@ class Interp:
         if op == "<<":
             return _wrap(a << b)
         if op == "/":
+            # **除零由 `requires b != 0` 负责**（规格），不是让 `/` 返回 Result。
+            # 以前返回 `Ok(q)`，于是 `return a/b` 得到 `Ok(3)`、`a%2==0` 恒假。
             if b == 0:
-                return Err(EnumVal("Arithmetic", "DivisionByZero"))
-            # 整数除法向零截断（与 C 一致）
+                raise InterpError("E-Arith-DivZero：除数为 0（请用 `requires b != 0;` 约束）")
             q = abs(a) // abs(b)
-            return Ok(q if (a >= 0) == (b >= 0) else -q)
+            return q if (a >= 0) == (b >= 0) else -q
         if op == "%":
             if b == 0:
-                return Err(EnumVal("Arithmetic", "DivisionByZero"))
+                raise InterpError("E-Arith-DivZero：取模的除数为 0（请用 `requires b != 0;` 约束）")
             r = abs(a) % abs(b)
-            return Ok(r if a >= 0 else -r)
+            return r if a >= 0 else -r
         if op == "<":
             return a < b
         if op == "<=":
@@ -851,6 +1114,15 @@ class Interp:
         raise InterpError(f"未实现的二元运算 {op}")
 
     # ---------------------------------------------------------------- FFI（第一批）
+    def _ffi_prepare(self, name: str, node, args):
+        """调用前的**形状校验**（与后端无关，见 shape.py）。"""
+        from checker import param_list
+        from shape import ShapeError, UnsupportedError, validate
+        try:
+            return validate(name, param_list(node), args)
+        except (ShapeError, UnsupportedError) as exc:
+            raise InterpError(str(exc))
+
     def _load_ffi(self, name: str):
         """把 `extern` 声明变成一个 ctypes 可调用对象（按需加载、缓存）。"""
         import ctypes
@@ -879,14 +1151,15 @@ class Interp:
                     ts = "Vec"
                 else:
                     ts = nm
-            argtypes.append(ctypes.c_char_p if ts == "Vec" else
-                            (ctypes.c_int64 if ts == "i64" else ctypes.c_uint64))
+            from ffi_c import argtype_for
+            argtypes.append(argtype_for("Vec" if ts == "Vec" else ts))
         fn.argtypes = argtypes or None
         rt = next((c for c in decl.children if c.kind in ("type-ref", "type-name")), None)
         rts = ""
         if rt is not None:
             rts = getattr(rt, "name", None) or (rt.children[0].name if rt.children else "")
-        fn.restype = None if not rts else (ctypes.c_int64 if rts == "i64" else ctypes.c_uint64)
+        from ffi_c import restype_for
+        fn.restype = restype_for(rts)
         self._ffi_cache[name] = fn
         return fn
 
@@ -896,6 +1169,9 @@ class Interp:
         spec = self.specs.get(name) if hasattr(self, "specs") else None
         if spec is None:
             raise InterpError(f"{name} 没有 spec，无法按签名调用")
+        # **校验必须在加载库之前**：否则参数错会先撞上 `ctypes.CDLL` 的报错，
+        # 而且测试还得依赖一个真实的外部库。
+        args = self._ffi_prepare(name, spec, args)
         lib_name = self.extern_specs.get(name) or getattr(self, "link_lib", None)
         try:
             lib = ctypes.CDLL(lib_name) if lib_name else ctypes.CDLL(None)
@@ -905,23 +1181,16 @@ class Interp:
         if fn is None:
             raise InterpError(f"外部库 {lib_name or '进程自身'} 里没有符号 {name}")
         ps = next((c for c in spec.children if c.kind == "params"), None)
+        from ffi_c import argtype_for, to_native
         argtypes = []
         for p in (ps.children if ps else []):
             ty = next((c for c in p.children if c.kind in ("type-ref", "type-name")), None)
-            ts = self._type_name(ty)
-            argtypes.append(ctypes.c_char_p if ts.startswith("Vec") else
-                            (ctypes.c_int64 if ts == "i64" else ctypes.c_uint64))
+            argtypes.append(argtype_for(self._type_name(ty)))
         fn.argtypes = argtypes or None
         rt = next((c for c in spec.children if c.kind in ("type-ref", "type-name")), None)
         rts = self._type_name(rt)
         fn.restype = None if not rts else (ctypes.c_int64 if rts == "i64" else ctypes.c_uint64)
-        conv = []
-        for a in args:
-            if isinstance(a, list):
-                conv.append(bytes(int(x) & 0xFF for x in a))
-            else:
-                conv.append(int(a))
-        return fn(*conv)
+        return fn(*to_native(args))
 
     @staticmethod
     def _type_name(n) -> str:
@@ -939,18 +1208,14 @@ class Interp:
         return getattr(n, "name", "") or ""
 
     def _call_ffi(self, name: str, args) -> Any:
+        decl = self.externs.get(name)
+        if decl is not None:
+            args = self._ffi_prepare(name, decl, args)
         fn = self._load_ffi(name)
         if fn is None:
             raise InterpError(f"未声明的外部函数 {name}")
-        conv = []
-        for a in args:
-            if isinstance(a, list):
-                conv.append(bytes(int(x) & 0xFF for x in a))
-            elif isinstance(a, str):
-                conv.append(a.encode("utf-8"))
-            else:
-                conv.append(int(a))
-        return fn(*conv)
+        from ffi_c import to_native
+        return fn(*to_native(args))
 
     def _call(self, n: Node, env, force) -> Any:
         # **调用函数值**：`g(1, 2)`，其中 `g` 是 `func(...)->R` 形参。
@@ -1025,22 +1290,35 @@ class Interp:
             if len(_items) < 2:
                 raise InterpError("for_each 需要 2 个实参（容器、具名函数）")
             _m = self._eval(_items[0], env, force)
-            if not isinstance(_m, stdlib.MapVal):
-                raise InterpError("for_each 的第一个实参不是 HashMap")
             _fnode = _items[1]
             _fname = _fnode.name if getattr(_fnode, "kind", "") == "path" else None
             _fn = self.fns.get(_fname or "")
             if _fn is None:
                 raise InterpError("for_each 的第二个实参必须是具名函数")
+            # **Vec / FixedVec：一元回调**（v0.73）。以前只认 HashMap，
+            # 于是文档里的 `for_each(xs, f)` 在 Vec 上直接报错。
+            if isinstance(_m, list):
+                _snap = list(_m)
+                for _x in _snap:
+                    self._run_fn(_fn, [_x], force, {})
+                if _COUNT:
+                    _bump()
+                return len(_snap)
+            if not isinstance(_m, stdlib.MapVal):
+                raise InterpError("for_each 的第一个实参必须是 Vec 或 HashMap")
             _pairs = list(_m.items())          # 快照
             for _k, _v in _pairs:
                 self._run_fn(_fn, [_k, _v], force, {})
+            if _COUNT:
+                _bump()
             return len(_pairs)
 
         # **`format` 是变参**：不能被 stdlib 的固定 arity 拦住
         if name == "format":
             args = self._args(n, env, force)
             self.builtin_calls[name] = self.builtin_calls.get(name, 0) + 1
+            if _COUNT:
+                _bump()
             return stdlib.FNS["format"]["impl"](args)
 
         # `sort(xs)` / `sort_by(xs, 具名比较器)` —— **必须在求值实参之前拦**：
@@ -1056,26 +1334,36 @@ class Interp:
             return self._call_ffi_spec(name or "", _vals)
 
         if name in ("sort", "sort_by"):
+            if _COUNT:
+                _bump()
             return self._builtin_sort(name, n, env, force)
 
         # **高阶内建**：第二个（fold 是第三个）实参是**具名函数**，不是值。
         # 和 `sort_by` 同一套理由：**具名函数是有限集合，成本可静态分析**；
         # 匿名函数是任意代码，`κ` 无法界定，契约会被打穿。
         if name in ("map", "filter", "fold", "count_if"):
+            if _COUNT:
+                _bump()
             return self._builtin_higher(name, n, env, force)
 
         args = self._args(n, env, force)
 
         if name in BUILTINS_INT2:
+            if _COUNT:
+                _bump()
             return BUILTINS_INT2[name](args)
 
         if name in BUILTINS_INT1:
             self.builtin_calls[name] = self.builtin_calls.get(name, 0) + 1
+            if _COUNT:
+                _bump()
             return BUILTINS_INT1[name](args)
 
         # **最小基本库（L1）**：容器/算法内建，见 stdlib.py 的收编标准。
         if stdlib.is_stdlib(name):
             self.builtin_calls[name] = self.builtin_calls.get(name, 0) + 1
+            if _COUNT:
+                _bump()
             return stdlib.call(name, args)
 
         if name == "Err":
@@ -1198,26 +1486,63 @@ class Interp:
             raise InterpError(f"sort_by 无法比较：{e}") from None
         return len(recv)
 
+    def _arg_value(self, a: Node, env, force) -> Any:
+        # **函数值**：`for_each(m, visit)` —— `visit` 是**名字**，不是值。
+        # 只有"没被局部变量遮蔽"时才当函数值，避免踩掉普通变量。
+        if a.kind == "path" and (a.name or "") not in env \
+                and (a.name or "") in self.fns:
+            return FnVal(a.name)
+        return self._eval(a, env, force)
+
     def _args(self, n: Node, env, force) -> List[Any]:
-        out = []
-        for c in n.children:
-            if c.kind == "args":
-                for a in c.children:
-                    if a.kind == "named-arg":
-                        # `Arith(cause = ...)`：解释器只关心值，名字留给检查器
-                        a = a.children[0] if a.children else None
-                        if a is None:
-                            continue
-                    # **函数值**：`for_each(m, visit)` —— `visit` 是**名字**，不是值。
-                    # 只有"没被局部变量遮蔽"时才当函数值，避免踩掉普通变量。
-                    if a.kind == "path" and (a.name or "") not in env \
-                            and (a.name or "") in self.fns:
-                        out.append(FnVal(a.name))
-                        continue
-                    out.append(self._eval(a, env, force))
-        return out
+        """求实参；**具名实参按名字绑定**（v0.72）。
+
+        以前 `named-arg` 只取里面的表达式、名字被丢掉——于是 `g(b = 1, a = 2)`
+        按位置绑定成 `a=1, b=2`，得到 12 而不是 21。**静默算错**是最坏的一类。
+        """
+        args_node = next((c for c in n.children if c.kind == "args"), None)
+        items = list(args_node.children) if args_node is not None else []
+        named = [a for a in items if a.kind == "named-arg"]
+        if not named:
+            return [self._arg_value(a, env, force) for a in items]
+
+        callee = (n.name or "").split(".")[-1]
+        fn = self.fns.get(callee)
+        pnames = []
+        if fn is not None:
+            ps = next((c for c in fn.children if c.kind == "params"), None)
+            pnames = [p.name for p in (ps.children if ps else [])]
+        vals = {}
+        for a in items:
+            if a.kind != "named-arg":
+                raise InterpError(f"{callee}：具名实参与位置实参不能混用")
+            if a.name in vals:
+                raise InterpError(f"{callee}：实参 {a.name} 重复给了")
+            if pnames and a.name not in pnames:
+                raise InterpError(f"{callee} 没有名为 {a.name} 的参数"
+                                  f"（有：{', '.join(pnames)}）")
+            kid = a.children[0] if a.children else None
+            if kid is None:
+                raise InterpError(f"{callee}：实参 {a.name} 没有值")
+            vals[a.name] = self._arg_value(kid, env, force)
+        if pnames:
+            missing = [p for p in pnames if p not in vals]
+            if missing:
+                raise InterpError(f"{callee} 缺少实参：{', '.join(missing)}")
+            return [vals[p] for p in pnames]
+        return list(vals.values())
 
     def _method(self, n: Node, env, force) -> Any:
+        # **`const T&` 形参不许被变更方法写**（v0.72）。
+        # 以前 `z(const Vec<u64>& xs) { xs.push(0); }` 会改掉调用方的 list。
+        _recv = n.children[0] if n.children else None
+        _mname = (n.name or "").split(".")[-1]
+        _consts = self._const_stack[-1] if getattr(self, "_const_stack", None) else set()
+        if _recv is not None and _recv.kind == "path" and _recv.name in _consts \
+                and _mname in MUTATING_METHODS:
+            raise InterpError(
+                f"E-Borrow-Const：{_recv.name} 是 `const` 形参，不能调 `. {_mname}(…)`"
+                f"（要改就把它声明成可变借用 `T&`）")
         name = n.name or ""
         recv_node = n.children[0]
         recv = self._eval(recv_node, env, force)
@@ -1232,6 +1557,8 @@ class Interp:
                     args.append(self._eval(a, env, force))
 
         self.method_calls += 1
+        if _COUNT:
+            _bump()
 
         if name == "length":
             return len(recv)
@@ -1308,20 +1635,21 @@ class Interp:
             cand = None
             if _seg and _seg in cands and any(c.kind == "block" for c in cands[_seg].children):
                 cand = cands[_seg]
-                self.last_candidates[label] = _seg
             elif _segs and _size is not None:
                 _msg = (f"?!{label}: 规模 {_size} 不在分档表范围内"
                         f"（表覆盖 {_segs[0][0]}..{_segs[-1][1]}），退化为第一个实现")
                 if _msg not in self.dispatch_warnings:
                     self.dispatch_warnings.append(_msg)
                     print("  ！ " + _msg, file=sys.stderr)
-            order = self.over.get(label) or list(cands)
-            for nm in order:
-                if nm in cands and any(c.kind == "block" for c in cands[nm].children):
-                    cand = cands[nm]
-                    break
-            if cand is not None:
-                self.last_candidates.setdefault(label, cand.name or "")
+            # **P0 修复**：表已经选好候选时，绝不能被 `over` 的顺序循环覆盖。
+            # 旧写法无条件走下面的循环，实际执行 `over` 里第一个有实现的候选，
+            # 而 `last_candidates` 记的是表选的那个 —— 报告与实际不一致。
+            if cand is None:
+                order = self.over.get(label) or list(cands)
+                for nm in order:
+                    if nm in cands and any(c.kind == "block" for c in cands[nm].children):
+                        cand = cands[nm]
+                        break
             if cand is None:
                 for nm, c in cands.items():
                     if any(x.kind == "block" for x in c.children):
@@ -1329,6 +1657,8 @@ class Interp:
                         break
         if cand is None:
             raise InterpError(f"?!{label}: 没有已实现的候选")
+        # **唯一赋值点**：报告的就是要跑的
+        self.last_candidates[label] = cand.name or ""
 
         # 候选 inline：在宿主环境的副本上执行（所以能读到 `n`）
         cenv = dict(self.globals)
@@ -1371,6 +1701,47 @@ def _fixed_capacity(tn: Node, consts: Optional[Dict[str, Any]] = None) -> Option
                 v = consts.get(nm)
                 if isinstance(v, int):
                     return v
+            # **常量表达式**（v0.72）：`FixedVec<u64, N + 1>` / `1 + 2`。
+            # 以前这里只认字面量与常量名，表达式一律返回 None →
+            # `FixedVec` 静默退化成普通 `Vec`，容量检查形同虚设。
+            _v = _const_expr_int(a, consts)
+            if _v is not None:
+                return _v
+    return None
+
+
+def _const_expr_int(n, consts: Dict[str, Any]) -> Optional[int]:
+    """把类型实参里的**常量表达式**求成 int（只认 + - * / 与常量名/字面量）。"""
+    if n is None:
+        return None
+    k = getattr(n, "kind", "")
+    if k in ("lit-int", "type-const"):
+        try:
+            return int(n.value)
+        except (TypeError, ValueError):
+            return None
+    if k == "type-name" and (n.name or "").isdigit():
+        return int(n.name)
+    if k == "path":
+        v = consts.get(n.name)
+        return v if isinstance(v, int) else None
+    if k == "binary" and len(n.children) >= 2:
+        l = _const_expr_int(n.children[0], consts)
+        r = _const_expr_int(n.children[1], consts)
+        if l is None or r is None:
+            return None
+        op = n.value or ""
+        if op == "+":
+            return l + r
+        if op == "-":
+            return l - r
+        if op == "*":
+            return l * r
+        if op == "/" and r:
+            return l // r
+        return None
+    if k in ("paren", "ref") and n.children:
+        return _const_expr_int(n.children[0], consts)
     return None
 
 

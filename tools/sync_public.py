@@ -14,21 +14,78 @@
   · 历史 = clean 自己的线性历史，永远不含开发提交
 
 用法：
+    python tools/sync_public.py --dry-run  # 只看会公开哪些文件（只读，不动任何 ref）
     python tools/sync_public.py            # 只造提交，不推
     python tools/sync_public.py --push     # 造完就推
 """
 import subprocess
 import sys
 
+# 内部材料：只允许留本地，任何发布路径都不得包含
+INTERNAL_PREFIXES = ("文档/设计/", "文档/实验/", "文档/其他/", "文档/待办")
+
+# 明显的脏文件（审稿/打包误入）
+def is_junk(path: str) -> bool:
+    base = path.rsplit("/", 1)[-1]
+    return (
+        "~$" in path
+        or base.startswith("-")
+        or base == "_tensor2.py"
+        or base.lower().endswith((".docx", ".doc", ".pdf"))
+    )
+
 
 def git(*args, check=True):
-    p = subprocess.run(("git",) + args, capture_output=True, text=True)
+    p = subprocess.run(
+        ("git", "-c", "core.quotepath=false") + args,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+    )
     if check and p.returncode != 0:
         raise SystemExit(f"git {' '.join(args)} 失败：{p.stderr.strip()}")
     return p.stdout.strip()
 
 
+def tree_files(rev):
+    return [ln for ln in git("ls-tree", "-r", "--name-only", rev).splitlines() if ln.strip()]
+
+
+def dry_run() -> int:
+    """只读检查：打印"对外发布应该包含哪些文件"，并核对没有内部材料。"""
+    files = tree_files("HEAD")
+    leaks = [f for f in files if f.startswith(INTERNAL_PREFIXES)]
+    junk = [f for f in files if is_junk(f)]
+
+    print(f"  候选发布树：HEAD（{git('rev-parse', '--short', 'HEAD')}）共 {len(files)} 个文件")
+    print(f"  内部材料条目：{len(leaks)}")
+    for f in leaks:
+        print("    LEAK:", f)
+    print(f"  可疑脏文件：{len(junk)}")
+    for f in junk:
+        print("    JUNK:", f)
+
+    print("\n  —— 对外发布应包含的文件 ——")
+    for f in files:
+        print("   ", f)
+
+    parent = git("rev-parse", "--verify", "clean/main", check=False)
+    if parent:
+        same = git("rev-parse", "HEAD^{tree}") == git("rev-parse", "clean/main^{tree}")
+        print(f"\n  与 clean/main 的树相同：{'是（无需新提交）' if same else '否（会造 1 个新提交）'}")
+    else:
+        print("\n  未找到 clean/main（先 `git fetch clean`），跳过同步状态比较")
+
+    ok = not leaks and not junk
+    print(f"\n  结论：{'干净，可以发布' if ok else '不干净，禁止发布'}")
+    print("  （--dry-run 只读：没有 fetch、没有 commit-tree、没有 push）")
+    return 0 if ok else 1
+
+
 def main() -> int:
+    if "--dry-run" in sys.argv:
+        return dry_run()
+
     git("fetch", "clean", check=False)
     tree = git("rev-parse", "HEAD^{tree}")
     parent = git("rev-parse", "clean/main")
