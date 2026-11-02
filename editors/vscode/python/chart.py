@@ -31,11 +31,19 @@ def _esc(s: str) -> str:
 def line_chart(series: Sequence[Tuple[str, Sequence[Tuple[float, float]]]],
                title: str, ylabel: str, log_x: bool = True,
                log_y: bool = False, hline: float = None,
-               annotate: bool = False, vline: float = None) -> str:
+               annotate: bool = False, vline: float = None,
+               note: str = None, direct_labels: bool = False) -> str:
     """series = [(名字, [(x, y), ...]), ...] → SVG 文本。"""
     pts = [(x, y) for _n, xs in series for x, y in xs if y == y and y > 0]
     if not pts:
-        return f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}"/>'
+        # **空面板也要有标题**：否则读者只看到一块白板，分不清"没数据"还是"画砸了"
+        return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" '
+                f'font-family="system-ui,Segoe UI,sans-serif" font-size="13">'
+                f'<rect width="{W}" height="{H}" fill="#ffffff"/>'
+                f'<text x="{L}" y="30" font-size="17" font-weight="600" fill="#1a1a1a">'
+                f'{_esc(title)}</text>'
+                f'<text x="{L}" y="{T + 40}" fill="#777">'
+                f'{_esc(note or "（没有可画的数据）")}</text></svg>')
     xs_all = [p[0] for p in pts]
     ys_all = [p[1] for p in pts]
     x0, x1 = min(xs_all), max(xs_all)
@@ -114,6 +122,7 @@ def line_chart(series: Sequence[Tuple[str, Sequence[Tuple[float, float]]]],
 
     _seen = set()
     _dup = []
+    _ends = []          # (末点 x, 末点 y, 名字, 颜色)
     for i, (name, data) in enumerate(series):
         _sig = tuple((round(x, 6), round(y, 6)) for x, y in data if y == y)
         if _sig in _seen:
@@ -133,11 +142,27 @@ def line_chart(series: Sequence[Tuple[str, Sequence[Tuple[float, float]]]],
                 if annotate:
                     out.append(f'<text x="{sx(x) + 6:.1f}" y="{sy(y) - 6:.1f}" '
                                f'font-size="11" fill="{color}">{y:.2f}</text>')
-        ly = T + 18 + i * 24
-        out.append(f'<line x1="{L + PW + 18}" y1="{ly}" x2="{L + PW + 52}" '
-                   f'y2="{ly}" stroke="{color}" stroke-width="2.4"/>')
-        out.append(f'<text x="{L + PW + 60}" y="{ly + 5}" fill="#333">'
-                   f'{_esc(name)}</text>')
+        _pts_ok = [(x, y) for x, y in data if y == y and y > 0]
+        if _pts_ok:
+            _ends.append((sx(_pts_ok[-1][0]), sy(_pts_ok[-1][1]), name, color))
+        if not direct_labels:
+            ly = T + 18 + i * 24
+            out.append(f'<line x1="{L + PW + 18}" y1="{ly}" x2="{L + PW + 52}" '
+                       f'y2="{ly}" stroke="{color}" stroke-width="2.4"/>')
+            out.append(f'<text x="{L + PW + 60}" y="{ly + 5}" fill="#333">'
+                       f'{_esc(name)}</text>')
+
+    if direct_labels and _ends:
+        # 线尾直接写名字：比在图例里对照更直观（眼睛不用来回跳）
+        _ends.sort(key=lambda z: z[1])
+        _prev = None
+        for _ex, _ey, _nm, _col in _ends:
+            _ly2 = _ey
+            if _prev is not None and _ly2 - _prev < 15:
+                _ly2 = _prev + 15
+            _prev = _ly2
+            out.append(f'<text x="{_ex + 8:.1f}" y="{_ly2 + 4:.1f}" fill="{_col}" '
+                       f'font-size="12">{_esc(_nm)}</text>')
 
     if _dup:
         out.append(f'<text x="{L + PW + 60}" y="{T + 18 + len(series) * 24}" '
@@ -148,7 +173,7 @@ def line_chart(series: Sequence[Tuple[str, Sequence[Tuple[float, float]]]],
     return "\n".join(out)
 
 
-def stack_svgs(svgs, titles=None) -> str:
+def stack_svgs(svgs, titles=None, columns: int = 1) -> str:
     """把多张图**垂直堆进同一个文件**（每张仍是独立坐标系）。
 
     SVG 允许嵌套 `<svg>`，所以不需要把各图的坐标系揉在一起——
@@ -159,6 +184,7 @@ def stack_svgs(svgs, titles=None) -> str:
     import re as _re
     total_h = 0
     parts = []
+    cols = max(1, int(columns))
     for svg in svgs:
         body = _re.sub(r"^<\?xml[^>]*\?>\s*", "", svg)
         m = _re.search(r'width="(\d+)" height="(\d+)"', body)
@@ -166,13 +192,18 @@ def stack_svgs(svgs, titles=None) -> str:
         body = body.replace('<svg xmlns="http://www.w3.org/2000/svg"', '<svg', 1)
         parts.append((w, h, body))
         total_h += h
+    import math as _math
+    _rows = _math.ceil(len(parts) / cols)
+    _wcell = max(p[0] for p in parts)
+    _hcell = max(p[1] for p in parts)
+    _W, _H = _wcell * min(cols, len(parts)), _hcell * _rows
     out = ['<?xml version="1.0" encoding="UTF-8"?>',
-           f'<svg xmlns="http://www.w3.org/2000/svg" width="{parts[0][0]}" '
-           f'height="{total_h}">',
-           f'<rect width="{parts[0][0]}" height="{total_h}" fill="#fff"/>']
-    y = 0
-    for w, h, body in parts:
-        out.append(f'<g transform="translate(0,{y})">{body}</g>')
-        y += h
+           f'<svg xmlns="http://www.w3.org/2000/svg" width="{_W}" '
+           f'height="{_H}">',
+           f'<rect width="{_W}" height="{_H}" fill="#fff"/>']
+    for _i, (_w, _h, body) in enumerate(parts):
+        _cx = (_i % cols) * _wcell
+        _cy = (_i // cols) * _hcell
+        out.append(f'<g transform="translate({_cx},{_cy})">{body}</g>')
     out.append("</svg>")
     return "\n".join(out)

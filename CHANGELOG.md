@@ -16,6 +16,67 @@
 ## [Unreleased]
 
 ### Added
+- **`cpp/docnums/`：文档数字绑定检查器的 C++17 实现**（单文件、零第三方依赖）。
+  与 `tools/doc_numbers.py` **同语义**：同一份 `tools/doc_numbers.json`、
+  同一套 `数字<!--dn:key-->` 标记、同样的退出码；`parity.py` 逐字节对照两版输出
+  （`--list` / `--check` / `--scan` 全一致）。
+  用途：没有 Python 的环境里也能在 CI 里查数字漂移。
+  CI：`.github/workflows/docnums.yml`（ubuntu / windows / macos 三平台编译 + parity）。
+  三个移植坑记在 README 里：**Windows `argv` 是 ANSI**（中文路径必炸，改用
+  `CommandLineToArgvW`）、**窄字符流按 ANSI 解路径**（改用 `filesystem::u8path`）、
+  **动态链接会缺 DLL**（`-static` 出单文件）。
+- **	ools/doc_numbers.py：文档数字绑定**（零依赖，可给别的仓库用）。
+  文档里写 数字<!--dn:key--> 就把这个数绑到 	ools/doc_numbers.json 的来源上
+  （JSON 字段 / 求和 / 长度 / udit_numbers.py 字段）；来源一变 --check 就非零退出。
+  另有**零标注**模式 --scan：把无法追溯到来源的数字列出来。
+  落地当天就抓到两处漂移（测试文件 85→86、断言调用点 1,390→1,402）与一处
+  附录合计 κ（27,589,793 含了输入无效的 	opk）。
+- **	ools/real_false_reject.py**：在**真实样例**上量误拒率（四档阶：常数/线性/n log n/平方）。
+  实测 22 例：判对 17、**误拒 0、漏判 0**、判不出 5（E23 多尺寸量）。
+- **	ools/ablation.py**：现场生成分档表、复现「分段 vs max」那张表；
+  分档表**不提交**（测量产物，不该钉成事实）。
+- **`cost --diff=<git-ref>`**：**成本承诺的 diff**——比的是 κ 的**类别**，
+  不是毫秒数。三档：`L1`（阶变了）/ `L3`（只有常数变了）/ `不变`；
+  加 `--deny-regress` 则阶变差时退出 1（CI 用）。
+  只 diff **源码版本**（两端都用当前成本模型），不比实测、也不比模型版本
+  （后者归 `golden_check`）。`tests/cases/test_cost_diff.py` 覆盖。
+- **`--relax=R1|R2|R3|R4|R5`**：把 `设计-自由与严谨` 的五条限制**单条放开**
+  （R1 while 圈数、R2 递归 depth、R3 benchmodel/scale、R4 隐式转换［v0 无独立检查］、
+  R5 分配建模）。被放开的那条从 error 降为 warning，并在消息末尾标注。
+- **`tools/relax_sweep.py`**：六种配置 × 3 个故意违规语料，量「放开一条限制
+  会多出多少**不可证的通过**」。实测：R5 放开产生 1 例假阳性（承诺 0 分配却分配），
+  R1/R2 放开**不**产生假阳性（κ=⊤ 会被 `--deny-unknown` 接住）。
+  **已修**：`--relax=R5` 现在只豁免「未知（⊤ / 未建模）」，**不豁免已知超支**——
+  放宽开关的语义是"允许不知道"，不是"允许撒谎"。修后六种配置假阳性 0 例。
+  同时暴露一个洞：**只加 `--deny-debt` 时，κ=⊤ 的程序会通过**——CI 需同时加
+  `--deny-unknown`。
+- **`tools/false_reject.py`**：生成语料上的误拒/漏判率（4 族 × 20 变体 × 3 档 target）。
+  实测 55/55 判对，0 误拒 0 漏判。
+- **文档：`文档/入门/成本记账单位.md`** —— 解释器把什么算作「一个操作」：
+  表达式（每个节点 1 步、方法调用 `max(3, 2+实参)`、括号免费…）、
+  语句、控制流（`if` 取 max、循环每轮含 1 步记账）、函数固定 2 步；
+  附 κ 与实测的核对表，以及两处已知的 ±1 不对齐。
+- **文档：`文档/入门/命令一览.md`** —— 16 个子命令按目的分组（检查/成本/门禁/其它），
+  每个给一行用途、关键开关与例子；含 `--deny-debt`、`--deny-unknown`、`--variant=max`、
+  `export --full`、`tightness`、`ELENCH_STEP_BUDGET` 等新开关。
+- `elench --help` 补上遗漏的 `tightness` 子命令。
+- **`ELENCH_STEP_BUDGET`**：解释器的「疑似死循环」护栏（默认 500 万步）可用环境变量
+  放宽——大样例（`count` 在 n=4096 是 1.7e7 操作）会**正常**超过它。
+  默认值不调大：调大就等于取消护栏。
+- **`measure --max-size=N`**：把分档表的测量范围截到 N（表外按运行期回退），
+  否则大样例的测量会撞步数预算、直接不产出表。
+- **`export --full --variant=random`**：跳过最坏搜索、紧度按**典型**算——
+  这是 A3 消融的对照臂（默认仍是搜最坏的 `worst`）。
+- **`cost --variant=max`**：强制「所有候选取 max」（消融基线）。默认仍是
+  **分段上界**（运行期表同源）。实测对比：`count` 在 n=4096 上
+  分段 98,886 vs max 352,591,942（**3.57×10³ 倍**）；`sum.average` n=4096
+  57,372 vs 139,330（2.43×）。两条都仍 ≥ 最坏实测。
+- **`build --deny-unknown`**：把「无法判定」变成**拒绝构建**（CI 可用）。
+  默认仍放行（渐进采用），但「不知道」不再能被当成「没问题」。
+- **`W-Concurrency-Time`**（G25）：函数用了 `parallel`/`spawn` 且 spec 有 `time`
+  target 时给出警告——v0 的 κ 按**单线程语义**计，并发下的耗时与竞争不在承诺内。
+  `elench cost` 也会打同一行（看 cost 的人不一定看 check）。
+  `tests/cases/test_gate_dimensions.py` 覆盖。
 - **`elench tightness`**：多规模输出 `slack_typ`（κ ÷ 典型 ops）曲线，
   `--sizes` / `--runs` / `--out`（md/json/csv）/ `--format`；
   与 `tools/worstcase.py` 产物合用后多出 `ops_worst` / `slack_wc_ub` 两列。
@@ -38,6 +99,15 @@
   `语法清单` §6.1 补真实可跑的 `?!` 骨架。
 
 ### Changed
+- **文档/ 三桶分家**：目前设计/未做/（**排期中的任务**，入口 制作顺序.md）、
+  未来设计/（长期设计与分析，**不是待办**）、目前设计/未做/已归档/（做完的）。
+  同时刷新 文档/README.md 的目录图（结构版本 v3 → v4）并修掉两条早已失效的引用。
+- **`?!` 的承诺口径统一为「分段上界」**：有分档表时按运行期同一份表逐段取
+  「该段真正会跑的候选」的 κ；无表 / 单候选 → 退回「所有候选取 max」。
+  分段**只从运行期表读**（`load_dispatch_table`），不用静态 `plan()` 的最优分段——
+  两者不一致就重演 `-341` / `402 vs 733` / `426,001 vs 729,109` 那三次破界。
+  连带：`otel.series` 的承诺线（`static_bound`）改画分段值，
+  `static_promise_max_operations` 保留整函数 max 供对照；README 硬规则同步改写。
 - **κ 更紧：`while` 每轮固定记账 3 → 1**。条件表达式已经**整条**计进
   `cond_cost`，那 3 个操作是 E35 时代的补偿，之后变成**重复计数**：
   实测每轮 9 步、κ 记 14 步（1.46 倍）。改后每轮 12 步。
@@ -47,6 +117,22 @@
   golden 21 条全部重冻（14 条变化，均变小）、`gap` 静态交点 2716 → **2222**。
 
 ### Fixed
+- **测量器把「输入无效」当成了证据**：	opk(xs, 32) 在 n=16 上 k > n，函数立刻早退，
+  量到 14 个操作——论文却把它当 3,135 引用。kappa_vs_measured 现在检查
+  **benchmodel 里写成字面量的标量**是否超过规模，超过就单列「输入无效」而不是报步数。
+  影响：Table 7 从 10/10 变成 **9/9 + 1 行「输入无效」**，预印本 v0.3 已同步。
+- **	ools/audit_numbers.py 的统计口径是错的**：只扫 src/ 顶层，于是报
+  「测试 0 文件」「check( 15 处」「关键字 4 个」。改成递归扫 src/+	ests/、
+  从 lexer 取关键字真值后：**51 实现文件 / 18.5k SLOC、85 测试文件 / 11.5k SLOC、
+  1,390 处 check(、44 关键字（4 个已下线）**。论文里的数字只能从这里出。
+- **只给 `--deny-debt` 会漏掉 κ=⊤ 的程序**：新增一行提示，用 `--deny-debt` 而未用 `--deny-unknown` 时报告「另有 N 处无法判定未被拒绝；CI 请加 --deny-unknown」。
+- **门禁只看 time，allocation 违约放行**（H1）：`--deny-debt` 过去只比
+  `cost_of` vs `target_cost`，于是「声明 `allocation: {max:0}`、每轮都分配」
+  的程序 exit 0。现在**逐维判**：time 用 `compare`（按阶）、allocation 用
+  `compare_exact`（按数量）。
+- **常数 target 被误判成 unknown**（H3）：`target` 写成 `O(1)` 而 κ 含尺寸量时，
+  过去一律判 unknown —— 于是「声明 O(1)、实现 O(n)」**必然判不出**。
+  现在判 **debt**（随规模增长必然超阶）；分配维度同理（`max: 0` vs `n×1`）。
 - **`--full` 不再静默截断规模点**：以前先按 `≤4096` 砍大点、再"最多 6 个"抽稀，
   于是 `benchmodel.scale` 写 `range(1, 65536, *2)` 的 **17 个点只剩 6 个**。
   现在写几个测几个；限速/抽稀必须显式（`--max-size` / `--max-points`）。

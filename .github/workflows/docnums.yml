@@ -1,0 +1,53 @@
+name: docnums (C++)
+
+# 只有 `cpp/` 或清单变了才跑——这个工具只关心这两处。
+on:
+  push:
+    paths:
+      - 'cpp/**'
+      - 'tools/doc_numbers.json'
+      - '.github/workflows/docnums.yml'
+  pull_request:
+    paths:
+      - 'cpp/**'
+      - 'tools/doc_numbers.json'
+  workflow_dispatch:
+
+jobs:
+  build-and-parity:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        compiler: [default]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 构建（CMake）
+        run: |
+          cmake -S cpp/docnums -B cpp/docnums/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build cpp/docnums/build --config Release
+
+      - name: 构建（Makefile，仅 Linux/macOS）
+        if: runner.os != 'Windows'
+        run: |
+          make -C cpp/docnums clean all
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 与 Python 版对照（parity）
+        shell: bash
+        run: |
+          EXE=cpp/docnums/build/docnums
+          [ -f "$EXE.exe" ] && EXE="$EXE.exe"
+          python cpp/docnums/parity.py "$EXE"
+
+      - name: 自检（--list / --check）
+        shell: bash
+        run: |
+          EXE=cpp/docnums/build/docnums
+          [ -f "$EXE.exe" ] && EXE="$EXE.exe"
+          "$EXE" --list

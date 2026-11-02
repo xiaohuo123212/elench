@@ -1454,6 +1454,8 @@ def check_module(tu_src: str, ai_src: Optional[str], module: str = "<module>",
 
 
     # **§13.6 周边检查**：B-25 / B-26（parallel 与 ?!）
+    res.diagnostics.extend(_check_concurrency_cost(tu.module if tu else None,
+                                                   ai.module if ai is not None else None))
     res.diagnostics.extend(_check_parallel(tu.module if tu else None,
                                             ai.module if ai is not None else None))
 
@@ -1950,6 +1952,45 @@ def _check_parallel(tu_mod, ch_mod) -> List[Diag]:
                         "E-Parallel-Measured",
                         "候选里不能有 parallel：候选要能被隔离测量（B-26）",
                         d.line, d.col))
+    return diags
+
+
+def _check_concurrency_cost(tu_mod, ch_mod) -> List[Diag]:
+    """**G25（2026-11-02）**：有并发（`parallel`/`spawn`）的函数，其 `time` 契约
+    在 v0 里**不可证伪**。
+
+    为什么必须说出来：v0 **没有内存模型、没有竞争规则**，κ 按单线程语义累加。
+    于是"并发下实际耗时"与"承诺的 time 上界"之间没有可比关系——
+    审稿人第一个反例就是"你承诺 O(n)，但两个任务一起跑当然不同"。
+
+    我们不假装能判：给出**警告级**诊断，并在 `elench cost` 里同样打一行。
+    """
+    diags: List[Diag] = []
+    if ch_mod is None or tu_mod is None:
+        return diags
+    specs = {getattr(c, "name", ""): c for c in getattr(tu_mod, "children", []) or []
+             if getattr(c, "kind", "") == "spec"}
+    for fn in getattr(ch_mod, "children", []) or []:
+        if getattr(fn, "kind", "") not in ("func", "fn"):
+            continue
+        par = next((n for n in _all_nodes(fn) if n.kind in ("parallel", "spawn")), None)
+        if par is None:
+            continue
+        sp = specs.get(getattr(fn, "name", ""))
+        has_time = False
+        if sp is not None:
+            for c in getattr(sp, "children", []) or []:
+                if getattr(c, "kind", "") == "spec-body":
+                    for cl in getattr(c, "children", []) or []:
+                        if getattr(cl, "kind", "") == "clause" and (cl.name or "") == "target":
+                            has_time = any(getattr(d, "name", "") == "time"
+                                           for d in _all_nodes(cl))
+        if has_time:
+            diags.append(Diag(
+                "W-Concurrency-Time",
+                f"`{fn.name}` 使用并发，但 v0 的 time 契约按**单线程语义**计 κ；"
+                f"并发下的实际耗时/竞争不在承诺范围内（G25：无内存模型）",
+                par.line, par.col, severity="warning"))
     return diags
 
 

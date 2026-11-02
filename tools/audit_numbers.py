@@ -3,7 +3,7 @@
 # Copyright 2026 Elench contributors
 """audit_numbers.py —— **论文里的每个数字从哪来**（可复算，防漂移）
 
-论文写 `12.3k SLOC`、`58 套`、`924 处 check(`、`119/137` 这些数字时，
+论文写「实现 N 行 / 测试 M 套 / K 处断言」这类数字时，
 读者凭什么信？凭这个脚本：**同一份仓库、同一条命令、同一个口径**。
 
 用法：
@@ -35,13 +35,31 @@ def count_lines(path):
     return phys, nonempty, code
 
 
-def agg(pattern):
+def _py_files(root):
+    """`root` 下**递归**所有 .py（跳过 `__pycache__`）。"""
+    out = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+        for f in sorted(filenames):
+            if f.endswith(".py"):
+                out.append(os.path.join(dirpath, f))
+    return sorted(out)
+
+
+def agg(root, pattern, recursive=True):
+    """统计 `root` 下匹配 `pattern` 的 .py。
+
+    **必须递归**：实现有 `src/cost_domain/`、测试在 `tests/cases/`。
+    只扫顶层会得出"测试 0 文件"这种结论（2026-11-03 修）。
+    """
     phys = nonempty = code = 0
     files = 0
-    for f in sorted(os.listdir(SRC)):
-        if not re.match(pattern, f):
+    paths = _py_files(root) if recursive else [
+        os.path.join(root, f) for f in sorted(os.listdir(root))]
+    for path in paths:
+        if not re.match(pattern, os.path.basename(path)):
             continue
-        p, n, c = count_lines(os.path.join(SRC, f))
+        p, n, c = count_lines(path)
         phys += p
         nonempty += n
         code += c
@@ -50,12 +68,21 @@ def agg(pattern):
 
 
 def keywords():
-    """KEYWORDS 表里真正被识别的关键字个数（扣掉 eof/ident 这类内部 token）。"""
-    t = open(os.path.join(SRC, "lexer.py"), encoding="utf-8").read()
-    m = re.search(r"KEYWORDS = \{(.*?)\n\}", t, re.S)
-    body = m.group(1) if m else ""
-    entries = re.findall(r"^\s+\"([a-z_]+)\":", body, re.M)
-    return len(entries), entries
+    """真正被识别的关键字个数。
+
+    **不要用正则去数 `KEYWORDS = {...}` 的字面量**：v0.68 之后它是
+    `{k.value: k for k in Kind if ...}`（从枚举生成），正则只能数到 4 行。
+    直接 import 拿真值，同时把"已下线的关键字"也报出来。
+    """
+    if SRC not in sys.path:
+        sys.path.insert(0, SRC)
+    try:
+        import lexer                                    # noqa: E402
+        live = sorted(lexer.KEYWORDS)
+        dead = sorted(getattr(lexer, "REMOVED_KEYWORDS", {}) or {})
+        return len(live), live, dead
+    except Exception:                                   # noqa: BLE001
+        return 0, [], []
 
 
 def subcommands():
@@ -66,11 +93,14 @@ def subcommands():
 
 
 def assertions():
+    """`check(` 调用点：**数测试目录**，不是数实现。
+
+    实现里的 `check(` 是函数调用（`check_files` 之类），测试里的才是断言。
+    """
     total = 0
-    for f in os.listdir(SRC):
-        if f.endswith(".py"):
-            with open(os.path.join(SRC, f), encoding="utf-8", errors="replace") as fh:
-                total += fh.read().count("check(")
+    for path in _py_files(os.path.join(R, "tests")):
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            total += fh.read().count("check(")
     return total
 
 
@@ -84,9 +114,9 @@ def sample_lines():
 
 
 def main():
-    impl = agg(r"^(?!test_).*\.py$")
-    tests = agg(r"^test_.*\.py$")
-    kw_n, kw = keywords()
+    impl = agg(SRC, r"^(?!test_).*\.py$")
+    tests = agg(os.path.join(R, "tests"), r"^test_.*\.py$")
+    kw_n, kw, kw_dead = keywords()
     subs = subcommands()
     data = {
         "implementation_files": impl["files"],
@@ -98,6 +128,7 @@ def main():
         "test_nonempty": tests["nonempty"],
         "test_code": tests["code"],
         "keywords_total": kw_n,
+        "keywords_removed": kw_dead,
         "check_call_sites": assertions(),
         "subcommands": subs,
         "sample_lines": sample_lines(),
@@ -113,7 +144,8 @@ def main():
     print(f"  测试：{tests['files']:>3} 文件  "
           f"物理 {tests['physical']:>6}  非空 {tests['nonempty']:>6}  "
           f"代码行 {tests['code']:>6}  ≈ {tests['code']/1000:.1f}k SLOC")
-    print(f"  关键字：{kw_n} 个 token 条目（含内部 token；净关键字 {kw_n - 2}）")
+    print(f"  关键字：{kw_n} 个（已下线仍需词法识别的：{len(kw_dead)} 个 → "
+          f"{' '.join(kw_dead) if kw_dead else '无'}）")
     print(f"  check( 调用点：{data['check_call_sites']}")
     print(f"  子命令（分派表）：{len(subs)} 个 → {' '.join(subs)}")
     print()

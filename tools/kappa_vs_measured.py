@@ -139,6 +139,7 @@ def measure_one(prog, n, runs, args_override=None):
             _bm = None
 
         acts, ops_seen, err = [], [], None
+        allocs_seen = []
         for seed in range(1, runs + 1):
             args = []
             if _bm is not None and args_override is None:
@@ -176,6 +177,8 @@ def measure_one(prog, n, runs, args_override=None):
                     it.call(fn, fixed)
                 acts.append(it.counters()["evaluation_steps"])
                 ops_seen.append(it.counters().get("operations", 0))
+                _al = it.counters().get("allocations", 0)
+                allocs_seen.append(_al)
             except Exception as exc:                       # noqa: BLE001
                 err = f"{type(exc).__name__}: {exc}"
                 break
@@ -183,6 +186,34 @@ def measure_one(prog, n, runs, args_override=None):
         if not acts:
             rows.append({"program": prog, "function": fn, "error": err,
                          "kappa": kappa.render()})
+            continue
+
+        # **输入有效性检查**：标量实参大于容器规模时，函数往往立刻返回错误——
+        # 这时量到的步数是"早退"，不是"这个函数的成本"。报出来会让读者以为
+        # 我们测过了（`topk(xs, 32)` 在 n=16 上就是这种）。
+        _has_vec = any(isinstance(a, (list, tuple)) for a in args)
+        # 只有**字面量标量**（benchmodel 里写 `k = 32;` 那种）才可能是"计数"；
+        # `any_of(xs)` 造出来的是**值**（search 的 key），比 n 大很正常。
+        _lits = set()
+        if _bm is not None:
+            _data, _sized, _seed0 = _bm
+            _pnames = [p.name for p in (params.children if params else [])]
+            for _pn, _gen in (_data or {}).items():
+                if str(_gen).startswith("#"):
+                    _lits.add(_pn)
+            _lit_values = {_data[_pn] for _pn in _lits}
+        else:
+            _pnames, _lit_values = [], set()
+        _bad_scalar = [a for a in args
+                       if _has_vec and isinstance(a, int)
+                       and not isinstance(a, bool) and a > n
+                       and f"#{a}" in _lit_values]
+        if _bad_scalar:
+            rows.append({
+                "program": prog, "function": fn,
+                "kappa": kappa.render(),
+                "invalid": f"标量实参 {_bad_scalar} > 规模 n={n}（早退，输入无效）",
+            })
             continue
 
         # **关键**：κ 里的每个变量都要用"真实实参"代入，不能一律填 n。
@@ -206,10 +237,24 @@ def measure_one(prog, n, runs, args_override=None):
                 if _tgt is not None else None
         except Exception:                                  # noqa: BLE001
             _tv = None
+        _ak = ci.alloc_of(fn)
+        try:
+            _akv = float(evaluate(_ak, {v: _env.get(v, n) for v in _ak.variables()}))
+        except Exception:                                  # noqa: BLE001
+            _akv = None
+        _at = ci.target_cost(fn, "allocation")
+        try:
+            _atv = float(evaluate(_at, {v: _env.get(v, n) for v in _at.variables()})) \
+                if _at is not None else None
+        except Exception:                                  # noqa: BLE001
+            _atv = None
         rows.append({
             "program": prog, "function": fn,
             "kappa": kappa.render(), "kappa_at_n": kv,
             "target_at_n": _tv,
+            "allocs_max": max(allocs_seen) if allocs_seen else 0,
+            "alloc_kappa_at_n": _akv,
+            "alloc_target_at_n": _atv,
             "max_actual": max(acts), "min_actual": min(acts),
             "runs": len(acts),
             "holds": kv >= max(acts),
@@ -224,6 +269,10 @@ def render_md(rows, n, runs):
            "| 程序 | 函数 | κ(n) | max 实测 | min 实测 | κ ≥ max |",
            "|---|---|---|---|---|---|"]
     for r in rows:
+        if r.get("invalid"):
+            out.append(f"| `{r['program']}` | `{r['function']}` | — | 输入无效 | — | "
+                       f"{r['invalid'][:40]} |")
+            continue
         if "error" in r:
             out.append(f"| `{r['program']}` | `{r['function']}` | — | 跑不了 | — | "
                        f"{r['error'][:40]} |")

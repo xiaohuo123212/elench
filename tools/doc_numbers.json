@@ -1,0 +1,32 @@
+{
+  "_comment": "文档数字绑定清单。key → 来源；文档里用 `数字<!--dn:key-->` 绑定。",
+  "_docs": ["文档/其他/预印本/预印本-v0.1.md"],
+  "kappa_total_n16": {
+    "type": "sum",
+    "file": "文档/其他/预印本/table7.json",
+    "path": "rows",
+    "field": "kappa_at_n"
+  },
+  "kappa_evaluate_n16": {
+    "type": "field",
+    "file": "文档/其他/预印本/table7.json",
+    "path": "rows.0.kappa_at_n"
+  },
+  "table7_rows": {
+    "type": "count",
+    "file": "文档/其他/预印本/table7.json",
+    "path": "rows"
+  },
+  "impl_sloc": {
+    "type": "audit",
+    "field": "implementation_code"
+  },
+  "test_files": {
+    "type": "audit",
+    "field": "test_files"
+  },
+  "check_calls": {
+    "type": "audit",
+    "field": "check_call_sites"
+  }
+}

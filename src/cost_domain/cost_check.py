@@ -184,8 +184,11 @@ def compare_exact(impl: Optional[Cost], target: Optional[Cost]) -> Verdict:
         return Verdict("debt", ratio=(float(impl.value) / target.value) if target.value else None,
                        note=f"分配 {impl.value} 次 > target 的 {target.value} 次")
     if target.is_const() and not impl.is_const():
-        return Verdict("unknown",
-                       note=f"分配上界含符号（{impl.render()}），推不出是否 ≤ {target.value}")
+        # **H3（分配维度）**：target 是常数（例如 `max: 0`）而分配上界带符号
+        # （例如 `n(xs)×1`）→ 规模一大就超过任何常数，判 debt。
+        # 以前判 unknown，于是"承诺 0 次分配、实际每轮分配"能过门禁。
+        return Verdict("debt", note=(f"分配上界 {impl.render()} 随规模增长，"
+                                     f"而 target 是常数 {target.value} 次"))
     return compare(impl, target)
 
 
@@ -218,6 +221,15 @@ def compare(impl: Optional[Cost], target: Optional[Cost]) -> Verdict:
         return Verdict("ok", ratio=(a / b) if b else None,
                        note="κ 是常数（不含尺寸量），任何阶的 target 都满足")
     if ci != ct:
+        # **H3（2026-11-02）**：target 写成常数（O(1)）而 κ 含尺寸量时，
+        # 过去一律判 unknown —— 于是"声明 O(1)、实现 O(n)"**必然判不出**。
+        # 但这不是判不出：任何随规模增长的量都 ≰ O(1)，判 debt 即可。
+        if not ct:
+            rs0 = _ratios(impl, target, vs[0])
+            return Verdict("debt", multi=multi,
+                           ratio=(rs0[-1] if rs0 else None),
+                           note=("target 是常数（O(1)），而 κ 含尺寸量 "
+                                 + "、".join(sorted(ci)) + "：随规模增长必然超阶"))
         rs0 = _ratios(impl, target, vs[0])
         extra = f"；若假设所有尺寸同阶，比值约 {rs0[-1]:.2f}（仅供参考，不作判定）" if rs0 else ""
         return Verdict("unknown", multi=multi,

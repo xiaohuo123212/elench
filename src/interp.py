@@ -452,10 +452,19 @@ class _Return(Exception):
 
 class Interp:
     def __init__(self, impl_mod: Node, decl_mod: Optional[Node] = None,
-                 budget: int = 5_000_000, table_path: Optional[str] = None,
+                 budget: int = None, table_path: Optional[str] = None,
                  parallel: str = "seq"):
         self.impl = impl_mod
         self.decl = decl_mod
+        # **步数预算**：默认 500 万步当作"疑似死循环"的护栏。
+        # 大样例（`count` 在 n=4096）会正常超过它 —— 用
+        # `ELENCH_STEP_BUDGET=20000000` 放宽，而不是把默认值调大
+        # （默认调大就等于取消了死循环护栏）。
+        if budget is None:
+            try:
+                budget = int(os.environ.get("ELENCH_STEP_BUDGET", "5000000"))
+            except ValueError:
+                budget = 5_000_000
         self.budget = budget
         # **运行期按表选候选**（2026-10-30 用户决定，方案甲）
         self.table_path = table_path

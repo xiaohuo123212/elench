@@ -45,3 +45,9 @@ build/
 
 # 根目录的临时计划（内部材料），只留本地
 /临时计划-*.md
+
+# C++ 构建产物（cpp/docnums）
+cpp/docnums/build/
+cpp/docnums/build-cmake/
+*.o
+*.obj

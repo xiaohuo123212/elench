@@ -95,7 +95,7 @@ def series(impl_cost: Cost, sizes: List[int], measured: Dict[int, float],
 
     | 线 | 是什么 | 和实测比有意义吗 |
     |---|---|---|
-    | `static_bound` | **承诺**：`?!` 取所有候选的最大值 | **不能直接比斜率**——承诺按最坏候选给，实测是单个候选 |
+    | `static_bound` | **承诺**：`?!` 的**分段上界**（每段取该段候选的 κ；无表退回 max） | **能比大小**——分段与运行期同源，实测应落在它下方 |
     | `static_candidate` | **被测那个候选自己的 κ** | **能比**——同口径，比值该平稳 |
 
     **这是本轮发现的一个易错点**：拿"承诺"和"单候选实测"画一起，
@@ -111,12 +111,11 @@ def series(impl_cost: Cost, sizes: List[int], measured: Dict[int, float],
     每条 row 都带 `"unit"`，下游（CSV / SVG / OTLP）据此决定列名、标签与是否归一化——
     **单位是数据的一部分，不是渲染时的猜测。**
 
-    **操作数模式为什么蓝线取整函数 κ**：同一个单位下蓝线就是判据线
-    （"实测线在承诺线下方才合法"）。逐段最优只是**对实际会跑哪个候选的预测**，
-    它比整函数承诺更紧，可能被实测超过（`gap` 的 `by_scan_heavy`：逐段 κ 402，
-    实测 733 操作）。**预测被超过不等于承诺被超过**——所以预测仍画出来
-    （`static_piecewise`），但不能拿它当判据。纳秒模式保留原行为（逐段最优），
-    因为那里比的是斜率，不是大小。
+    **为什么蓝线取分段上界（2026-11-02 定口径）**：判据线必须与
+    `cost_interp._dispatch` 判的那条一致——有分档表时承诺逐段取「该段真正会跑的
+    候选」的 κ。只画 max 会和门禁判定**不同源**：门禁放行、图上却显示超界（或反之）。
+    没有分段（无表 / 单候选 / 无 benchmodel）→ 退回 max，与 `_dispatch` 的退化路径一致。
+    `static_promise_max` 仍保留整函数 max，供对照。
     """
     from cost_check import evaluate
 
@@ -134,7 +133,15 @@ def series(impl_cost: Cost, sizes: List[int], measured: Dict[int, float],
         # 逐段值另有 `static_piecewise` 一列（橙虚线），不必占用承诺的位置。
         k_max = evaluate(impl_cost, {var: n})
         k_seg = (piecewise or {}).get(n)
-        k = k_max
+        # **承诺 = 分段上界（piecewise），不是 max**（2026-11-02 定口径）。
+        #
+        # 判据线必须与 `cost_interp._dispatch` 判的那条一致：
+        # 有分档表时承诺按段取「该段真正会跑的那个候选」的 κ。
+        # 只画 max 会和门禁判定不同源——门禁放行、图上却显示超界（或反之）。
+        #
+        # 没有分段（无表 / 单候选 / 无 benchmodel）→ k_seg is None → 退回 max，
+        # 这与 `_dispatch` 的退化路径一致（它是 sound 的，只是松）。
+        k = k_seg if k_seg is not None else k_max
         c = evaluate(candidate_cost, {var: n}) if candidate_cost is not None else None
         m = measured.get(n) if measured else None
         out.append({

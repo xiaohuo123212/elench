@@ -57,6 +57,9 @@ USAGE = """elench —— 成本契约语言 Elench 的工具链（v0.70-M1）
     stats     <模块> <函数> [--ops] 跑一次：调用数 / 分配数 / 迭代数 / **操作数**
                                   --ops：打开操作数计数并输出 JSON（与 κ 同单位）
     bench     <模块> <函数>       单函数隔离测量（只给判定与比值，不做全量统计）
+    tightness <模块> [--sizes=16,64,256] [--runs=5] [--format=md|json|csv] [--out=文件]
+                                  紧度曲线：κ / ops_typ / slack_typ / ops_worst / slack_wc_ub
+
     export    <模块> [--format=table|otlp|svg|csv] [--out=文件] [--function=名] [--timing]
                                   导出「静态上界 vs 实测」（默认实测=**操作数**，与 κ 同单位）
                                   --timing：实测改成纳秒（不同单位，图会各自归一化）
@@ -211,7 +214,8 @@ def _otel_flush():
         pass
 
 
-def _cost_interp(ch_mod, tu_mod, tu_p: Optional[str] = None):
+def _cost_interp(ch_mod, tu_mod, tu_p: Optional[str] = None,
+                 force_max: bool = False):
     """构造 CostInterp：**有分档表就按段取上界**（默认行为，2026-10-31 起）。
 
     没有表 → 自动退回"全候选取 max"（保守但不需要任何外部文件）。
@@ -224,7 +228,7 @@ def _cost_interp(ch_mod, tu_mod, tu_p: Optional[str] = None):
     # 循环每轮 3 个操作 + 方法调用 3 个操作之后，`count` 的逐段上界在
     # n = 16 / 64 / 256 / 512 / 1024 上全部 ≥ 实测（evaluation_steps）。
     path = None
-    if tu_p:
+    if tu_p and not force_max:
         cand = _tbl_for(tu_p)
         if os.path.exists(cand):
             path = cand
@@ -422,7 +426,52 @@ def _expand_module_args(args):
     return args
 
 
-def _diagnose_all(tu, ai, strict: bool = False, overflow: str = "off"):
+#: **R1–R5 放宽开关** → 被降级为 warning 的诊断码。
+#:
+#: 这些是"设计-自由与严谨"里那 5 条限制的**单因素放开**，用来量
+#: "放开一条限制会多出多少假阳性"。**默认全关**（一条都不放宽）。
+#:
+#: | 开关 | 放开的限制 | 被降级的诊断 |
+#: |---|---|---|
+#: | `R1` | while 圈数必须可推 | `E-While-NoBound` |
+#: | `R2` | 递归必须声明 depth | `E-Recursion-Unbounded` |
+#: | `R3` | 必须声明 benchmodel/scale | `E-Bench-NoModel`、`E-Bench-MissingScale` |
+#: | `R4` | 无隐式转换/重载 | **没有对应诊断**（v0 由类型系统本身保证，无开关） |
+#: | `R5` | 分配必须建模 | `alloc` 维度的 unknown（在门禁层处理） |
+RELAX_CODES = {
+    "R1": {"E-While-NoBound"},
+    "R2": {"E-Recursion-Unbounded"},
+    "R3": {"E-Bench-NoModel", "E-Bench-MissingScale"},
+    # R4（隐式转换/重载）在 v0 里不是一条独立诊断——类型系统本身保证，无开关；
+    # 保留空集只为让 `--relax=R4` 被"认得但无害"。
+    "R4": set(),
+    # R5（分配建模）不降级任何诊断，而是在**门禁层**跳过 allocation 维度。
+    "R5": set(),
+}
+
+
+def _relax_names(relax) -> set:
+    """`--relax=R1,R5` → {"R1","R5"}（原样保留，供门禁层判断）。"""
+    out: set = set()
+    for item in (relax or []):
+        for part in str(item).split(","):
+            _p = part.strip().upper()
+            if _p:
+                out.add(_p)
+    return out
+
+
+def _relax_codes(relax) -> set:
+    """把 `--relax=R1,R3` 解析成"要降级的诊断码集合"。"""
+    out: set = set()
+    for item in (relax or []):
+        for part in str(item).split(","):
+            out |= RELAX_CODES.get(part.strip().upper(), set())
+    return out
+
+
+def _diagnose_all(tu, ai, strict: bool = False, overflow: str = "off",
+                  relax=None):
     """**唯一的检查入口**：`check` / `run` / `build` 都走这里。
 
     以前 `check` 与 `build` 各写一套：`build` 只调 `check_module`、**不跑类型检查**，
@@ -431,6 +480,14 @@ def _diagnose_all(tu, ai, strict: bool = False, overflow: str = "off"):
     """
     from checker import Diag, check_files
     res = check_files(tu, ai, strict=strict, overflow=overflow)
+    # **放宽**：把指定诊断的 severity 从 error 降成 warning。
+    # 注意这里只改**severity**，不改消息——读者仍能看见"这条限制被放开了"。
+    _rc = _relax_codes(relax)
+    if _rc:
+        for _d in res.diagnostics:
+            if _d.code in _rc and _d.severity == "error":
+                _d.severity = "warning"
+                _d.message = _d.message + "　（已按 --relax 放宽为警告）"
     if not any(d.severity == "error" for d in res.diagnostics):
         try:
             from parser import parse_source as _ps
@@ -476,7 +533,8 @@ def cmd_check(argv: List[str]) -> int:
         print(f"✗ 找不到 {paths[0]}（试过：原样、+.tu、+.eln、仓库样例目录）", file=sys.stderr)
         return 2
 
-    res = _diagnose_all(tu, ai, strict=strict, overflow=overflow)
+    _relax = [a.split("=", 1)[1] for a in argv if a.startswith("--relax=")]
+    res = _diagnose_all(tu, ai, strict=strict, overflow=overflow, relax=_relax)
 
     if as_json:
         print(json.dumps(res.to_dict(), ensure_ascii=False, indent=2))
@@ -1002,7 +1060,7 @@ def cmd_header(argv: List[str]) -> int:
     if not _table_covers_declared(tu_mod, tu_p,
                                   strict=("--strict-coverage" in argv)):
         return 1
-    ci = _cost_interp(ch_mod, tu_mod, tu_p)
+    ci = _cost_interp(ch_mod, tu_mod, tu_p, force_max=("--variant=max" in argv))
     eff = _ck.function_effects(tu_mod, ch_mod)
 
     guard = os.path.basename(tu_p).rsplit(".", 1)[0].upper() + "_H"
@@ -1212,14 +1270,15 @@ def cmd_cost(argv: List[str]) -> int:
                                   strict=("--strict-coverage" in argv)):
         return 1
 
-    ci = _cost_interp(ch_mod, tu_mod, tu_p)
-    # **承诺口径（2026-11-01 定）**：承诺 κ = `max over candidates` 的**符号式**，
-    # 与分档表无关——表只决定运行期跑哪个候选，不参与"承诺多少"。
+    ci = _cost_interp(ch_mod, tu_mod, tu_p, force_max=("--variant=max" in argv))
+    # **承诺口径（2026-11-02 定）**：承诺 κ = **分段上界**（piecewise）——
+    # 每段用运行期真正会跑的那个候选的符号式；分段取自运行期同一份 `.dispatch.yaml`。
+    # 无表 / 单候选 → 退回 `max over candidates`（sound，只是松）。
     #
-    # 曾经这里分两档（有表就按逐段上界），实测（`gap`，表只覆盖 8..4096）暴露三件事：
-    #   ① 蓝线是一条水平线；② 真拐点（n≈2,715）被抹掉；
-    #   ③ 表范围外破界（n=8192：承诺 426,001，实测 729,109）。
-    # 原因只有一个：**表在替公式做决定**。
+    # **前提是 S2 同源**：分段必须来自运行期读的那张表，不能用 `segment_plan` 的静态交点切
+    # （两次计算会给出两个分区）。实测踩过三次：
+    #   `search.binary_search` 余量 -341；`gap` 逐段 402 / 实测 733；
+    #   表外 n=8192 承诺 426,001 / 实测 729,109。
     print("  （口径：承诺 = 分段函数——每段用**运行期真正会跑的那个候选**的符号式；"
           "分段取自运行期同一份分档表，越界按运行期的回退；没有表时退回 max）")
 
@@ -1262,7 +1321,36 @@ def cmd_cost(argv: List[str]) -> int:
             print(json.dumps(out, ensure_ascii=False, indent=2))
         return 0
 
+    # **成本 diff**：`--diff=<ref>` 只比承诺 κ（不比实测），见 src/cost_diff.py
+    _dref = next((a.split("=", 1)[1] for a in argv if a.startswith("--diff=")), None)
+    if _dref:
+        import cost_diff as _cd
+        _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        _rows, _err = _cd.diff(tu_p, ch_p, _dref, _root)
+        if _err:
+            print(f"✗ {_err}", file=sys.stderr)
+            return 2
+        print(_cd.render(_rows, _dref))
+        if "--deny-regress" in argv:
+            _bad = [r for r in _rows if r["kind"] == "L1" and (r.get("ratio") or 0) > 1.0]
+            if _bad:
+                print(f"\n✗ 拒绝：{len(_bad)} 个函数的成本阶变差（--deny-regress）："
+                      + ", ".join(r["function"] for r in _bad), file=sys.stderr)
+                return 1
+        return 0
+
     print(f"module {os.path.basename(tu_p).rsplit('.', 1)[0]}")
+    # **G25**：并发函数的时间契约不可证伪——看见就说明白，别让人以为 κ 覆盖了并发
+    try:
+        _conc = [n.name for n in getattr(ch_mod, "children", []) or []
+                 if getattr(n, "kind", "") in ("func", "fn")
+                 and any(x.kind in ("parallel", "spawn")
+                         for x in (_all_nodes(n)))]
+        if _conc:
+            print(f"  ⚠ 并发：{', '.join(sorted(set(_conc)))} 使用 parallel/spawn；"
+                  f"v0 的 κ 按**单线程语义**计，并发下的耗时与竞争不在承诺范围内（G25）")
+    except Exception:                                  # noqa: BLE001
+        pass
     # **批次 S**：`assume` 是"可撒谎位置"，报告 MUST 把它印出来。
     if getattr(ci, "assumptions", None):
         for k, v in sorted(ci.assumptions.items()):
@@ -1404,7 +1492,7 @@ def cmd_dispatch(argv: List[str]) -> int:
         print("没有实现文件，无法规划分档", file=sys.stderr)
         return 2
 
-    ci = _cost_interp(ch_mod, tu_mod, tu_p)
+    ci = _cost_interp(ch_mod, tu_mod, tu_p, force_max=("--variant=max" in argv))
     sizes, lo, hi = _scale_range(tu_mod)
     if lo is None:
         print("没有 benchmodel.scale，无法确定实际输入范围", file=sys.stderr)
@@ -1529,8 +1617,16 @@ def cmd_measure(argv: List[str]) -> int:
 
     tu_mod = parse_source(io_read(tu_p), os.path.basename(tu_p)).module
     ch_mod = parse_source(io_read(ch_p), os.path.basename(ch_p)).module
-    ci = _cost_interp(ch_mod, tu_mod, tu_p)
+    ci = _cost_interp(ch_mod, tu_mod, tu_p, force_max=("--variant=max" in argv))
     sizes_by_param, lo, hi = _scale_range(tu_mod)
+    # **`--max-size`**：大样例（`count` 在 n=4096 是 1.7e7 操作）会让测量撞步数预算，
+    # 直接失败、不产出表。允许把表的覆盖范围截到 N，表外按运行期回退处理。
+    for _a in argv:
+        if _a.startswith("--max-size="):
+            _ms = int(_a.split("=", 1)[1])
+            sizes_by_param = {k: [x for x in v if x <= _ms] or v[:1]
+                              for k, v in sizes_by_param.items()}
+            hi = min(hi, _ms)
     if not sizes_by_param:
         print("没有 benchmodel.scale，无法确定测量点", file=sys.stderr)
         return 2
@@ -1692,7 +1788,9 @@ def cmd_stats(argv: List[str]) -> int:
         return 2
     tu_mod = parse_source(io_read(tu_p), os.path.basename(tu_p)).module
     ch_mod = parse_source(io_read(ch_p), os.path.basename(ch_p)).module
-    it = Interp(ch_mod, tu_mod)
+    # **必须传分档表**：承诺（piecewise）按这张表切；运行期不读表就会退回
+    # 第一个候选 → 承诺与运行不同源 → 系统性破界（实测过 -341 / 逐段 402 实测 733）。
+    it = Interp(ch_mod, tu_mod, table_path=_tbl_for(tu_p))
 
     args = []
     for a in rest:
@@ -1785,6 +1883,10 @@ def cmd_export(argv: List[str]) -> int:
         _pos = []
         _out = None
         _split = "--split" in argv
+        _variant = "worst"
+        for _a in argv:
+            if _a.startswith("--variant="):
+                _variant = _a.split("=", 1)[1]
         for _a in argv:
             if _a.startswith("--sizes="):
                 _sizes = [int(x) for x in _a.split("=", 1)[1].split(",") if x.strip()]
@@ -1806,7 +1908,7 @@ def cmd_export(argv: List[str]) -> int:
             elif _a.startswith("--max-points="):
                 _maxp = int(_a.split("=", 1)[1])
         return _full_report(_pos[0], _sizes, _runs, out_path=_out, split=_split,
-                            max_size=_max, max_points=_maxp)
+                            max_size=_max, max_points=_maxp, variant=_variant)
 
     from bench import measure, measure_ops
     from bound import _descendants
@@ -1852,7 +1954,7 @@ def cmd_export(argv: List[str]) -> int:
     if not _table_covers_declared(tu_mod, tu_p,
                                   strict=("--strict-coverage" in argv)):
         return 1
-    ci = _cost_interp(ch_mod, tu_mod, tu_p)
+    ci = _cost_interp(ch_mod, tu_mod, tu_p, force_max=("--variant=max" in argv))
 
     # 只导出一个函数：用 --function= 指定，否则取第一个 public 有 target 的
     fn_name = None
@@ -1954,10 +2056,14 @@ def cmd_export(argv: List[str]) -> int:
     # **κ分段**：按 plan 的段，逐点取该段候选的 κ（与实测同口径）。
     # 没有表 → piecewise=None → 渲染退化为「候选」口径，并标注是静态计划。
     _pw = {}
-    if label and segments and _size_var(cands):
+    if label and _has_tbl and _size_var(cands):
+        # **分段必须取自运行期那份表**（S2 同源）：静态 plan() 算的是"模型最优分段"，
+        # 它和表可以不一致（真机常数不同）。用 plan() 画承诺 = 承诺与运行不同源。
+        from interp import load_dispatch_table
+        _tb = (load_dispatch_table(_tbl_for(tu_p)) or {}).get(label) or []
         from cost_check import evaluate as _ev2
         for _n in pts:
-            for _lo, _hi, _who in segments:
+            for _lo, _hi, _who in _tb:
                 if _lo <= _n <= _hi and _who in cands:
                     try:
                         _pw[_n] = _ev2(cands[_who], {_size_var(cands): _n})
@@ -2092,7 +2198,8 @@ def cmd_bench(argv: List[str]) -> int:
 
     tu_mod = parse_source(io_read(tu_p), os.path.basename(tu_p)).module
     ch_mod = parse_source(io_read(ch_p), os.path.basename(ch_p)).module
-    interp = Interp(ch_mod, tu_mod)
+    # 同上：bench 测的是「运行期真正会跑的那个候选」，必须读同一张表。
+    interp = Interp(ch_mod, tu_mod, table_path=_tbl_for(tu_p))
     fns = interp.fns
 
     # **I/O 不再阻测**：照常测，测完把 I/O 的耗时**摘出来**单独报
@@ -2189,7 +2296,8 @@ def _gate_checks(tu_p, ch_p, argv) -> bool:
     if "--no-check" in argv:
         print("⚠ --no-check：跳过静态检查（仅供调试，输出**不可信**）")
         return True
-    r = _diagnose_all(tu_p, ch_p if (ch_p and os.path.exists(ch_p)) else None)
+    r = _diagnose_all(tu_p, ch_p if (ch_p and os.path.exists(ch_p)) else None,
+                      relax=[a.split("=", 1)[1] for a in argv if a.startswith("--relax=")])
     errs = [d for d in r.diagnostics if d.severity == "error"]
     if errs:
         print(f"✗ 未通过：{len(errs)} 条错误（先修完再 run/build）", file=sys.stderr)
@@ -2242,7 +2350,7 @@ def cmd_run(argv: List[str]) -> int:
     _prog_args = [a.split("=", 1)[1] for a in argv if a.startswith("--arg=")]
     import stdlib as _stdlib_args
     _stdlib_args.set_prog_args(_prog_args)
-    it = Interp(ch_mod, tu_mod, parallel=_par)
+    it = Interp(ch_mod, tu_mod, parallel=_par, table_path=_tbl_for(tu_p))
     if fn_name not in it.fns:
         print(f"✗ 找不到函数 {fn_name}（模块里有：{', '.join(sorted(it.fns)) or '无'}）",
               file=sys.stderr)
@@ -2442,7 +2550,7 @@ def cmd_build(argv: List[str]) -> int:
              "state": "incomplete" if pending else "complete",
              "functions": {}}
     if ch_mod is not None:
-        ci = _cost_interp(ch_mod, tu_mod, tu_p)
+        ci = _cost_interp(ch_mod, tu_mod, tu_p, force_max=("--variant=max" in argv))
         for name in ci.fns:
             try:
                 c = ci.cost_of(name)
@@ -2483,21 +2591,61 @@ def cmd_build(argv: List[str]) -> int:
     # **--deny-debt**：把"债务只记录"改成"债务即拒绝"。
     # 规格 L2450 的默认语义是**记录不阻断**（为了渐进采用），
     # 但发布 / CI 需要"不满足就拒绝编译"——那是同一套计算，只是把结论当门禁用。
-    if "--deny-debt" in argv:
-        from cost_check import compare as _cmp
-        _debt = []
+    if ("--deny-debt" in argv) or ("--deny-unknown" in argv):
+        # **H1（2026-11-02）**：过去只比 time，`allocation: {max:0}` + 每轮分配
+        # 的程序照样 exit 0。门禁必须**逐个维度**判：time 用 compare（按阶），
+        # allocation 用 compare_exact（按数量）。
+        from cost_check import compare as _cmp, compare_exact as _cmpe
+        _debt, _unknown = [], []
         for _n in ci.fns:
+            _dims = []
             try:
-                _c = ci.cost_of(_n)
+                _dims.append(("time", _cmp(ci.cost_of(_n), ci.target_cost(_n))))
             except Exception:                          # noqa: BLE001
-                continue
-            if _cmp(_c, ci.target_cost(_n)).kind == "debt":
-                _debt.append(_n)
-        if _debt:
-            print(f"✗ 拒绝构建：{len(_debt)} 个函数超出 target（--deny-debt）："
+                _dims.append(("time", None))
+            # **R5 放宽**：不要求建模分配 ⇒ 允许该维度"未知"。
+            # 但**已知超支（debt）仍然拒绝**——放宽的是"要不要建模"，
+            # 不是"能不能超"。把能算出来的 debt 也摘掉 = 假阳性。
+            try:
+                _av = _cmpe(ci.alloc_of(_n), ci.target_cost(_n, "allocation"))
+            except Exception:                          # noqa: BLE001
+                _av = None
+            if _av is not None:
+                _r5 = "R5" in _relax_names([a.split("=", 1)[1] for a in argv
+                                            if a.startswith("--relax=")])
+                if not (_r5 and _av.kind == "unknown"):
+                    _dims.append(("alloc", _av))
+            for _dim, _v in _dims:
+                if _v is None:
+                    continue
+                # **没有该维度的 target ⇒ 不适用**（没承诺就不用守），
+                # 不能算成 unknown——否则每个没写 allocation 的函数都会被拒绝。
+                if ci.target_cost(_n, "allocation" if _dim == "alloc" else "time") is None:
+                    continue
+                if _v.kind == "debt":
+                    _debt.append(f"{_n}[{_dim}]")
+                elif _v.kind == "unknown":
+                    _unknown.append(f"{_n}[{_dim}]")
+        if ("--deny-debt" in argv) and _debt:
+            print(f"✗ 拒绝构建：{len(_debt)} 处超出 target（--deny-debt）："
                   + ", ".join(sorted(_debt)))
             _mod_b = os.path.splitext(os.path.basename(tu_p))[0]
             _print_restarts(_cost_restarts(_mod_b), indent="  ")
+            return 1
+        # **H2**：`--deny-unknown` 把"判不出来"变成拒绝。
+        # 默认仍放行（渐进采用），但 CI 必须能要求"不许有未知"——
+        # 否则"不知道"会被当成"没问题"。
+        # **只用 --deny-debt 会漏掉 κ=⊤ 的程序**（unknown 不是 debt）。
+        # 这是实测出来的洞（tools/relax_sweep.py：C1 在 6 种配置下全部通过）。
+        # 不改变语义，只提醒——要不要拒绝"不知道"由 CI 决定。
+        if ("--deny-debt" in argv) and ("--deny-unknown" not in argv) and _unknown:
+            print(f"  提示：另有 {len(_unknown)} 处**无法判定**未被拒绝"
+                  f"（{', '.join(sorted(_unknown))}）；CI 请加 `--deny-unknown`。")
+        if ("--deny-unknown" in argv) and _unknown:
+            print(f"✗ 拒绝构建：{len(_unknown)} 处无法判定（--deny-unknown）："
+                  + ", ".join(sorted(_unknown)))
+            print("  出路：写出可判的 target（含同样的尺寸量）、或补 `assume`/`repeats`。",
+                  file=sys.stderr)
             return 1
     return 0
 
@@ -2508,7 +2656,7 @@ ARGV_VERSION = ("--version", "-V", "version")
 
 def _full_report(module_arg: str, sizes, runs, wc_path=None, out_path=None,
                  split: bool = False, max_size=None,
-                 max_points=None) -> int:
+                 max_points=None, variant: str = "worst") -> int:
     """**完整报告**：上界、实测、紧度**分三节**，每节一张表。
 
     刻意不用缩写：`typical / worst / slack / ops` 一律写全（典型、最坏、松度、操作数），
@@ -2589,6 +2737,9 @@ def _full_report(module_arg: str, sizes, runs, wc_path=None, out_path=None,
                 "bound": float(r.get("kappa_at_n") or 0),
                 "target": r.get("target_at_n"),
                 "typical": typical,
+                "alloc_bound": r.get("alloc_kappa_at_n"),
+                "alloc_target": r.get("alloc_target_at_n"),
+                "allocs": r.get("allocs_max", 0),
             })
     if not rows:
         import glob as _glob
@@ -2636,9 +2787,15 @@ def _full_report(module_arg: str, sizes, runs, wc_path=None, out_path=None,
     # **现场补最坏搜索**：报告要么读 `worstcase.json`，要么自己搜——
     # 否则"相对最坏"那列永远是"（未搜索）"，等于把最有用的一列空着。
     _live = {}
+    if variant == "random":
+        # **A3 消融基线**：不跑最坏搜索，紧度分母用"典型"（随机输入）。
+        # 与默认（搜最坏）对照，就能量出"搜最坏"这一步值多少。
+        worst = {}
+        print("（--variant=random：不搜索最坏输入，紧度按**典型**算——"
+              "这不是承诺的判据，仅供消融对照）")
     try:
         from worstcase import worst_for as _worst_for
-        for _r in rows:
+        for _r in (rows if variant != "random" else []):
             _k = (_r["function"], _r["size"])
             if _k in worst:
                 continue
@@ -2749,9 +2906,10 @@ def _full_report(module_arg: str, sizes, runs, wc_path=None, out_path=None,
             _tgt = [(z["size"], z["target"]) for z in _rs
                     if z.get("target") is not None]
             _svg1 = line_chart(
-                [("承诺（候选取最大）", _bound)] + ([("承诺上限 target", _tgt)] if _tgt else [])
+                [("承诺（候选取最大）", _bound)] + ([("target（阶承诺，不含常数）", _tgt)] if _tgt else [])
                 + [("典型实测", _typ), ("最坏实测", _worst)],
-                f"{_fn}：上界与实测", "操作数", log_y=True)
+                f"{_fn}：上界与实测", "操作数", log_y=True,
+                direct_labels=True)
 
             _st = [(_xs[i], _rs[i]["bound"] / _rs[i]["typical"])
                    for i in range(len(_rs))]
@@ -2760,45 +2918,80 @@ def _full_report(module_arg: str, sizes, runs, wc_path=None, out_path=None,
                 _w = worst.get((_rs[i]["function"], _rs[i]["size"]))
                 if _w and _w.get("ops_worst_obs"):
                     _sw.append((_xs[i], _rs[i]["bound"] / float(_w["ops_worst_obs"])))
+            # 面板②：**超额倍数**（κ ÷ target）——作者承诺"至多 O(n)"，
+            # 这里看"常数意义上超了几倍"。紧度在报告第三节与面板③。
+            _over = []
+            for _i in range(len(_rs)):
+                _t = _rs[_i].get("target")
+                if _t:
+                    _over.append((_rs[_i]["size"], _rs[_i]["bound"] / float(_t)))
             _svg2 = line_chart(
-                [("相对典型", _st)] + ([("相对最坏", _sw)] if _sw else []),
-                f"{_fn}：紧度（越接近 1 越紧）", "上界 ÷ 实测",
-                log_y=True, hline=1)
+                [("超额倍数（κ ÷ target）", _over)],
+                f"{_fn}：超额倍数（>1 = 常数意义上超了）", "上界 ÷ 承诺上限",
+                log_y=True, hline=1, annotate=True)
+
+            # 面板③：各点紧度（数值标注）+ n0 竖线
+            _v3 = []
+            for _i in range(len(_rs)):
+                _w3 = worst.get((_rs[_i]["function"], _rs[_i]["size"]))
+                if _w3 and _w3.get("ops_worst_obs"):
+                    _v3.append((_rs[_i]["size"],
+                                _rs[_i]["bound"] / float(_w3["ops_worst_obs"])))
+            _n0 = None
+            if len(_rs) >= 2:
+                _b = ((_rs[-1]["bound"] - _rs[-2]["bound"])
+                      / (_rs[-1]["size"] - _rs[-2]["size"]))
+                _a = _rs[-1]["bound"] - _b * _rs[-1]["size"]
+                if _b > 0 and _a > 0:
+                    _n0 = 10 * _a / _b
+            _svg3 = line_chart(
+                [("该点紧度（相对最坏）", _v3)],
+                f"{_fn}：各点紧度（数值标注）", "上界 ÷ 最坏实测",
+                log_y=True, hline=1, annotate=True, vline=_n0)
+
+            # 面板④⑤⑥：空间（分配）——与左边时间面板一一对应
+            _ab = [(z["size"], z["alloc_bound"]) for z in _rs
+                   if z.get("alloc_bound") is not None]
+            _at = [(z["size"], z["alloc_target"]) for z in _rs
+                   if z.get("alloc_target") is not None]
+            _am = [(z["size"], max(1, z.get("allocs") or 0)) for z in _rs]
+            _svg4 = line_chart(
+                [("分配上界 κ_alloc", _ab)]
+                + ([("分配上限 target", _at)] if _at else [])
+                + [("实测分配次数", _am)],
+                f"{_fn}：空间（分配）", "分配次数", log_y=True)
+            _aover = []
+            for z in _rs:
+                if z.get("alloc_target") and z.get("alloc_bound") is not None:
+                    _aover.append((z["size"],
+                                   z["alloc_bound"] / float(z["alloc_target"])))
+            _svg5 = line_chart(
+                [("超额倍数（κ_alloc ÷ target）", _aover)],
+                f"{_fn}：分配超额倍数", "分配上界 ÷ 分配上限",
+                log_y=True, hline=1, annotate=True,
+                note="该模块的 spec 没有 `target { allocation }` 条款，无可比数据")
+            _svg6 = line_chart(
+                [("各点分配（实测）", _am)],
+                f"{_fn}：各点分配（数值标注）", "分配次数",
+                log_y=True, annotate=True)
 
             _dir = os.path.dirname(_out_base) or "."
             _nm = os.path.basename(_out_base)
             if split:
                 _f1 = os.path.join(_dir, f"{_nm}-上界与实测.svg")
-                _f2 = os.path.join(_dir, f"{_nm}-紧度.svg")
+                _f2 = os.path.join(_dir, f"{_nm}-超额倍数.svg")
                 io.open(_f1, "w", encoding="utf-8", newline="\n").write(_svg1)
                 io.open(_f2, "w", encoding="utf-8", newline="\n").write(_svg2)
                 print(f"已写出图：{_f1}")
                 print(f"已写出图：{_f2}")
             else:
-                # 一个文件、三张面板（各自独立坐标系，不共享 y 轴）
-                _v3 = []
-                for _i in range(len(_rs)):
-                    _w3 = worst.get((_rs[_i]["function"], _rs[_i]["size"]))
-                    if _w3 and _w3.get("ops_worst_obs"):
-                        _v3.append((_rs[_i]["size"],
-                                    _rs[_i]["bound"] / float(_w3["ops_worst_obs"])))
-                # n0：常数项占 κ 的 10% 以下的起点（用末两点估斜率与截距）
-                _n0 = None
-                if len(_rs) >= 2:
-                    _b = ((_rs[-1]["bound"] - _rs[-2]["bound"])
-                          / (_rs[-1]["size"] - _rs[-2]["size"]))
-                    _a = _rs[-1]["bound"] - _b * _rs[-1]["size"]
-                    if _b > 0 and _a > 0:
-                        _n0 = 10 * _a / _b
-                _svg3 = line_chart(
-                    [("该点紧度（相对最坏）", _v3)],
-                    f"{_fn}：各点紧度（数值标注）", "上界 ÷ 最坏实测",
-                    log_y=True, hline=1, annotate=True, vline=_n0)
+                # 一个文件、六张面板：左列时间、右列空间（独立坐标系）
                 _f3 = (out_path if out_path and out_path.lower().endswith(".svg")
                        else os.path.join(_dir, f"{_nm}-图.svg"))
                 io.open(_f3, "w", encoding="utf-8", newline="\n").write(
-                    stack_svgs([_svg1, _svg2, _svg3]))
-                print(f"已写出图：{_f3}（一个文件，三张面板）")
+                    stack_svgs([_svg1, _svg4, _svg2, _svg5,
+                                _svg3, _svg6], columns=2))
+                print(f"已写出图：{_f3}（一个文件，左时间右空间）")
     except Exception as _exc:                          # noqa: BLE001
         print(f"（画图失败：{type(_exc).__name__}: {_exc}）", file=sys.stderr)
     return 0

@@ -98,9 +98,13 @@ def main():
                 cand = float(r.get("static_candidate_operations") or 0)
             except ValueError:
                 continue
-            if cand and seg < cand:
+            # **2026-11-02 定口径**：承诺 = 分段上界（有表时逐段取运行期真跑的那个候选）。
+            # 于是"承诺 ≥ 所有候选"只在**无表（max）**时成立；有表时承诺 = 该档候选，
+            # 对另一档候选可以更小——那不是 bug，是"承诺与运行同源"的结果。
+            _pmax = float(r.get("static_promise_max_operations") or 0)
+            if _pmax and seg == _pmax and cand and seg < cand:
                 bad.append((r.get("input_size"), seg, cand))
-        check(not bad, "每一档：承诺 κ ≥ 候选 κ", str(bad[:3]))
+        check(not bad, "无表（max 口径）时：承诺 κ ≥ 所有候选 κ", str(bad[:3]))
         _mcol = ("measured_operations" if "measured_operations" in rows[0]
                  else "measured_nanoseconds")
         check(rows[0].get(_mcol, "") == "", "没有实测时 measured 列为空", str(rows[0]))
