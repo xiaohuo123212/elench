@@ -105,10 +105,48 @@ def require_measured(argv: List[str], module_dir: str) -> bool:
     return bool(option(module_dir, "build", "require_measured", False))
 
 
-def table_path(module_dir: str, module: str) -> str:
+#: 仓库级参考表的默认目录名（`[dispatch] repo_dir` 可改）
+REPO_TABLE_DIR = "tables"
+
+
+def local_table_path(module_dir: str, module: str) -> str:
+    """本机实测出来的表：会被 `.gitignore` 的 `*.dispatch.yaml` 排除。"""
     import os
 
     return os.path.join(module_dir, f"{module}.dispatch.yaml")
+
+
+def repo_table_path(module_dir: str, module: str) -> str:
+    """入库的参考表：换后缀 `.table.yaml`，免得被 `*.dispatch.yaml` 的规则一起吞掉。"""
+    import os
+
+    d = str(option(module_dir, "dispatch", "repo_dir", REPO_TABLE_DIR) or REPO_TABLE_DIR)
+    return os.path.join(module_dir, d, f"{module}.table.yaml")
+
+
+def table_path(module_dir: str, module: str) -> str:
+    """分档表用哪一份，由 `[dispatch] source` 决定。
+
+    | source | 用哪份 | 适合 |
+    |---|---|---|
+    | `auto`（默认） | 有本机表用本机，否则用仓库表 | 日常开发 |
+    | `local` | 只用本机实测 | 想要"本机最优" |
+    | `repo` | 只用仓库表 | CI / 新人 clone（不用等 `measure`） |
+
+    **为什么要有这个开关**：表里存的是**实测出来的交叉点**，那是**机器相关**的。
+    入库能让人少跑一次 `measure`、可复现、可 diff；但别人机器上它可能次优。
+    两件事没法同时最优，只能让用户选。
+    """
+    import os
+
+    src = str(option(module_dir, "dispatch", "source", "auto") or "auto").lower()
+    local = local_table_path(module_dir, module)
+    repo = repo_table_path(module_dir, module)
+    if src == "local":
+        return local
+    if src == "repo":
+        return repo
+    return local if os.path.exists(local) else repo
 
 
 # ---------------------------------------------------------------- 静态分段

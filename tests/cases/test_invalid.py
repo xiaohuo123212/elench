@@ -45,9 +45,10 @@ from parser import parse_source
 CASES = []          # list[dict]
 
 
-def case(name, expect=None, strict=False, tu="", ai=None, code=None):
+def case(name, expect=None, strict=False, tu="", ai=None, code=None,
+         expect_none=False):
     CASES.append({"name": name, "expect": expect, "strict": strict,
-                  "tu": tu, "ai": ai, "code": code})
+                  "tu": tu, "ai": ai, "code": code, "expect_none": expect_none})
 
 
 # 一个合法的骨架，供变异使用
@@ -169,7 +170,10 @@ _T13_TU = """spec pred(u64 lo, u64 hi) -> bool {
 spec pred2(u64 lo, u64 hi) -> bool { effects {}; }
 spec a(const Vec<u64>& xs) -> u64 { effects {}; }"""
 
-case("V14 条件无尺寸比较 → 宽松 warn", "E-While-NoBound", tu=_T13_TU,
+# 2026-11-03 更正：`while (i < 10)` 的上界**推得出来**（常量），
+# 原来期望它报警是**假警报**。这条改成"不该报警"的守卫。
+# "推不出"那一支由 V15（谓词没写 repeats）继续覆盖。
+case("V14 常量边界 → 推得出，不该报警", tu=_T13_TU, expect_none=True,
      ai="func a(const Vec<u64>& xs) -> u64 { u64 i = 0; while (i < 10) { i = i + 1; } return i; }")
 
 case("V15 谓词没写 repeats → 宽松 warn", "E-While-NoBound", tu=_T13_TU,
@@ -366,6 +370,15 @@ def run():
         total_len = max(len(s) for s in srcs) if srcs else 0
 
         diags = res.diagnostics
+        # **"不该报警"也是一条断言**：只测"报了什么"会漏掉"报了不该报的"。
+        # 常量边界的循环（`while (i < 10)`）上界推得出来，报警就是假警报。
+        if c.get("expect_none"):
+            if diags:
+                _failed.append(f"{c['name']}: 期望**无**诊断，实际 "
+                               f"{[d.code for d in diags][:3]}")
+            else:
+                _passed += 1
+            continue
         if not diags:
             _failed.append(f"{c['name']}: 未产生任何诊断")
             continue

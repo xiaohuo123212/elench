@@ -1,0 +1,12 @@
+// max_in.eln —— 线性扫描求最大值（单循环，纯读）
+pub func max_in(const Vec<u64>& xs) -> u64 {
+    u64 n = xs.length();
+    if (n == 0) { return 0; }
+    u64 best = xs[0];
+    u64 i = 1;
+    while (i < n) {
+        if (xs[i] > best) { best = xs[i]; }
+        i = i + 1;
+    }
+    return best;
+}

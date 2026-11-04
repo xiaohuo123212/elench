@@ -19,11 +19,15 @@ dependencies = []
 [project.urls]
 Homepage = "https://github.com/xiaohuo123212/ai-lang-design"
 
-# 只装入口脚本；`src/` 在仓库里是扁平目录（历史上就这样），
-# 用 `py-modules` 逐个列出，避免为了打包去搬动 40 个文件的目录结构。
-# 只装入口脚本；`src/` 在仓库里是扁平目录（历史上就这样），
-# 用 `py-modules` 逐个列出，避免为了打包搬动 40+ 个文件的目录结构。
+# `src/` 在仓库里是扁平目录（历史上就这样），因此：
+#   · 顶层模块用 `py-modules` 逐个列出（扁平文件不会被 setuptools 自动发现）
+#   · `cost_domain/` 是真包，用 `packages` 列出
+#
 # **必须列全**：`dsh` 会 import 下面每一个模块，漏一个 `elench` 就跑不起来。
+# 2026-11-03 补齐：chart / cost_diff / cxx_map / emit / ffi_c / fmt / grammar /
+# guarantees / jsonval / kinds / otel_export / policy / requires / segment_plan /
+# shape / stdlib 与 `cost_domain` 包此前都漏在清单外——装出来的包一跑就
+# ImportError，而 `pip install` 本身不报错。
 [tool.setuptools]
 py-modules = [
     "archive_specs",
@@ -32,29 +36,52 @@ py-modules = [
     "borrow",
     "bound",
     "cfg",
+    "chart",
     "check_docs",
     "checker",
     "cost_check",
+    "contract_metric",
+    "cost_diff",
+    "cost_explain",
     "cost_interp",
+    "cxx_map",
     "dispatch",
     "dsh",
-    "elench",
     "dup_scan",
+    "elench",
+    "emit",
+    "ffi_c",
+    "fmt",
     "formatter",
+    "grammar",
+    "guarantees",
     "highlight",
     "interp",
     "isolated",
+    "jsonval",
+    "kappa_vs_measured",
+    "kinds",
     "lexer",
     "migrate_docs",
     "migrate_tests",
     "otel",
+    "otel_dashboard",
+    "otel_local_sink",
+    "otel_view",
+    "otel_export",
     "parser",
+    "policy",
     "rename_ch",
+    "requires",
+    "segment_plan",
+    "shape",
+    "stdlib",
     "symbolic",
     "sync_docs",
     "typecheck",
     "walk",
 ]
+packages = ["cost_domain"]
 package-dir = { "" = "src" }
 
 [project.scripts]

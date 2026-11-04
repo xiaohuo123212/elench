@@ -9,13 +9,68 @@
 > **三套版本号，不要混**：
 > · **公开发布** `1.0.0`（本文件主线）
 > · **语言与规格** `0.71`（`文档/语法清单.md` 与预印本里的口径）
-> · **VS Code 扩展** `0.4.0`（`editors/vscode/package.json`，独立制品）
+> · **VS Code 扩展** `0.6.19`（`editors/vscode/package.json`，独立制品）
 
 ---
 
 ## [Unreleased]
 
+### Removed
+- **`assume` 语法移除**：它允许声明无法验证的上界，与「κ 是可验证上界」冲突。
+  现在写 `assume` 会在解析阶段报 `E-Assume-Removed` 并给出三条改法。
+  实测 15 个样例、21 个函数一个都没用过（`3369051` `55968e9` `26c7b71`）。
+
 ### Added
+- **`E-Call-Undeclared`**：未声明的外部调用现在报错，而不是悄悄记 1 个操作——
+  那等于把被调函数体当成 0 成本，κ 就不再是上界（`185b64a` `116ecc1`）。
+
+### Fixed
+- **实参类型检查从来没跑过**：`_diagnose_all` 只在显式传 `.eln` 时才喂类型检查器，
+  `check <模块>` 传的是 `ai=None`。现在 `.eln` 自动发现（`cac7b65`）。
+- **循环次数由分支决定时算不出上界**（E4）：`monotone_decreasing` 现在区分
+  「循环体外赋值（改初值）」与「循环体内赋值（必须仍是减法）」（`95dfbac`）。
+- `Cost.max(0, x) = x`（`5d426fb`）；`if` 的分支状态真的合并（`a0ca1db`）。
+- 借用规则表 BR-3 的描述写错了——功能本来就在，现已改正并加测试钉住（`992d96b`）。
+
+### Added
+- **	ools/fetch_incoming.py**：把 PR / fork 分支 / 任意提交**改动的文件**导出到 _incoming/，
+  不切换分支、不 merge、不动工作树；附 MANIFEST.md（状态 + 行数增减）。
+  支持 --pr N、--remote alice --ref main、--path src、--dry-run。
+- **`cost --explain`：超界归因。** 以前只报「超标 + 比值 ≈ 1072023837083.90」，
+  读的人知道超了却不知道从哪下手。现在给四样：支配项（按尺寸指数）、
+  **元凶行号 + 源码片段**、`?!` 的逐候选分解、最小修复（拿掉它 / 换候选，
+  用同一套引擎重判）。归因是**只读**的——对拍 20 个模块，开关前后 κ 逐字节相同。
+- **`cost --diff` 增加「契约 diff」。** `κ` 一动不动但承诺被削弱的改动现在能看见：
+  删掉 `guarantees`、`effects` 从 pure 变 io、`scale` 区间缩小、`target` 放松。
+  `target` 的松紧用数值判（几个规模点上都变大 = 放松），并额外警告「κ 不会替你报警」。
+- **`check --apply=N`：静态检查的 fix-it。** 带 `actions` 的诊断会编号列出，
+  `--apply=N` 取一条执行（`edit` 只打印 diff，不落盘）。先覆盖两条：
+  `E-Guarantee-Uncheckable`（降级成 `assume`，给的是真实那一行）、
+  `E-Fn-NoSpec`（从 `.eln` 签名抄出 spec 骨架）。
+- **`elench.toml` 的 `[dispatch] source`**：分档表用哪一份可配
+  （`local` 本机最优 / `repo` 入库参考表 / `auto` 默认）。`measure --commit`
+  额外写一份 `tables/<模块>.table.yaml` 入库。
+- **`--accept-tu-change`**：声明被静默改过就拦住（指纹用词法 token，
+  改注释不触发；只在 git 仓库里生效）。
+
+### Changed
+- **越界规则改成「沿最近那段延伸」**：低于声明下界用第一段的候选，
+  高于上界用**最后一段**的候选。以前一律退回「第一个候选」——那是书写顺序，
+  与区间顶端谁更快无关（实测 `count`：按书写顺序取会让 n>4096 的承诺凭空变成 O(n²)）。
+  承诺侧用两段哨兵表达，运行期同步，两边同源。
+- 机读模式（`--json` / `--yaml` / `--signature`）的 stdout **只有数据**，
+  不再混入中文口径说明——这样 `json.loads(stdout)` 才能直接用。
+
+### Fixed
+- `cost --json` 的 stdout 前面混着口径行，`json.loads()` 直接失败。
+- `cost --diff` 历史端取不到分档表，导致 1.93× 的错误结论（现在多路径查找，
+  取不到时标「口径差」并排除在 `--deny-regress` 之外）。
+- `otel.report` 在「未实测、只画静态线」时 `TypeError` 崩溃。
+- `cpp` 生成的 `uint64_t main()` 违反 C++ 规则；无入口的模块被强制链接。
+- 两个长期红的测试：`test_assume`（spawn 裸 `dsh.py`，只在 cwd==src 时能跑）、
+  `test_invalid` 的 V14（常量边界的循环本来推得出上界，报警是**假警报**）。
+
+### Added（早期）
 - **`cpp/docnums/`：文档数字绑定检查器的 C++17 实现**（单文件、零第三方依赖）。
   与 `tools/doc_numbers.py` **同语义**：同一份 `tools/doc_numbers.json`、
   同一套 `数字<!--dn:key-->` 标记、同样的退出码；`parity.py` 逐字节对照两版输出
@@ -25,15 +80,15 @@
   三个移植坑记在 README 里：**Windows `argv` 是 ANSI**（中文路径必炸，改用
   `CommandLineToArgvW`）、**窄字符流按 ANSI 解路径**（改用 `filesystem::u8path`）、
   **动态链接会缺 DLL**（`-static` 出单文件）。
-- **	ools/doc_numbers.py：文档数字绑定**（零依赖，可给别的仓库用）。
-  文档里写 数字<!--dn:key--> 就把这个数绑到 	ools/doc_numbers.json 的来源上
+- **tools/doc_numbers.py：文档数字绑定**（零依赖，可给别的仓库用）。
+  文档里写 数字<!--dn:key--> 就把这个数绑到 tools/doc_numbers.json 的来源上
   （JSON 字段 / 求和 / 长度 / udit_numbers.py 字段）；来源一变 --check 就非零退出。
   另有**零标注**模式 --scan：把无法追溯到来源的数字列出来。
   落地当天就抓到两处漂移（测试文件 85→86、断言调用点 1,390→1,402）与一处
   附录合计 κ（27,589,793 含了输入无效的 	opk）。
-- **	ools/real_false_reject.py**：在**真实样例**上量误拒率（四档阶：常数/线性/n log n/平方）。
+- **tools/real_false_reject.py**：在**真实样例**上量误拒率（四档阶：常数/线性/n log n/平方）。
   实测 22 例：判对 17、**误拒 0、漏判 0**、判不出 5（E23 多尺寸量）。
-- **	ools/ablation.py**：现场生成分档表、复现「分段 vs max」那张表；
+- **tools/ablation.py**：现场生成分档表、复现「分段 vs max」那张表；
   分档表**不提交**（测量产物，不该钉成事实）。
 - **`cost --diff=<git-ref>`**：**成本承诺的 diff**——比的是 κ 的**类别**，
   不是毫秒数。三档：`L1`（阶变了）/ `L3`（只有常数变了）/ `不变`；
@@ -99,6 +154,14 @@
   `语法清单` §6.1 补真实可跑的 `?!` 骨架。
 
 ### Changed
+- **承诺口径统一为「分段上界」（`piecewise`）**：`run` / `stats` / `bench` 以前**不读分档表**，
+  运行期退回第一个候选——承诺按段算、跑的却不是那个候选，会系统性破界
+  （实测过 `search.binary_search` 余量 −341、`gap` 逐段 402 / 实测 733）。
+  现在三条命令都传 `table_path`，与 `measure` / `export` 同源。
+- **`export` 的判据线与门禁同源**：有分档表时画分段式，没有时退回 `max`。
+  以前无论有没有表都画 `max`，与 `cost` 的判定不是同一条线。
+  同步改正 `README`、`segment_plan`、`dsh`、`otel`、`cost_interp` 里
+  「承诺永远是 `max over candidates`」的旧说法。
 - **文档/ 三桶分家**：目前设计/未做/（**排期中的任务**，入口 制作顺序.md）、
   未来设计/（长期设计与分析，**不是待办**）、目前设计/未做/已归档/（做完的）。
   同时刷新 文档/README.md 的目录图（结构版本 v3 → v4）并修掉两条早已失效的引用。
@@ -117,11 +180,16 @@
   golden 21 条全部重冻（14 条变化，均变小）、`gap` 静态交点 2716 → **2222**。
 
 ### Fixed
+- **`pyproject.toml` 的模块清单补全**：漏了 `chart` / `cost_diff` / `cxx_map` / `emit` /
+  `ffi_c` / `fmt` / `grammar` / `guarantees` / `jsonval` / `kinds` / `otel_export` /
+  `policy` / `requires` / `segment_plan` / `shape` / `stdlib` 共 16 个顶层模块，以及
+  `cost_domain` 包。以前 `pip install` 出来的包一跑就 `ImportError`，而安装本身不报错。
+  现已验证：安装后 `elench --version` 与 `elench cost` 均可正常执行。
 - **测量器把「输入无效」当成了证据**：	opk(xs, 32) 在 n=16 上 k > n，函数立刻早退，
   量到 14 个操作——论文却把它当 3,135 引用。kappa_vs_measured 现在检查
   **benchmodel 里写成字面量的标量**是否超过规模，超过就单列「输入无效」而不是报步数。
   影响：Table 7 从 10/10 变成 **9/9 + 1 行「输入无效」**，预印本 v0.3 已同步。
-- **	ools/audit_numbers.py 的统计口径是错的**：只扫 src/ 顶层，于是报
+- **tools/audit_numbers.py 的统计口径是错的**：只扫 src/ 顶层，于是报
   「测试 0 文件」「check( 15 处」「关键字 4 个」。改成递归扫 src/+	ests/、
   从 lexer 取关键字真值后：**51 实现文件 / 18.5k SLOC、85 测试文件 / 11.5k SLOC、
   1,390 处 check(、44 关键字（4 个已下线）**。论文里的数字只能从这里出。

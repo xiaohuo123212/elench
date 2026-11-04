@@ -53,7 +53,7 @@ class Kind(str, Enum):
     ASM = "asm"
     EXTERN = "extern"
     EXTERNAL = "external"
-    ASSUME = "assume"        # 模块级环境假设：`assume n <= xs.length();`
+    ASSUME = "assume"        # **已移除的语法**（2026-11-04）。保留词法只为给出迁移报错
     KERNELS = "kernels"      # 上下文关键字：出现在 func 体之后
     ERROR_DECL = "error"     # 模块级错误类型声明：`error CalcError;`
     BREAK = "break"          # v0.72：循环提前退出

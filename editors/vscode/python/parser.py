@@ -405,28 +405,31 @@ class Parser:
         return node
 
     def parse_assume(self) -> Node:
-        """`assume n <= xs.length(), k <= 1024;`
+        """**`assume` 已移除（2026-11-04）**：这里只负责给出迁移提示。
 
-        **语义**：声明**环境参数的界**（上界）。检查器只接受
-        「一侧是尺寸/参数、另一侧是表达式」的 `<=` / `<` 形式——
-        **`assume` 只允许写上界**，写等号或下界一律报错（它进了"可撒谎位置"清单）。
+        为什么移除：它允许作者单方面声明一个**不可验证**的上界，而 κ 的全部
+        卖点是"上界"。`assume` 是整门语言里唯一没有"谁能验证它"答案的机制。
+        实测：15 个算法样例、21 个函数**一个都没用过它**。
+
+        替代写法：
+
+        | 原来想写 | 现在写 |
+        |---|---|
+        | `assume n <= xs.length();` | **直接写 `xs.length()`**（本来就不需要假设） |
+        | 外部给的量（`argc`、文件行数） | 在 `benchmodel { data {…} }` 里声明成**输入**并给 `scale` |
+        | 真·资源预算（`while (budget > 0)`） | `external { … }` / `ext()` 登记 |
+
+        **保留词法与这条报错是故意的**：直接删掉会让老代码变成无意义语法错误，
+        而迁移提示告诉用户该改成什么。
         """
         t = self.expect(Kind.ASSUME, "'assume'")
-        node = Node("assume", t.line, t.col, name=None)
-        while True:
-            e = self.parse_expr()
-            # **`assume` 只允许写上界**：`<=` 或 `<`。
-            # 写 `=` / `>=` 一律报错——这是"可撒谎位置"，必须一眼看懂方向。
-            if getattr(e, "kind", None) != "binary" or (e.value or "") not in ("<", "<="):
-                raise ParseError(
-                    "E-Assume-NotUpperBound",
-                    "assume 只能写「上界」（`<=` 或 `<`），例如 `assume n <= xs.length();`",
-                    t)
-            node.add(e)
-            if not self.accept(Kind.COMMA):
-                break
-        self.expect(Kind.SEMI, "';'")
-        return node
+        raise ParseError(
+            "E-Assume-Removed",
+            "`assume` 已移除：它允许声明一个无法验证的上界，而 κ 的卖点正是可验证。"
+            "改法：① 直接写真实尺寸（如 `while (i < xs.length())`）；"
+            "② 外部给的量写进 `benchmodel { data { … } }` 并给 `scale`；"
+            "③ 资源预算用 `external { … }` 登记",
+            t)
 
     def parse_rewrite(self) -> Node:
         t = self.expect(Kind.REWRITE, "'rewrite'")

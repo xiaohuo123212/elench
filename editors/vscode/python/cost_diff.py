@@ -16,14 +16,31 @@ CI 的性能门禁比的是**同一台机器上的毫秒数**，换个机器就�
 
 **只 diff 承诺**（`cost_of`），不 diff 实测——实测本来就不该进版本对比。
 
-## 它**不**比什么（重要）
+## 四层（2026-11-03 补齐）
 
-两端都用**当前**的成本模型去算，所以它回答的是
+| 层 | 做什么 | 为什么必须 |
+|---|---|---|
+| **① 口径** | 两端都按**各自版本的分档表**切段 | 承诺已是**分段上界**；只取代码不取表，等于用今天的分段算昨天的承诺 |
+| **② 判决** | 报「达标 → 超标」 | 「阶变了」不等于「变坏了」；L1 也可能变好 |
+| **③ 表变化** | 段表改动单独报 | **表也是承诺**：段边界一移，承诺形状就变了，而 κ 在采样点上可能一模一样 |
+| **④ 人话** | 具体规模上的倍数 | 符号表达式对非专家不可读 |
 
-> 「**你的代码改了**，承诺的阶变了吗？」
+## ⚠ 已知的口径陷阱（2026-11-03 实测）
 
-而不是「成本模型自己改了，所有数字变了多少」。后者要靠 `tools/golden_check.py`
-（κ 冻结表）与重跑基线，不是这个工具的事。
+`*.dispatch.yaml` 被 `.gitignore` 排除（第 3 行），**历史里从来没有过表**。
+后果：`--diff` 的旧端拿不到表 → 退回 `max`，而新端读得到表 → 分段。
+同一份代码会显示「`gap.top` 从 201,553 变到 104,567，0.52×，L1」——
+**那是口径差，不是代码变好了。**
+
+所以本模块**显式检测两端表的有无**：不一致时把结论标成「口径不可比」，
+并且**不参与 `--deny-regress`**，避免 CI 因为一个文件没提交而误报回归。
+
+要真正消除这个陷阱，得让表进版本库（它本来就是承诺的一部分）。
+
+## 它**不**比什么
+
+两端都用**当前**的成本模型去算，所以它回答的是「**你的代码改了**，承诺的阶变了吗？」
+而不是「成本模型自己改了，所有数字变了多少」——后者靠 `tools/golden_check.py`。
 
 ## 用法
 
@@ -37,10 +54,13 @@ from __future__ import annotations
 import os
 import subprocess
 import tempfile
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 #: 用来判定"随规模变 vs 常数变"的规模点
 SIZES = (64, 256, 1024)
+
+#: `cost_check.Verdict.kind` → 人话
+_VERDICT_ZH = {"ok": "达标", "debt": "超标", "unknown": "无法判定"}
 
 
 def _git_show(ref: str, path: str) -> Optional[str]:
@@ -57,26 +77,80 @@ def git_root(path: str) -> Optional[str]:
     return r.stdout.strip() if r.returncode == 0 else None
 
 
-def load_at_ref(tu_p: str, ch_p: str, ref: str, root: str):
-    """把 `<ref>` 版本的 `.tu`/`.eln` 取到临时目录并构造 CostInterp。"""
+def table_path_for(tu_path: str) -> str:
+    """当前工作区该用哪份表——交给 `policy.table_path`（`[dispatch] source` 决定）。"""
+    from policy import table_path as _tp
+    return _tp(os.path.dirname(os.path.abspath(tu_path)),
+               os.path.basename(tu_path).rsplit(".", 1)[0])
+
+
+def _read_table(path: Optional[str]) -> Dict[str, List[Tuple[int, int, str]]]:
+    if not path or not os.path.exists(path):
+        return {}
+    try:
+        from interp import load_dispatch_table
+        return load_dispatch_table(path) or {}
+    except Exception:                                  # noqa: BLE001
+        return {}
+
+
+def load_at_ref(tu_p: str, ch_p: str, ref: str,
+                root: str) -> Tuple[Any, Dict[str, Any], Optional[str]]:
+    """把 `<ref>` 版本的 `.tu` / `.eln` / **`.dispatch.yaml`** 取到临时目录并构造 CostInterp。
+
+    **表必须一起取**：承诺是分段上界，分段来自表。只取代码不取表，
+    两边就不是同一个量（实测 `gap`：max 口径 201,553，分段口径 104,567，差 1.93 倍）。
+    """
     from cost_interp import CostInterp
     from parser import parse_source
 
     _root = git_root(tu_p)
     if not _root:
-        return None, f"{tu_p} 不在任何 git 仓库里（--diff 需要版本历史）"
+        return None, {}, f"{tu_p} 不在任何 git 仓库里（--diff 需要版本历史）"
     rel_tu = os.path.relpath(os.path.abspath(tu_p), _root).replace("\\", "/")
     rel_ch = os.path.relpath(os.path.abspath(ch_p), _root).replace("\\", "/")
     old_tu = _git_show(ref, rel_tu)
     old_ch = _git_show(ref, rel_ch)
     if old_tu is None or old_ch is None:
-        return None, f"`{ref}` 里没有 {rel_tu} / {rel_ch}"
+        return None, {}, f"`{ref}` 里没有 {rel_tu} / {rel_ch}"
+
     d = tempfile.mkdtemp(prefix="eln_diff_")
     tu = parse_source(old_tu, os.path.basename(rel_tu)).module
     ch = parse_source(old_ch, os.path.basename(rel_ch)).module
-    # 分档表也可能随版本变；这里**不带表**：diff 比的是"模型给的承诺"，
-    # 表是运行期选择，另属一类变化。
-    return CostInterp(ch, tu, table_path=None), None
+
+    # **表可能有两份**：本机实测（`<模块>.dispatch.yaml`，通常被 gitignore）
+    # 与入库参考表（`tables/<模块>.table.yaml`）。历史里能取到哪份就用哪份，
+    # 优先取下当前配置选中的那份，取不到再退另一份。
+    _base = os.path.splitext(rel_tu)[0]
+    _dir = os.path.dirname(_base)
+    _dir = "" if _dir in ("", ".") else _dir + "/"
+    _mod = os.path.basename(_base)
+    _cands = []
+    try:
+        from policy import (local_table_path as _ltp, repo_table_path as _rtp)
+        _abs_dir = os.path.dirname(os.path.abspath(tu_p))
+        for _p in (_ltp(_abs_dir, _mod), _rtp(_abs_dir, _mod)):
+            _cands.append(os.path.relpath(_p, _root).replace("\\", "/"))
+    except Exception:                                  # noqa: BLE001
+        _cands = []
+    _cands += [f"{_dir}{_mod}.dispatch.yaml",
+               f"{_dir}tables/{_mod}.table.yaml"]
+    old_tbl_txt = None
+    rel_tbl = None
+    for _c in _cands:
+        if _c in [x for x in _cands[:_cands.index(_c)]]:
+            continue
+        old_tbl_txt = _git_show(ref, _c)
+        if old_tbl_txt:
+            rel_tbl = _c
+            break
+    tbl_path = None
+    if old_tbl_txt:
+        tbl_path = os.path.join(d, os.path.basename(rel_tbl))
+        with open(tbl_path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(old_tbl_txt)
+    ci = CostInterp(ch, tu, table_path=tbl_path)
+    return ci, _read_table(tbl_path), None
 
 
 def classify(old_vals: List[float], new_vals: List[float]) -> str:
@@ -96,12 +170,53 @@ def classify(old_vals: List[float], new_vals: List[float]) -> str:
         "L3" if abs(hi - lo) < 1e-3 else "L1")
 
 
-def diff(tu_p: str, ch_p: str, ref: str, root: str) -> Tuple[List[Dict], Optional[str]]:
+def _verdict(ci, fn: str) -> str:
+    """用**和 `elench cost` 同一套**判定（`cost_check.compare`）。"""
+    try:
+        from cost_check import compare
+        return _VERDICT_ZH.get(compare(ci.cost_of(fn), ci.target_cost(fn)).kind,
+                               "无法判定")
+    except Exception:                                  # noqa: BLE001
+        return "无法判定"
+
+
+def _fmt_segs(segs: List[Any]) -> str:
+    return "; ".join(f"{a}..{b}:{nm}" for a, b, nm in segs) or "（空）"
+
+
+def diff_tables(old: Dict[str, Any], new: Dict[str, Any]) -> List[Dict[str, str]]:
+    """分档表的差异：**表也是承诺，段边界一移承诺形状就变了**。"""
+    out: List[Dict[str, str]] = []
+    for label in sorted(set(old) | set(new)):
+        o = [tuple(x) for x in (old.get(label) or [])]
+        n = [tuple(x) for x in (new.get(label) or [])]
+        if o == n:
+            continue
+        if not o:
+            out.append({"label": label, "kind": "新增表", "detail": _fmt_segs(n)})
+        elif not n:
+            out.append({"label": label, "kind": "删除了表", "detail": _fmt_segs(o)})
+        else:
+            same_names = [x[2] for x in o] == [x[2] for x in n]
+            out.append({"label": label,
+                        "kind": "段边界变了" if same_names else "候选变了",
+                        "detail": f"{_fmt_segs(o)}  →  {_fmt_segs(n)}"})
+    return out
+
+
+def diff(tu_p: str, ch_p: str, ref: str, root: str) -> Tuple[
+        List[Dict[str, Any]], List[Dict[str, str]], Dict[str, Any], Optional[str]]:
+    """返回 `(每个函数的行, 分档表的变化, 上下文, 错误)`。
+
+    上下文里的 `comparable` 说明**两端是否同一口径**：两端表的有无不一致时
+    （典型情形是表被 `.gitignore` 排除、历史里根本没有），
+    任何"变大/变小"的结论都是口径差，不是代码变化。
+    """
     from cost_check import evaluate
 
-    old_ci, err = load_at_ref(tu_p, ch_p, ref, root)
+    old_ci, old_tbl, err = load_at_ref(tu_p, ch_p, ref, root)
     if err:
-        return [], err
+        return [], [], {}, err
 
     from cost_interp import CostInterp
     from parser import parse_source
@@ -110,19 +225,25 @@ def diff(tu_p: str, ch_p: str, ref: str, root: str) -> Tuple[List[Dict], Optiona
                       os.path.basename(tu_p)).module
     ch = parse_source(open(ch_p, encoding="utf-8").read(),
                       os.path.basename(ch_p)).module
-    new_ci = CostInterp(ch, tu, table_path=None)
+    cur_tbl_path = table_path_for(tu_p)
+    new_ci = CostInterp(ch, tu,
+                        table_path=(cur_tbl_path if os.path.exists(cur_tbl_path) else None))
+    new_tbl = _read_table(cur_tbl_path)
 
-    rows: List[Dict] = []
+    ctx = {"old_has_table": bool(old_tbl), "new_has_table": bool(new_tbl)}
+    ctx["comparable"] = (ctx["old_has_table"] == ctx["new_has_table"])
+
+    rows: List[Dict[str, Any]] = []
     names = sorted(set(old_ci.fns) | set(new_ci.fns))
     for fn in names:
         in_old, in_new = fn in old_ci.fns, fn in new_ci.fns
         if not in_new:
             rows.append({"function": fn, "kind": "删除", "old": None, "new": None,
-                         "ratio": None})
+                         "ratio": None, "comparable": True})
             continue
         if not in_old:
             rows.append({"function": fn, "kind": "新增", "old": None, "new": None,
-                         "ratio": None})
+                         "ratio": None, "comparable": True})
             continue
         old_vals, new_vals = [], []
         ok = True
@@ -139,29 +260,76 @@ def diff(tu_p: str, ch_p: str, ref: str, root: str) -> Tuple[List[Dict], Optiona
             new_vals.append(float(vn))
         if not ok:
             rows.append({"function": fn, "kind": "无法比较", "old": None,
-                         "new": None, "ratio": None})
+                         "new": None, "ratio": None, "comparable": ctx["comparable"]})
             continue
         kind = classify(old_vals, new_vals)
+        # 口径不可比时，任何"变了"都不是代码变化，标出来免得被当成结论
+        if not ctx["comparable"] and kind != "不变":
+            kind = "口径差"
         ratio = (new_vals[-1] / old_vals[-1]) if old_vals[-1] else None
         rows.append({"function": fn, "kind": kind,
                      "old": old_vals[-1], "new": new_vals[-1], "ratio": ratio,
                      "old_expr": old_ci.cost_of(fn).render(),
-                     "new_expr": new_ci.cost_of(fn).render()})
-    return rows, None
+                     "new_expr": new_ci.cost_of(fn).render(),
+                     "verdict_old": _verdict(old_ci, fn),
+                     "verdict_new": _verdict(new_ci, fn),
+                     "comparable": ctx["comparable"]})
+    return rows, diff_tables(old_tbl, new_tbl), ctx, None
 
 
-def render(rows: List[Dict], ref: str) -> str:
-    out = [f"成本 diff（相对 {ref}；**只比承诺 κ，不比实测**）", ""]
-    out.append(f"{'函数':<22}{'变化':<8}{'旧 κ':>16}{'新 κ':>16}{'比':>8}")
+def render(rows: List[Dict[str, Any]], ref: str,
+           table_changes: Optional[List[Dict[str, str]]] = None,
+           ctx: Optional[Dict[str, Any]] = None) -> str:
+    ctx = ctx or {}
+    comparable = ctx.get("comparable", True)
+    old_has, new_has = ctx.get("old_has_table"), ctx.get("new_has_table")
+
+    out = [f"成本 diff（相对 {ref}；**只比承诺 κ，不比实测**）"]
+
+    # ① 口径必须写出来：读不读表，同一个函数能差一倍
+    if comparable:
+        out.append("口径：**分段上界**（两端各按自己版本的分档表切段），与 `elench cost` 同源"
+                   if old_has else
+                   "口径：**两端都没有分档表 → 都退回 `max over candidates`**（与 `elench cost` 同源）")
+    else:
+        out.append(f"口径：**两端不一致** —— 旧端{'有' if old_has else '无'}表，"
+                   f"新端{'有' if new_has else '无'}表")
+        out.append("      ⚠ 下面的『变化』是**口径差**，不是代码变好或变坏；已排除在 `--deny-regress` 之外。")
+        out.append("      ⚠ 常见成因：`*.dispatch.yaml` 被 `.gitignore` 排除，历史里没有表——"
+                   "而表本身就是承诺的一部分。")
+
+    out.append("")
+    out.append(f"{'函数':<20}{'变化':<8}{'旧 κ':>14}{'新 κ':>14}{'比':>9}   判决")
     for r in rows:
         o = f"{r['old']:,.0f}" if r.get("old") is not None else "—"
         n = f"{r['new']:,.0f}" if r.get("new") is not None else "—"
         ratio = f"{r['ratio']:.2f}×" if r.get("ratio") else "—"
-        out.append(f"{r['function']:<22}{r['kind']:<8}{o:>16}{n:>16}{ratio:>8}")
+        vo, vn = r.get("verdict_old"), r.get("verdict_new")
+        judge = f"{vo} → {vn}" if vo and vn else "—"
+        out.append(f"{r['function']:<20}{r['kind']:<8}{o:>14}{n:>14}{ratio:>9}   {judge}")
+
+    # ③ 表变化：κ 在采样点上可能一动不动，但承诺形状已经变了
+    if table_changes:
+        out += ["", "⚠ 承诺形状变了（分档表改动；**表也是承诺**）："]
+        for t in table_changes:
+            out.append(f"  {t['label']}  [{t['kind']}]  {t['detail']}")
+
+    # ② 判决变差：L1 不等于变坏，要分开说
+    worse = [r for r in rows
+             if r.get("verdict_old") and r.get("verdict_new")
+             and r["verdict_old"] == "达标" and r["verdict_new"] == "超标"]
+    if comparable and worse:
+        out += ["", "✗ 判决变差（达标 → 超标）："
+                + "、".join(r["function"] for r in worse)]
+
+    # ④ 人话：符号之外给一个能感知的量
     l1 = [r for r in rows if r["kind"] == "L1"]
     if l1:
         out += ["", "⚠ 阶变了（L1）：" + "、".join(r["function"] for r in l1)]
         for r in l1:
             out.append(f"  {r['function']}: {r.get('old_expr', '?')}")
             out.append(f"       → {r.get('new_expr', '?')}")
+            if r.get("ratio"):
+                out.append(f"       在 n={SIZES[-1]} 上多花 {r['ratio']:.2f} 倍"
+                           f"（{r['old']:,.0f} → {r['new']:,.0f} 次操作）")
     return "\n".join(out)

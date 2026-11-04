@@ -1,5 +1,6 @@
 # 生成物与本地文件，不进版本库
 *.cost.yaml
+*.accept.yaml
 *.dispatch.yaml
 *.bench.yaml
 __pycache__/
@@ -29,6 +30,10 @@ _tensor2.py
 # 编辑器扩展打包产物
 *.vsix
 
+# 扩展自带的 Python 运行时（约 31 MB 二进制）：打包前从本机 CPython 裁剪生成，
+# **不入库**——体积大、且是第三方分发物。生成办法见 editors/vscode/README-运行时.md
+editors/vscode/runtime/
+
 # 本地私有材料（不进公开仓库）
 _private/
 
@@ -51,3 +56,6 @@ cpp/docnums/build/
 cpp/docnums/build-cmake/
 *.o
 *.obj
+
+# 从 PR / fork 取回来的文件（临时对比用）
+_incoming/

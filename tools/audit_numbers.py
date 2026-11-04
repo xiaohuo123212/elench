@@ -104,13 +104,34 @@ def assertions():
     return total
 
 
+def _sample_dirs():
+    """样例目录，**按优先级**。
+
+    `文档/样例/` 是**公开的规范位置**（`tools/kappa_vs_ops.py` 读的就是它）；
+    `文档/设计/目前设计/样例/` 是内部镜像。以前只读后者，导致公开目录里的
+    新增样例在审计里看不见（2026-11-04 修）。
+    """
+    return [os.path.join(R, "文档", "样例"),
+            os.path.join(R, "文档", "设计", "目前设计", "样例")]
+
+
 def sample_lines():
-    d = os.path.join(R, "文档", "设计", "目前设计", "样例")
+    d = next((x for x in _sample_dirs() if os.path.isdir(x)), None)
     out = {}
+    if d is None:
+        return out
     for f in sorted(os.listdir(d)):
         if f.endswith((".tu", ".eln")):
             out[f] = count_lines(os.path.join(d, f))
     return out
+
+
+def sample_programs():
+    """`.tu` 样例个数（= 可对拍的算法数，每个样例一个 target）。"""
+    d = next((x for x in _sample_dirs() if os.path.isdir(x)), None)
+    if d is None:
+        return 0
+    return sum(1 for f in os.listdir(d) if f.endswith(".tu"))
 
 
 def main():
@@ -132,6 +153,7 @@ def main():
         "check_call_sites": assertions(),
         "subcommands": subs,
         "sample_lines": sample_lines(),
+        "sample_programs": sample_programs(),
     }
     if "--json" in sys.argv:
         print(json.dumps(data, ensure_ascii=False, indent=2))

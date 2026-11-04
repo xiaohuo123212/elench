@@ -102,14 +102,20 @@ def main() -> int:
           str(it_none.dispatch_warnings))
     check("Ok" in repr(val) or isinstance(val, (int,)) or val is not None, "返回值正常", repr(val))
 
-    print("[4] 规模超出表的覆盖范围：退化 + 一条警告（不静默）")
+    print("[4] 规模超出表的覆盖范围：**沿最近那段延伸** + 一条警告（不静默）")
     small_tbl = os.path.join(tmp, "small.dispatch.yaml")
     io.open(small_tbl, "w", encoding="utf-8", newline="\n").write(
         "module: count\nlabel: freq_kernel\nsegments:\n"
         "  - {lo: 1, hi: 4, candidate: freq_pairwise}\n")
     it_out = Interp(ch, tu, table_path=small_tbl)
     it_out.call("count", [list(b"ab" * 32)])                 # n = 64 > 4
-    check(it_out.last_candidates.get("freq_kernel") == "freq_bucket", "退化为第一个实现",
+    # 2026-11-03 改规则：越界不再"退回第一个候选"，而是**沿最近的那一段延伸**
+    # （低于下界用第一段的候选，高于上界用最后一段的）。理由是段表已经写明
+    # "这个区间谁更快"，而"第一个候选"只是书写顺序，可能恰好是慢的那个——
+    # 实测 `count`：按书写顺序取会让 n>4096 的承诺凭空变成 O(n²)。
+    # 承诺侧（`cost` 的哨兵段）用的是同一条规则，两边必须一致，否则就是破界。
+    check(it_out.last_candidates.get("freq_kernel") == "freq_pairwise",
+          "越上界沿最后一段延伸 → freq_pairwise",
           str(it_out.last_candidates))
     check(len(it_out.dispatch_warnings) == 1, "留一条警告", str(it_out.dispatch_warnings))
 

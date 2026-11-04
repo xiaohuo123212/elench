@@ -1642,14 +1642,25 @@ class Interp:
                         _seg = _who
                         break
             cand = None
+            if not _seg and _segs and _size is not None:
+                # **越界按 `over` 的顺序退回**：低于下界用第一个，高于上界用**最后一个**。
+                # 以前一律退"第一个"——而承诺里已经写明越上界该跑什么
+                # （`cost` 出来是 `n(xs)>65536: …21×n…`），两边不同源就是**破界**。
+                # **沿最近的那一段延伸**：低于下界用第一段的候选，高于上界用最后一段的。
+                # 与 `cost_interp._dispatch` 的哨兵段**同一条规则**——两边不同源就是破界。
+                if _size < _segs[0][0]:
+                    _seg = _segs[0][2]
+                elif _size > _segs[-1][1]:
+                    _seg = _segs[-1][2]
+                if _seg:
+                    _msg = (f"?!{label}: 规模 {_size} 超出分档表范围"
+                            f"（表覆盖 {_segs[0][0]}..{_segs[-1][1]}），"
+                            f"按规则沿最近段延伸 → 候选 {_seg}")
+                    if _msg not in self.dispatch_warnings:
+                        self.dispatch_warnings.append(_msg)
+                        print("  ！ " + _msg, file=sys.stderr)
             if _seg and _seg in cands and any(c.kind == "block" for c in cands[_seg].children):
                 cand = cands[_seg]
-            elif _segs and _size is not None:
-                _msg = (f"?!{label}: 规模 {_size} 不在分档表范围内"
-                        f"（表覆盖 {_segs[0][0]}..{_segs[-1][1]}），退化为第一个实现")
-                if _msg not in self.dispatch_warnings:
-                    self.dispatch_warnings.append(_msg)
-                    print("  ！ " + _msg, file=sys.stderr)
             # **P0 修复**：表已经选好候选时，绝不能被 `over` 的顺序循环覆盖。
             # 旧写法无条件走下面的循环，实际执行 `over` 里第一个有实现的候选，
             # 而 `last_candidates` 记的是表选的那个 —— 报告与实际不一致。

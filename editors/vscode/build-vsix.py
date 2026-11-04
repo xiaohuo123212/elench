@@ -110,6 +110,19 @@ def main() -> int:
                     rel = os.path.relpath(src, py_dir).replace(os.sep, "/")
                     z.write(src, f"extension/python/{rel}")
 
+        # **自带运行时**：runtime/ 下的解释器与标准库一起打进去，
+        # 测试者不需要另装 Python。这里不按扩展名过滤（.exe/.dll/.pyd 都要）。
+        rt_dir = os.path.join(HERE, "runtime")
+        if os.path.isdir(rt_dir):
+            for root, dirs, files in os.walk(rt_dir):
+                dirs[:] = sorted(d for d in dirs if d != "__pycache__")
+                for fname in sorted(files):
+                    if fname.endswith(".pyc"):
+                        continue
+                    src = os.path.join(root, fname)
+                    rel = os.path.relpath(src, rt_dir).replace(os.sep, "/")
+                    z.write(src, f"extension/runtime/{rel}")
+
         # **命令行启动器**：bin/ 下的 elench(.cmd)
         bin_dir = os.path.join(HERE, "bin")
         if os.path.isdir(bin_dir):

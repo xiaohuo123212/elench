@@ -4,6 +4,7 @@ setlocal
 set "HERE=%~dp0"
 set "SCRIPT=%HERE%..\python\elench.py"
 set "PY="
+if exist "%HERE%..\runtime\python.exe" set "PY=%HERE%..\runtime\python.exe"
 for %%P in (python.exe python3.exe) do (
   if not defined PY (
     where %%P >nul 2>nul && set "PY=%%P"

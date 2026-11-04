@@ -34,6 +34,12 @@ from typing import Dict, List, Optional, Tuple
 
 # ---------------------------------------------------------------- 符号值
 
+#: **哨兵段的边界**。`?!` 的承诺里用 `[-PIECE_BIG, lo-1]` 与 `[hi+1, PIECE_BIG]`
+#: 两段来表达"低于下界跑第一个候选 / 高于上界跑最后一个"，
+#: 这样不必给 `Cost.piece` 加第二个 fallback 参数（那要动九处）。
+PIECE_BIG = 1 << 62
+
+
 class Cost:
     """符号域的一个成本值。不可变。"""
 
@@ -112,6 +118,13 @@ class Cost:
             return Cost.top()
         if a.kind == "num" and b.kind == "num":
             return Cost.num(max(a.value, b.value))
+        # **`max(0, x) = x`**（E4）：成本恒非负，0 是这一格的底。
+        # 不化简的话，`if (c) { i = xs.length() }` 合并出 `max(0, n(xs))`，
+        # 而循环上界的提取器认不出 `max` 节点，会退回符号 `n(i)` → 判决 `unknown`。
+        if a.kind == "num" and a.value == 0:
+            return b
+        if b.kind == "num" and b.value == 0:
+            return a
         if _same(a, b):
             return a
         if a.kind == "piece" or b.kind == "piece":
@@ -303,8 +316,22 @@ class Cost:
             return f"max({self.args[0].render()}, {self.args[1].render()})"
         if k == "piece":
             var, segs = self.value
-            parts = [f"{lo}≤n({var})≤{hi}: {c.render()}" for lo, hi, c in segs]
-            return "{" + "; ".join(parts) + f"；越界: {self.args[0].render()}}}"
+            parts = []
+            below = above = False
+            for lo, hi, c in segs:
+                # **哨兵段**（`PIECE_BIG`）：不印天文数字，印成 `n<…` / `n>…`。
+                # 它们不是"真实区间"，而是"越界时跑哪个候选"的显式表达。
+                if lo <= -PIECE_BIG // 2:
+                    parts.append(f"n({var})<{hi + 1}: {c.render()}")
+                    below = True
+                    continue
+                if hi >= PIECE_BIG // 2:
+                    parts.append(f"n({var})>{lo - 1}: {c.render()}")
+                    above = True
+                    continue
+                parts.append(f"{lo}≤n({var})≤{hi}: {c.render()}")
+            tail = "" if (below and above) else f"；越界: {self.args[0].render()}"
+            return "{" + "; ".join(parts) + tail + "}"
         return "?"
 
     def __repr__(self) -> str:

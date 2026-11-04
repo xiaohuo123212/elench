@@ -52,10 +52,147 @@ class Restart:
     label: str                   # 一句话：如「重测并生成分档表」
     argv: List[str] = field(default_factory=list)      # kind=command
     patch: Dict[str, Any] = field(default_factory=dict)  # kind=edit：{file,line,text}
+    #: **要不要碰 `target` 那一行**。默认 False ⇒ 构造时就拒绝。
+    #: 只有"修正格式/槽位"这类修复才该是 True；**改写成本表达式永远不许**。
+    #: （必须放在最后一个字段：前面的构造都是位置传参。）
+    touches_target: bool = False
+
+    def __post_init__(self) -> None:
+        """**硬规则在构造点就拒绝**：任何 restart 都不许触碰 `.tu` 的 `target`。
+
+        以前这条只写在 docstring 里、再由 `test_restarts.py` 事后查一遍——
+        而且只查了债务修法清单那一处。**诊断带 actions 之后，能改文件的地方变多了**，
+        靠测试守纪律等于没守：新增一条诊断就可能悄悄绕过。
+
+        契约是**持久的**，实现是**一次性的**；"不达标就改承诺"这条路必须不存在。
+        （对应 Anthropic 那条：技术上做得到，也不让做——所以要**在能力边界上拒绝**，
+        不是在使用时自觉。）
+        """
+        blob = " ".join([str(self.patch.get("text", "")),
+                         str(self.patch.get("file", "")),
+                         " ".join(self.argv or [])])
+        if "target" in blob and not self.touches_target:
+            raise ValueError(
+                "restart 不许触碰 target（契约持久、实现一次性；"
+                f"要改 target 请人工编辑）：{self.label}")
 
     def to_dict(self) -> dict:
         return {"kind": self.kind, "label": self.label,
                 "argv": list(self.argv), "patch": dict(self.patch)}
+
+
+def _line_patch(src: Optional[str], file: str, line: int, fn, label: str):
+    """把某一行的文本按 `fn` 改写，做成一条 `edit` 修法；拿不到那行就返回 None。
+
+    **宁可返回 None（给不出修法），也不给一条会改错行的修法。**
+    """
+    lines = (src or "").splitlines()
+    if not (0 < line <= len(lines)):
+        return None
+    old = lines[line - 1]
+    try:
+        new = fn(old)
+    except Exception:                                  # noqa: BLE001
+        return None
+    if new is None or new == old or not new.strip():
+        return None
+    return Restart("edit", label, patch={"file": file, "line": line,
+                                         "text": new.strip()})
+
+
+def _ren_obj(s: str, old: str):
+    """把 `objective <old>;` 里的取值换成 `time`（找不到就返回 None）。"""
+    i = s.find("objective")
+    if i < 0 or not old:
+        return None
+    j = s.find(old, i)
+    if j < 0:
+        return None
+    return s[:j] + "time" + s[j + len(old):]
+
+
+def _rewrite_cond(s: str, var: str, vec: str):
+    """把 `while (<任意>)` 的条件改写成 `var < vec.length()`。"""
+    import re as _re
+    if not var or not vec:
+        return None
+    new, n = _re.subn(r"while\s*\([^)]*\)",
+                      "while (" + var + " < " + vec + ".length())", s, count=1)
+    return new if n else None
+
+
+def _first_vec_param(fn):
+    """函数里第一个容器形参的名字（找不到就 None）——修 while 条件要用它。"""
+    for p in walk(fn, "param"):
+        # 类型是 **node** 不是字符串：`type-ref → type-name(name="Vec") → type-args`
+        vals, stack = [], [p]
+        while stack:
+            n = stack.pop()
+            v = getattr(n, "value", None)
+            if isinstance(v, str):
+                vals.append(v)
+            nm = getattr(n, "name", None)
+            if isinstance(nm, str):
+                vals.append(nm)
+            stack.extend(getattr(n, "children", None) or [])
+        if any("Vec" in x for x in vals):
+            return getattr(p, "name", None)
+    return None
+
+
+def _target_slot_fix(src, file: str, line: int, bad: str):
+    """槽位名不合法 → 换成 `max`。**显式声明 touches_target**，且只改槽位名。"""
+    lines = (src or "").splitlines()
+    if not (0 < line <= len(lines)) or not bad:
+        return None
+    old = lines[line - 1]
+    if bad + ":" not in old:
+        return None
+    new = old.replace(bad + ":", "max:", 1)
+    return Restart("edit", "把槽位改成 `max`（上界的默认写法）",
+                   patch={"file": file, "line": line, "text": new.strip()},
+                   touches_target=True)
+
+
+def _acts(a) -> list:
+    """`actions=[...]` 的便捷写法：拿不到修法就给空列表。"""
+    return [a] if a is not None else []
+
+
+def _spec_skeleton(ai_src: Optional[str], fn) -> str:
+    """从 `.eln` 的函数签名**抄**出一个 spec 骨架。
+
+    只处理单行签名；多行签名**不瞎猜**，返回一句提示——宁可给不出，也不给错的。
+    """
+    lines = (ai_src or "").splitlines()
+    if not (0 < getattr(fn, "line", 0) <= len(lines)):
+        return "spec <函数名>(...) { effects {}; }"
+    head = lines[fn.line - 1].strip()
+    if "{" not in head:
+        return f"// 多行签名：请手动为 `{getattr(fn, 'name', '')}` 写 spec"
+    sig = head.split("{", 1)[0].strip()
+    for kw in ("func ", "fn "):
+        if sig.startswith(kw):
+            sig = "spec " + sig[len(kw):]
+            break
+    return f"{sig} {{ effects {{}}; }}"
+
+
+def _guarantees_line(spec) -> int:
+    """spec 里第一条 `guarantees` 子句所在的行（找不到就退回 spec 的行）。"""
+    body = next((c for c in (spec.children or []) if c.kind == "spec-body"), None)
+    for cl in (body.children if body else []):
+        if cl.kind == "clause" and (cl.name or "") == "guarantees":
+            return getattr(cl, "line", 0) or getattr(spec, "line", 0)
+    return getattr(spec, "line", 0)
+
+
+def _demote_guarantees(tu_src: Optional[str], line: int) -> str:
+    """把某一行的 `guarantees X;` **注释掉**（`assume` 已于 2026-11-04 移除）。"""
+    lines = (tu_src or "").splitlines()
+    if not (0 < line <= len(lines)):
+        return "// 拿不到这一行，请手动删掉这条 guarantees"
+    return "// " + lines[line - 1].strip() + "   ← 不可检查，已注释"
 
 
 @dataclass
@@ -604,9 +741,16 @@ def _check_benchmodel(res, specs, choosers, impls, consts=None) -> None:
         # ---- MB-8：成本式里出现的尺寸变量都要有 scale，且至少 2 个
         #      （成本式检查放在 §7.8 的实现里；此处只查"一个都没写"）
         if scale is None or not scaled:
+            # **注意优先级**：`parser.py` 通常已经先抛同名错误（文案带"必写"），
+            # 所以这条只是兜底；两条文案必须一致，否则用户会看到两种说法。
             res.diagnostics.append(Diag(
                 "E-Bench-MissingScale",
-                "benchmodel 缺少 `scale` 段（测哪些规模）", bm.line, bm.col))
+                "benchmodel 缺少 `scale` 段（测哪些规模，必写）", bm.line, bm.col,
+                actions=[Restart(
+                    "edit", "补一个 scale 骨架（把 xs 换成你的容器名）",
+                    patch={"file": (module or "a") + ".tu",
+                           "line": bm.line,
+                           "text": "scale { xs in range(1, 4096, *2); }"})]))
 
 
 def _check_sort_calls(res, all_fns) -> None:
@@ -725,7 +869,9 @@ def check_recursion_depth(impls: Dict[str, Node],
     return diags
 
 
-def _check_while_bounds(res, all_fns, specs, strict: bool) -> None:
+def _check_while_bounds(res, all_fns, specs, strict: bool,
+                        ai_src: Optional[str] = None,
+                        fn_file: Optional[str] = None) -> None:
     """给每个 `while` 判定上界来源；③ 类按严格模式分档处理。"""
     from bound import progresses
     for fn in all_fns:
@@ -747,7 +893,7 @@ def _check_while_bounds(res, all_fns, specs, strict: bool) -> None:
                     "E-Loop-CounterUnchanged",
                     f"{prog_why} —— 这会变成死循环（成本为 ∞），不能给出有限上界。"
                     f"出路：① 在体内推进它（`i = i + 1` / `q.pop()`）；"
-                    f"② 若确实由外部条件控制，改成有界循环并配 `assume`",
+                    f"② 若确实由外部条件控制，改成有界循环，并把那个上界**写成 benchmodel 的输入**",
                     wh.line, wh.col, severity="error"))
                 continue
 
@@ -786,11 +932,18 @@ def _check_while_bounds(res, all_fns, specs, strict: bool) -> None:
             hint = ("三条出路：① 若条件可用尺寸比较表达，改写成 `while (i < xs.length())`；"
                     "② 若条件是个函数，把上界写进该函数的 spec 的 repeats；"
                     "③ 否则改写成 for + break")
+            _v = getattr(cond.children[0], "name", None) if (
+                cond is not None and getattr(cond, "children", None)) else None
+            _vec = _first_vec_param(fn)
             res.diagnostics.append(Diag(
                 "E-While-NoBound",
                 f"无法确定 while 的迭代次数。{hint}",
                 wh.line, wh.col,
-                severity="error" if strict else "warning"))
+                severity="error" if strict else "warning",
+                actions=_acts(_line_patch(
+                    ai_src, fn_file or ((module or "a") + ".eln"), wh.line,
+                    lambda s, a=_v, b=_vec: _rewrite_cond(s, a, b),
+                    f"把条件改成 `{_v} < {_vec}.length()`（若这是遍历整个容器）"))))
 
 
 def _fn_type_params_of(fn) -> set:
@@ -954,6 +1107,56 @@ def _check_generic_calls(impl_mod, specs) -> List[Diag]:
     return diags
 
 
+#: `_call_inner` 里有专门分支的内建——不算"未声明调用"
+_CALL_BUILTIN = {"min", "max", "Ok", "Err", "Some", "None", "panic", "unwrap",
+                 "expect", "assert", "print", "println", "dbg",
+                 "for_each", "map", "filter", "fold", "count_if", "sort", "sort_by"}
+
+
+def unknown_calls(tu_mod, ch_mod) -> list:
+    """**E18**：找出分析器不认识的调用名。
+
+    判据：不在用户函数里、不是 stdlib、不是已声明 `extern`、不是语言内建。
+    方法调用（`xs.length()`）走成员派发，不在这个兜底里。
+
+    为什么需要它：`_call_inner` 遇到这种调用会记 `1 + 实参`，
+    **把被调函数体当成 0 成本**——对内部一无所知时这不是上界。
+    """
+    try:
+        import stdlib as _sl
+        from bound import _descendants as _desc
+    except Exception:                                  # noqa: BLE001
+        return []
+    fns, externs = set(), set()
+    for m in (tu_mod, ch_mod):
+        if m is None:
+            continue
+        for n in (getattr(m, "children", None) or []):
+            if getattr(n, "kind", "") in ("func", "fn", "kernel") and getattr(n, "name", None):
+                fns.add(n.name)
+    # **以 `CostInterp` 自己的登记表为准**——它已经把三种写法都解析过了
+    # （顶层 `extern`、spec 里的 `external { … }`、`external "lib" { … }`），
+    # 我们再猜一遍形状只会漂。构造失败就退化成"没有已声明项"。
+    try:
+        from cost_interp import CostInterp as _CI
+        _ci = _CI(ch_mod, tu_mod)
+        for _a in ("externs", "extern_spec_names", "extern_names"):
+            externs |= set(getattr(_ci, _a, set()) or set())
+    except Exception:                                  # noqa: BLE001
+        pass
+
+    out = {}
+    for c in (_desc(ch_mod, "call") if ch_mod is not None else []):
+        nm = getattr(c, "name", None) or ""
+        if "." in nm or "::" in nm:
+            continue
+        if (not nm or nm in fns or nm in externs
+                or nm in _CALL_BUILTIN or _sl.is_stdlib(nm)):
+            continue
+        out.setdefault(nm, getattr(c, "line", None))
+    return sorted(out.items(), key=lambda kv: (kv[1] or 0))
+
+
 def check_module(tu_src: str, ai_src: Optional[str], module: str = "<module>",
                 strict: bool = False, overflow: str = "off") -> CheckResult:
     res = CheckResult(module=module)
@@ -976,6 +1179,17 @@ def check_module(tu_src: str, ai_src: Optional[str], module: str = "<module>",
             res.diagnostics.append(Diag(d.code, "[.eln] " + d.message,
                                         d.line, d.col, d.start, d.end))
 
+    # **E18（方案 B）**：未声明的外部调用 → 报错，而不是悄悄记 1。
+    # 记 1 等于把被调函数体当成 0 成本；对一个可能跑 10⁶ 步的调用，κ 就不再是上界。
+    for _nm, _ln in unknown_calls(tu.module if tu else None,
+                                  ai.module if ai is not None else None):
+        res.diagnostics.append(Diag(
+            "E-Call-Undeclared",
+            f"调用了未声明的外部函数 `{_nm}`：它的成本无法推导，"
+            f"而「记 1 个操作」**不是上界**（E18）。"
+            f"在 spec 里声明一行：`external {{ {_nm}: O(n); }};`（把 `O(n)` 换成它真实的界）",
+            _ln or 1, 1, severity="error"))
+
     tu_items = tu.module.children if tu.module else []
     ai_items = ai.module.children if (ai is not None and ai.module is not None) else []
 
@@ -983,7 +1197,7 @@ def check_module(tu_src: str, ai_src: Optional[str], module: str = "<module>",
     #
     # 以前 `guarantees` 是"能写、没人看"——一个**假的承诺位**。
     # 现在分两类：可检查的进运行时校验（`I-Guarantee-Runtime`），
-    # 不可检查的**必须**报出来（`E-Guarantee-Uncheckable`），要求改写或降级成 `assume`。
+    # 不可检查的**必须**报出来（`E-Guarantee-Uncheckable`），要求改写或注释掉。
     try:
         import guarantees as _gt
         for _it in tu_items:
@@ -995,12 +1209,18 @@ def check_module(tu_src: str, ai_src: Optional[str], module: str = "<module>",
                     "E-Guarantee-Uncheckable",
                     f"{_it.name} 的 guarantees 无法检查：{_bad[0]}；"
                     f"可检查的谓词只有 {', '.join(sorted(_gt.CHECKABLE))}，"
-                    f"否则请改写（或降级写成 `assume`）",
+                    f"否则请改写（或把这行注释掉——`assume` 已移除）",
                     _it.line, _it.col, severity="warning",
                     actions=[Restart(
-                        "info", "降级成 `assume`（把承诺说成假设）",
-                        patch={"file": module + ".tu", "line": _it.line,
-                               "text": "assume <原来的条件>;"})]))
+                        # **以前这里写着字面占位符 `<原来的条件>`**：真应用了
+                        # 就是往文件里写这行字。现在给出**真实的那一行**。
+                        "edit", "把这行 promises 注释掉（旧的「降级成 assume」已随 assume 一起移除）",
+                        # **行号取 `guarantees` 子句那一行，不是 spec 那一行**——
+                        # 取 spec 行会改到 `spec a(...) {` 上去（实测踩过）。
+                        patch={"file": (module or "a") + ".tu",
+                               "line": _guarantees_line(_it),
+                               "text": _demote_guarantees(tu_src,
+                                                          _guarantees_line(_it))})]))
             elif _ok:
                 res.diagnostics.append(Diag(
                     "I-Guarantee-Runtime",
@@ -1062,7 +1282,11 @@ def check_module(tu_src: str, ai_src: Optional[str], module: str = "<module>",
             if error_decl is not None:
                 res.diagnostics.append(Diag(
                     "E-Dup-Error", "模块级 `error` 声明只能有一个（v0.68）",
-                    it.line, it.col))
+                    it.line, it.col,
+                    actions=_acts(_line_patch(
+                        tu_src, (module or "a") + ".tu", it.line,
+                        lambda s: "// " + s.strip() + "   // ← 重复的 error 声明",
+                        "把重复的那一行注释掉（保留第一个）"))))
             error_decl = it
         elif it.kind == "spec":
             specs[it.name] = it
@@ -1105,22 +1329,33 @@ def check_module(tu_src: str, ai_src: Optional[str], module: str = "<module>",
         for c in body.children:
             if c.kind == "clause" and c.name not in KNOWN_CLAUSES:
                 res.diagnostics.append(Diag(
-                    "E-Clause-Unknown", f"未知子句 {c.name}", c.line, c.col))
+                    "E-Clause-Unknown", f"未知子句 {c.name}", c.line, c.col,
+                    actions=_acts(_line_patch(
+                        tu_src, (module or "a") + ".tu", c.line,
+                        lambda s: "// " + s.strip() + "   // ← 未知子句，已注释",
+                        "把这一行注释掉（保留痕迹，不直接删）"))))
             if c.kind == "clause" and c.name == "target":
                 for dim in c.children:
                     for slot in dim.children:
                         if slot.kind == "slot" and slot.name not in ("min", "max", "exact"):
+                            _bad = slot.name or ""
                             res.diagnostics.append(Diag(
                                 "E-Target-BadSlot",
                                 f"target 槽位只能是 min/max/exact，实际 {slot.name}",
-                                slot.line, slot.col))
+                                slot.line, slot.col,
+                                actions=_acts(_target_slot_fix(
+                                    tu_src, (module or "a") + ".tu", slot.line, _bad))))
 
     # ---- F-1：实现必须有声明
     for name, fn in impls.items():
         if name not in specs and name not in kernels_decl:
             res.diagnostics.append(Diag(
                 "E-Fn-NoSpec", f"函数 {name} 在 .tu 中没有对应 spec（F-1）",
-                fn.line, fn.col))
+                fn.line, fn.col,
+                actions=[Restart("edit", "在 .tu 末尾插入 spec 骨架（target 要你自己填）",
+                                 patch={"file": (module or "a") + ".tu",
+                                        "line": len((tu_src or "").splitlines()) + 1,
+                                        "text": _spec_skeleton(ai_src, fn)})]))
 
     # ---- F-2：签名一致
     for name, fn in impls.items():
@@ -1200,7 +1435,11 @@ def check_module(tu_src: str, ai_src: Optional[str], module: str = "<module>",
                     res.diagnostics.append(Diag(
                         "E-Choose-BadObjective",
                         f"objective 取值非法：{objective}（仅 time/p99/mem/size）",
-                        c.line, c.col))
+                        c.line, c.col,
+                        actions=_acts(_line_patch(
+                            tu_src, (module or "a") + ".tu", c.line,
+                            lambda s, o=objective: _ren_obj(s, o),
+                            "把 objective 改成 `time`（最常用的那个）"))))
 
             if not over:
                 res.diagnostics.append(Diag(
@@ -1437,7 +1676,9 @@ def check_module(tu_src: str, ai_src: Optional[str], module: str = "<module>",
     _check_benchmodel(res, specs, choosers, impls, _int_consts)
 
     # ---- T13：while 的迭代上界（三种来源 + 两档处理）
-    _check_while_bounds(res, all_fns, specs, strict)
+    # `.eln` 的文件名：用模块名拼（`check_module` 拿不到路径）。
+    _check_while_bounds(res, all_fns, specs, strict,
+                        ai_src=ai_src, fn_file=(module or "a") + ".eln")
     _check_sort_calls(res, all_fns)
 
     # ---- C11-b：递归必须有 `recursion depth` 声明（否则 κ 沉默地偏小）

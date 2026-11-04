@@ -68,11 +68,15 @@ def test_every_command_reacts():
 
 def test_real_invocations():
     print("[2] 真实调用：tightness / cost 必须出内容")
-    rc, out, err = run(["tightness", "samples/sum", "--sizes=16", "--runs=2"])
+    # **用公开例子，别用内部样例**：`samples/sum` 这种路径以前能过，
+    # 是因为 `tightness` 会把参数砍成 basename 再去内部样例目录里找（那是 bug）。
+    # 修好之后它按给定路径找，假路径就会如实报错——所以这里改用真文件。
+    ex = os.path.join(ROOT, "文档", "入门", "例子", "pick")
+    rc, out, err = run(["tightness", ex, "--sizes=16", "--runs=2"])
     check(rc == 0, "tightness 退出 0", f"rc={rc} {err[-100:]}")
     check("slack_typ" in (out + err), "tightness 输出含 slack_typ", (out + err)[:80])
 
-    rc, out, err = run(["cost", "samples/sum"])
+    rc, out, err = run(["cost", ex])
     check("κ" in (out + err) or "=" in (out + err), "cost 有实质输出",
           (out + err)[:80])
 

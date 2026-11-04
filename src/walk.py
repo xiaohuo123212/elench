@@ -64,7 +64,7 @@ IGNORED = {
     "fn": "函数定义",
     "use": "use 声明（当前不加载）",
     "extern": "外部声明",
-    "assume": "模块级环境假设，不在函数体内",
+    "assume": "**已移除的语法**（2026-11-04）：解析阶段直接报 E-Assume-Removed",
     "enum": "枚举声明",
     "variant": "枚举变体",
     "struct": "结构体声明",

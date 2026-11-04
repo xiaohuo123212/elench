@@ -104,6 +104,32 @@ def test_no_target_restart():
           str([a.argv for a in acts]))
 
 
+def test_target_edit_needs_explicit_allow():
+    """**"不许改 target"要在构造点就拒绝**，不是靠测试事后发现。
+
+    对应 Anthropic 那条：技术上做得到，也不让做——所以要**在能力边界上拒绝**。
+    """
+    print("[2b] 碰 target 的修法必须显式声明 + 显式放行")
+    from checker import Restart
+    raised = False
+    try:
+        Restart("edit", "偷偷放宽 target",
+                patch={"file": "m.tu", "line": 3, "text": "target { time: { max: O(n) } }"})
+    except ValueError:
+        raised = True
+    check(raised, "默认构造就拒绝（不等到执行）")
+
+    ok = Restart("edit", "修正槽位名",
+                 patch={"file": "m.tu", "line": 3, "text": "target { time: { max: O(n) } }"},
+                 touches_target=True)
+    check(ok.touches_target, "显式声明后可以构造")
+
+    # 执行侧：没有 --allow-target-edit 就拒绝
+    from dsh import _run_restart
+    rc = _run_restart(ok)
+    check(rc == 3, "执行时拒绝（退出码 3）", str(rc))
+
+
 def test_guarantee_restart():
     print("[3] 不可检查的 guarantees 带一条修法")
     tu = """
@@ -117,7 +143,18 @@ spec f(const Vec<u64>& xs) -> u64 {
     check(d is not None, "报出了 E-Guarantee-Uncheckable")
     check(d is not None and len(d.actions) >= 1, "带至少一条修法",
           str(d.actions if d else None))
-    check(d is not None and d.actions[0].kind == "info", "是 info 类（只提示）")
+    # 2026-11-03 改：这条以前是 `info` 类，而且 patch 里写着字面占位符
+    # `<原来的条件>`——真应用就是往文件里写那行字。现在是真 `edit`，
+    # 且行号取 `guarantees` 那一行（不是 spec 那行）。
+    a0 = d.actions[0] if d else None
+    check(a0 is not None and a0.kind == "edit", "是 edit 类（能落到文件上）",
+          str(a0))
+    check(a0 is not None and "已注释" in a0.patch.get("text", ""),
+          "给的是被注释掉的 guarantees 那一行", str(a0.patch if a0 else None))
+    check(a0 is not None and "<" not in a0.patch.get("text", ""),
+          "**没有占位符**", str(a0.patch if a0 else None))
+    check(a0 is not None and a0.patch.get("line") == 4,
+          "指到 guarantees 那一行（第 4 行）", str(a0.patch if a0 else None))
 
 
 def test_lenient_vs_deny():
@@ -159,6 +196,7 @@ def test_apply_runs():
 def main() -> int:
     test_dataclass()
     test_no_target_restart()
+    test_target_edit_needs_explicit_allow()
     test_guarantee_restart()
     test_lenient_vs_deny()
     test_apply_runs()

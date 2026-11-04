@@ -115,12 +115,19 @@ class CostInterp:
     """
 
     def __init__(self, mod: Node, decl: Optional[Node] = None, table_path=None,
-                 diags=None):
+                 diags=None, explain: bool = False):
         # **解析失败就不许给数**（2026-11-01）：
         # 以前 `.eln` 里有语法错误时，坏掉的那段被丢掉，κ 照样算出一个数
         # （`match (n) { 0 => … }` 直接算出 **0**——一个"什么都不承诺"的上界）。
         # 有了诊断就返回 ⊤：不知道就是不知道。
         self.diags = list(diags or [])
+        # **归因侧表（只在 --explain 下维护）**：`id(Cost) → Origin`。
+        # 不给 `Cost` 加字段——它是 `__slots__` 不可变结构，改它会污染所有构造点。
+        # `_keep` 持有强引用：否则中间节点被回收后 `id()` 会被复用，归因指错。
+        self.explain = bool(explain)
+        self.origins: Dict[int, Dict[str, Any]] = {}
+        self.dispatch_cands: Dict[str, Dict[str, "Cost"]] = {}
+        self._keep: list = []
         # **分档表不参与承诺**（2026-11-01 定）。
         #
         # 曾经这里是"有表就按逐段上界"：把每段候选在**段末端**折成一个常数再取 max。
@@ -200,9 +207,6 @@ class CostInterp:
                 v = _const_int_value(it)
                 if v is not None:
                     self.const_values.setdefault(it.name, v)
-        # **批次 S**：模块级 `assume` 声明（环境参数的**上界**）。
-        # 形如 `assume n <= xs.length();` → {n: Bound(size, xs)}
-        # 用途：让界里的环境变量归约成尺寸表达式（否则 `while (i < n)` 只能给 `n(n)`）。
         # **批次 S**：外部符号（`extern`）只**数次数**，不**估价格**——
         # 因为它的内部成本我们看不见；「调了几次」可静态算、可验证，
         # 「每次多贵」属环境，写进 `.tu` 就是又一处可撒谎位置。
@@ -211,19 +215,11 @@ class CostInterp:
         for e in (_descendants(decl, "extern") if decl is not None else []):
             if getattr(e, "name", None):
                 self.externs[e.name] = e
+        # **`assume` 已移除（2026-11-04）**：这个字典恒为空。
+        # 它原来装「环境参数的上界」，但那是个**不可验证**的断言，
+        # 而 κ 的卖点正是可验证——见 `C-决定与索引.md` N-13。
+        # 形参仍往下传给 `bound`，但永远是空 dict（`if assumptions:` 恒假）。
         self.assumptions: Dict[str, object] = {}
-        for a in _descendants(decl, "assume") if decl is not None else []:
-            for c in a.children:
-                if getattr(c, "kind", None) != "binary":
-                    continue
-                if (c.value or "") not in ("<", "<=") or len(c.children) < 2:
-                    continue
-                lhs, rhs = c.children[0], c.children[1]
-                if getattr(lhs, "kind", None) != "path" or not lhs.name:
-                    continue
-                b = expr_to_bound(rhs)
-                if b is not None:
-                    self.assumptions.setdefault(lhs.name, b)
         # **A–D**：不再写模块级全局（旧写法会清掉别的实例的常量表）。
         # 旧全局与旧函数暂时保留给 `_baseline` 对拍用，新代码一律走实例级版本。
         self._collect_repeats()
@@ -495,7 +491,7 @@ class CostInterp:
             # 复用**时间成本那套**循环上界推导（G29 提取器），保证两维口径一致
             b, _why = bound_of_condition_wrapper(
                 s, self.repeats.get, {}, self.row_of, self.capacities,
-                self.const_names, self.cur_fn, self.assumptions)
+                self.const_names, self.cur_fn)
             if b is None:
                 return Cost.top()       # 推不出轮数：分配上界未知（不撒谎）
             bound = bound_to_cost_inst(b, self.const_values)
@@ -705,18 +701,39 @@ class CostInterp:
     def _k_stmt_if(self, st, env):
         cond = st.children[0] if st.children else None
         branches = [c for c in st.children[1:] if c.kind == "block"]
-        # **甲.2**：条件要用 `_expr` 求整条表达式的成本。
-        # 原先这里只算 1 个操作（`cond` 读了没用），而解释器会把条件整个求值一遍。
+        # 甲.2：条件要用 _expr 求整条表达式的成本。
         cc = Cost.add(Cost.num(OP_COST),
                       self._expr(cond, env) if cond is not None
                       else Cost.num(0))
-        costs = [self._block(b, dict(env)) for b in branches]
-        if not costs:
+        if not branches:
             return cc
+        # E4：合并必须真的发生。以前每个分支拿 dict(env) 副本，改完就扔，
+        # 于是分支里赋的界全丢——if (c) { i = xs.length() } 之后的 i
+        # 被当成说不清的量（n(i)），κ 里出现 n(i)，判决变 unknown。
+        # 现在只合并【被写过的键】，值取 Cost.max（上界语义）；
+        # 没被写过的变量原样保留，不制造「两条路都不存在」的假状态。
+        before = dict(env)
+        costs, envs = [], []
+        for b in branches:
+            e2 = dict(env)
+            costs.append(self._block(b, e2))
+            envs.append(e2)
         worst = costs[0]
         for x in costs[1:]:
             worst = Cost.max(worst, x)
+        changed = set()
+        for e2 in envs:
+            for k, v in e2.items():
+                if k not in before or before[k].render() != v.render():
+                    changed.add(k)
+        for k in changed:
+            vals = ([before[k]] if k in before else []) + [e2[k] for e2 in envs if k in e2]
+            cur = vals[0]
+            for v in vals[1:]:
+                cur = Cost.max(cur, v)
+            env[k] = cur
         return Cost.add(cc, worst)
+
     def _k_stmt_parallel(self, st, env):
         # **B-24**：κ = Σ_i κ_i（每个任务是 `parallel { {…} {…} }` 里的一个块）。
         # 判阶时等价于 max（阶相加取 max），因此 target 判定仍成立。
@@ -748,7 +765,41 @@ class CostInterp:
         return self._dispatch(st, env)
 
 
+    # ---------------------------------------------------------------- 归因钩子
+    #
+    # 三个"元凶粒度"的构造：循环 / 调用 / `?!` 选择。
+    # **只在 explain 下登记**，而且只写侧表——**不参与任何算术**，
+    # 所以开着它算出来的 κ 与不开**逐字节相同**（这是硬约束）。
+
+    def _mark(self, c: "Cost", node: Node, kind: str, note: str = "") -> "Cost":
+        if self.explain and c is not None:
+            try:
+                self._keep.append(c)
+                self.origins[id(c)] = {
+                    "line": getattr(node, "line", 0),
+                    "col": getattr(node, "col", 0),
+                    "kind": kind,
+                    "note": note,
+                    # `substitute_sizes` 会**重建**节点，`id()` 随之失效；
+                    # 记一份 render 文本，报告侧可以按文本回找。
+                    "render": c.render(),
+                }
+            except Exception:                          # noqa: BLE001
+                pass
+        return c
+
     def _while(self, st: Node, env: Dict[str, Cost]) -> Cost:
+        return self._mark(self._while_inner(st, env), st, "loop")
+
+    def _call(self, name: Optional[str], node: Node, env: Dict[str, Cost]) -> Cost:
+        c = self._call_inner(name, node, env)
+        return self._mark(c, node, "call", (name or "").split(".")[-1])
+
+    def _dispatch(self, node: Node, env: Dict[str, Cost]) -> Cost:
+        c = self._dispatch_inner(node, env)
+        return self._mark(c, node, "dispatch", node.name or "")
+
+    def _while_inner(self, st: Node, env: Dict[str, Cost]) -> Cost:
         cond = st.children[0] if st.children else None
         body = next((c for c in st.children[1:] if c.kind == "block"), None)
 
@@ -756,7 +807,7 @@ class CostInterp:
         # 同时把 env 里已知的尺寸名交给它，避免 `n` 认不出来。
         b, _why = bound_of_condition_wrapper(
             st, self.repeats.get, env, self.row_of, self.capacities,
-            self.const_names, self.cur_fn, self.assumptions)
+            self.const_names, self.cur_fn)
         if b is None:
             return Cost.top()
 
@@ -797,8 +848,7 @@ class CostInterp:
                              for k, v in env.items() if v.kind == "size"}
                 rhs = clean_bound_inst(expr_to_bound(cond.children[1]),
                                        self.cur_fn, env_sizes,
-                                       self.row_of, self.capacities,
-                                       self.assumptions)
+                                       self.row_of, self.capacities,)
                 if rhs is not None:
                     body_cost = body_cost.substitute_sizes(
                         {cond.children[0].name: bound_to_cost_inst(rhs, self.const_values)})
@@ -1180,7 +1230,7 @@ class CostInterp:
             total = Cost.add(total, self._expr(a, env))
         return total
 
-    def _call(self, name: Optional[str], node: Node, env: Dict[str, Cost]) -> Cost:
+    def _call_inner(self, name: Optional[str], node: Node, env: Dict[str, Cost]) -> Cost:
         # **FFI**：`extern` 声明的名字 —— 成本是 `ext(name)`（或 `external` 登记值）
         # **高阶内建**：成本 = n(容器) × κ(回调) + n(容器)
         _short_hof = (name or "").split(".")[-1]
@@ -1396,6 +1446,10 @@ class CostInterp:
         # ② 没有 target → 内联
         fn = self.fns.get(short)
         if fn is None:
+            # **E18**：这里假定「被调函数体成本 = 0」，所以记的是 `1 + 实参`。
+            # 对被调内部一无所知时，**这不是上界**——它可能跑 10⁶ 步。
+            # 检测放在 `dsh.py::_unknown_calls`（静态扫一遍），因为这条路上的
+            # 实例可能来自缓存，记账不一定落在报告用的那个对象上。
             # 内置/外部函数：记 `1 + 实参求值`，不猜被调内部。
             # **函数值调用 `g(x)` 也在这里**（`g: func(A)->R` 不在 `self.fns` 里）：
             # 解释器 `_call` 的 FnVal 分支照样先 `_args` 求值再派发，
@@ -1494,7 +1548,25 @@ class CostInterp:
                     return sb.name, pts[0], pts[-1]
         return None, None, None
 
-    def _dispatch(self, node: Node, env: Dict[str, Cost]) -> Cost:
+    def _over_order(self, label: str) -> List[str]:
+        """`over { ... }` 里的候选顺序——**与运行期退回候选时用的顺序必须一致**。
+
+        以前承诺里的"越界"分支取的是 `cands` 的**定义顺序**（`.eln` 里谁先写），
+        而运行期退的是 `over` 的顺序。两份顺序一旦不同，越界时承诺与运行期
+        就不是同一个候选——那正是 S2 同源要防的事。
+        """
+        if self.decl is None:
+            return []
+        for ch in _descendants(self.decl, "choose"):
+            if (ch.name or "") != label:
+                continue
+            for cl in ch.children:
+                if (getattr(cl, "kind", "") == "choose-clause"
+                        and getattr(cl, "name", "") == "over"):
+                    return list((cl.value or {}).get("names", []))
+        return []
+
+    def _dispatch_inner(self, node: Node, env: Dict[str, Cost]) -> Cost:
         """`?!L(...)`：**承诺 = 分段函数**（每段用它自己那个候选的符号式）。
 
         ## 为什么是分段，而不是 max
@@ -1525,15 +1597,33 @@ class CostInterp:
         #
         # 没有表 → 运行期"退化为第一个实现"，那是一个**单点行为**，我们不知道
         # 它一定跑哪个，所以退回 `max`（sound，松一点）。
+        if self.explain and cands:
+            # `?!` 的逐候选分解：我们最独特的一块。**只存不判**。
+            self.dispatch_cands[label] = dict(cands)
         segs_tbl = self.table.get(label) or []
         if len(cands) >= 2 and segs_tbl:
             try:
                 var, lo, hi = self._scale_span()
                 segs = [(a, b, cands[nm]) for a, b, nm in segs_tbl if nm in cands]
                 if var and segs:
-                    first = next(iter(cands.values()))
+                    # **越界时跑哪个，由 `over` 的顺序定，不是定义顺序**：
+                    #   低于下界 → 第一个候选；高于上界 → 最后一个候选。
+                    # 用两段哨兵表达，而不是给 `Cost.piece` 加第二个 fallback
+                    # （加一个 Cost 形状要动九处，见 `能力索引` §0）。
+                    # 运行期 `interp._dispatch` 按**同一条规则**退回，两处必须一致。
+                    # **越界 = 沿最近的那一段延伸**，用的是**段上的候选**，
+                    # 不是 `over` 的顺序。为什么：段表已经告诉我们"在区间顶端谁更快"，
+                    # 而 `over` 的顺序只是书写顺序。反例（实测）：`count` 的 `over`
+                    # 最后一个是 `count_by_scan`（O(n²)），但顶端赢的是线性的那个——
+                    # 若按书写顺序取，n>4096 的承诺会被抬成 O(n²)，凭空变松。
+                    lo_fb = segs[0][2]
+                    hi_fb = segs[-1][2]
+                    from symbolic import PIECE_BIG as _BIG
+                    segs = ([(segs[0][0] - _BIG, segs[0][0] - 1, lo_fb)]
+                            + segs
+                            + [(segs[-1][1] + 1, segs[-1][1] + _BIG, hi_fb)])
                     return Cost.add(Cost.num(OP_COST),
-                                    Cost.piece(var, segs, first))
+                                    Cost.piece(var, segs, lo_fb))
             except Exception:                          # noqa: BLE001
                 pass
 
@@ -1579,8 +1669,7 @@ def _substitute_size(b, row_of: Dict[str, str]):
 
 
 def bound_of_condition_wrapper(st: Node, repeats_of, env, row_of=None,
-                              capacities=None, const_names=None, cur_fn=None,
-                              assumptions=None):
+                              capacities=None, const_names=None, cur_fn=None):
     """把 env 里的两件事告诉 G29 的提取器：
 
       · 初值为 0 的变量（决定上界写成 `e` 还是 `e - i`）
@@ -1614,8 +1703,6 @@ def bound_of_condition_wrapper(st: Node, repeats_of, env, row_of=None,
         # 已经变成 `size(row)` 了。直接改 substitute 会波及所有尺寸替换，风险更大。
         b = _substitute_size(b, row_of or {})
         b = _substitute_capacity(b, capacities or {})
-    if assumptions:
-        b = substitute(b, assumptions)
     return b, why
 def _unwrap_obig(n: Node) -> Node:
     """`O(x)` 去掉 O，取里面的表达式。"""
@@ -1712,7 +1799,7 @@ def drop_cost_of(ty_node, name: str) -> Cost:
     return Cost.num(1)
 
 def clean_bound_inst(b, cur_fn=None, env_sizes=None, row_of=None,
-                     capacities=None, assumptions=None):
+                     capacities=None):
     """`_clean_bound` 的实例级版本：当前函数由参数传入，不读 `_CUR_FN`。"""
     from .bound import substitute, const_bindings
     if b is None:
@@ -1721,8 +1808,6 @@ def clean_bound_inst(b, cur_fn=None, env_sizes=None, row_of=None,
         b = substitute(b, const_bindings(cur_fn))
     b = _substitute_size(b, row_of or {})
     b = _substitute_capacity(b, capacities or {})
-    if assumptions:
-        b = substitute(b, assumptions)
     if env_sizes:
         b = substitute(b, env_sizes)
     return b

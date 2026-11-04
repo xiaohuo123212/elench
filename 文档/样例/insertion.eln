@@ -1,0 +1,20 @@
+// insertion.eln —— 插入排序（嵌套循环，O(n²)）
+pub func insertion(const Vec<u64>& xs) -> u64 {
+    u64 n = xs.length();
+    u64 i = 1;
+    while (i < n) {
+        u64 key = xs[i];
+        u64 j = i;
+        while (j > 0) {
+            if (xs[j - 1] > key) {
+                xs[j] = xs[j - 1];
+                j = j - 1;
+            } else {
+                j = 0;
+            }
+        }
+        xs[j] = key;
+        i = i + 1;
+    }
+    return n;
+}

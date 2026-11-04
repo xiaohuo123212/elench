@@ -37,7 +37,9 @@ import threading
 import urllib.request
 from http.server import ThreadingHTTPServer
 
-sys.path.insert(0, os.path.join(SRC, "..", "tools"))
+# `otel_dashboard` 2026-11-03 搬到了 `src/`（打包需要）；`tools/` 里只剩兼容入口，
+# 那个入口只在 `__main__` 下 runpy 转发，`import` 拿不到 `render`。
+sys.path.insert(0, SRC)
 import otel_dashboard as D  # noqa: E402
 
 _passed = 0

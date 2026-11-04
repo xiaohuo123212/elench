@@ -37,6 +37,20 @@ function pickPython() {
   const { python } = cfg();
   if (python) return python;
   if (chosenPython) return chosenPython;
+  // **先试扩展自带的解释器**：多数测试者机器上没有 Python，
+  // 扩展已经把裁剪版运行时放在 runtime/，那就直接用，别要求用户先装 Python。
+  if (ctx) {
+    const bundled = process.platform === 'win32'
+      ? path.join(ctx.extensionPath, 'runtime', 'python.exe')
+      : path.join(ctx.extensionPath, 'runtime', 'bin', 'python3');
+    if (fs.existsSync(bundled)) {
+      try {
+        cp.execFileSync(bundled, ['--version'], { stdio: 'ignore', timeout: 5000 });
+        chosenPython = bundled;
+        return bundled;
+      } catch (e) { /* 自带的跑不起来，退回 PATH */ }
+    }
+  }
   for (const cand of ['python', 'python3', 'py']) {
     try {
       cp.execFileSync(cand, ['--version'], { stdio: 'ignore', timeout: 5000 });
@@ -167,11 +181,15 @@ function installCli() {
   const dest = stableDir();
   const destPy = path.join(dest, 'python');
   const destBin = path.join(dest, 'bin');
+  const srcRt = path.join(ctx.extensionPath, 'runtime');
+  const destRt = path.join(dest, 'runtime');
   try {
     fs.rmSync(dest, { recursive: true, force: true });
     fs.mkdirSync(destBin, { recursive: true });
     fs.cpSync(srcPy, destPy, { recursive: true });
     fs.cpSync(srcBin, destBin, { recursive: true });
+    // 自带运行时一起搬走，否则装完命令行的机器仍然要求系统里有 Python
+    if (fs.existsSync(srcRt)) fs.cpSync(srcRt, destRt, { recursive: true });
   } catch (e) {
     vscode.window.showErrorMessage(`Elench：复制到 ${dest} 失败：${e.message}`);
     return;
@@ -248,6 +266,29 @@ function activate(context) {
   out = vscode.window.createOutputChannel('Elench');
   diags = vscode.languages.createDiagnosticCollection('elench');
   context.subscriptions.push(out, diags);
+
+  // **首次激活时主动问一次**：终端里的 `elench` 和 VS Code 扩展是两件事，
+  // 用户装上扩展后敲 `elench` 得到「不是内部或外部命令」是最常见的困惑。
+  // 这里在 PATH 上找不到 elench 时直接给一个按钮，不用让他去命令面板里翻。
+  try {
+    const onPath = (() => {
+      try {
+        cp.execFileSync(process.platform === 'win32' ? 'where' : 'which',
+                        ['elench'], { stdio: 'ignore', timeout: 4000 });
+        return true;
+      } catch (e) { return false; }
+    })();
+    if (!onPath && !context.globalState.get('elench.cliPrompted')) {
+      context.globalState.update('elench.cliPrompted', true);
+      vscode.window
+        .showInformationMessage(
+          'Elench：要不要把 `elench` 命令加进终端？（只需一次，之后新开的终端都能用）',
+          '加进终端', '不用了')
+        .then((pick) => {
+          if (pick === '加进终端') installCli();
+        });
+    }
+  } catch (e) { /* 探测失败就静默，不打扰 */ }
 
   const needArgs = (fn) => async () => {
     const args = argsFor(vscode.window.activeTextEditor);

@@ -246,7 +246,13 @@ def monotone_decreasing(fn: Node) -> dict:
       2. 函数体内对它的赋值**只有** `j = j - <常量>` 这一种形态
     满足就认为它单调递减，`while (j > 0)` 的迭代次数不超过初值。
 
-    任何一处 `j = ...` 形态不符 → **整个变量剔除**（宁可不认，不可算小）。
+    **E4（2026-11-04）**：以前**循环外**的赋值（如 `i = xs.length()`）也会剔除变量，
+    于是「循环次数由分支决定」的写法完全拿不到上界。现在区分开：
+
+      - 循环**体内**的赋值：仍按老规则（只许 `j = j - const` / `j = 0`）；
+      - 循环**体外**的赋值：记成「初值覆盖」，**但只在声明处初值是字面量 0 时采用**
+        （`max(0, x) = x`，而 u64 计数器不可能小于 0）。初值非 0 时仍剔除——
+        那种情况要取 max，而这里只能给一个节点，取 max 会失真。
     """
     from parser import Node as _N  # noqa: F401
 
@@ -256,7 +262,19 @@ def monotone_decreasing(fn: Node) -> dict:
             if len(d.children) >= 2:
                 init[d.name] = d.children[1]
 
+    # **循环体内的节点集合**：体内赋值才是"推进量"，体外的是"初值"
+    in_loop: set = set()
+    for w in _descendants(fn, "while"):
+        blk = next((c for c in (getattr(w, "children", None) or [])
+                    if getattr(c, "kind", "") == "block"), None)
+        stack = [blk] if blk is not None else []
+        while stack:
+            nd = stack.pop()
+            in_loop.add(id(nd))
+            stack.extend(getattr(nd, "children", None) or [])
+
     bad: set = set()
+    override: dict = {}
     for a in _descendants(fn, "assign"):
         if not a.children or a.children[0].kind != "path":
             continue
@@ -264,21 +282,33 @@ def monotone_decreasing(fn: Node) -> dict:
         if nm not in init:
             continue
         rhs = a.children[1] if len(a.children) > 1 else None
+        # 循环外的赋值 → 只影响"初值"，不影响"是否单调"
+        if id(a) not in in_loop:
+            if rhs is not None:
+                override[nm] = rhs
+            continue
         ok = False
         if rhs is not None and rhs.kind == "binary" and (rhs.value or "") == "-":
             left, right = (rhs.children + [None, None])[:2]
             if (left is not None and left.kind == "path" and left.name == nm
                     and right is not None and right.kind == "lit-int"):
                 ok = True
-        # `j = 0;` 是「提前退出」的惯用写法（插入排序就这么写）：
-        # 赋 0 只会让它更快退出，不会让它多转，所以**不破坏单调递减**。
+        # `j = 0;` 是「提前退出」的惯用写法（插入排序就这么写）
         if rhs is not None and rhs.kind == "lit-int" and str(rhs.value) == "0":
             ok = True
         if not ok:
             bad.add(nm)
 
-    return {nm: v for nm, v in init.items() if nm not in bad}
-
+    out: dict = {}
+    for nm, v in init.items():
+        if nm in bad:
+            continue
+        # 初值是字面量 0 才用覆盖（max(0, x) = x）
+        if nm in override and v is not None and v.kind == "lit-int" and str(v.value) == "0":
+            out[nm] = override[nm]
+        else:
+            out[nm] = v
+    return out
 
 def zero_initialised(fn: Node) -> set:
     """本函数里初值为字面量 0 的变量名。

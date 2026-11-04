@@ -115,8 +115,7 @@ stmt          = const-stmt | var-stmt | assign-stmt | if-stmt | while-stmt
               | for-stmt | match-stmt | parallel-stmt | return-stmt
               | break-stmt | continue-stmt | expr-stmt | block
               | unsafe-block | asm-stmt | spawn-stmt | scope-stmt
-              | rewrite-stmt | assume-stmt ;
-const-stmt    = "const" type IDENT "=" expr ";" ;
+          const-stmt    = "const" type IDENT "=" expr ";" ;
 var-stmt      = type IDENT "=" expr ";" ;
 assign-stmt   = lvalue "=" expr ";" ;
 if-stmt       = "if" "(" expr ")" block [ "else" ( if-stmt | block ) ] ;
@@ -135,7 +134,11 @@ asm-stmt      = "asm" "(" STRING { "," STRING } ")" ";" ;
 spawn-stmt    = "spawn" IDENT "(" [ args ] ")" ";" ;
 scope-stmt    = "scope" block ;
 rewrite-stmt  = "rewrite" IDENT block ;
-assume-stmt   = "assume" expr ";" ;
+
+  (* assume-stmt 已移除（2026-11-04）：关键字 "assume" 仍能被词法识别，
+     但它不再有文法产生式——解析阶段直接报 E-Assume-Removed。
+     理由：它允许声明无法验证的上界，
+     与「κ 是可验证上界」冲突。解析阶段报 E-Assume-Removed，见 parser.parse_assume。 *)
 
 (* ---------------- 表达式 ---------------- *)
 expr          = or-expr ;
@@ -166,8 +169,7 @@ extern-decl   = "extern" IDENT "(" [ params ] ")" [ "->" type ]
 error-decl    = "error" IDENT "{" IDENT { "," IDENT } "}" ";" ;
 tu-clause     = "effects" "{" [ IDENT { "," IDENT } ] "}" ";"
               | "guarantees" expr ";"
-              | "assume" expr ";"
-              | "repeats" expr ";"
+                        | "repeats" expr ";"
               | "recursion" "depth" "<=" INT ";"
               | "target" "{" { dim ":" "{" slot ":" cost-expr "}" } "}" ";"
               | "external" "{" IDENT ":" cost-expr { "," IDENT ":" cost-expr } "}" ";"

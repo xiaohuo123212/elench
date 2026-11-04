@@ -527,14 +527,23 @@ def report(rows: List[Dict[str, Any]], function_name: str) -> str:
                + (f"{'实测操作':>12}  " if ops_unit else f"{'实测 ns':>12}  ")
                + f"{'实测/κ分段':>13}")
     out.append("  " + "-" * 66)
+    any_measured = False
     for r in rows:
         cand = r.get("static_piecewise") or r["static_candidate"]
         ratio = r["measured_over_candidate"]
+        m = r.get("measured")
+        if m is not None:
+            any_measured = True
+        # **没实测时不能格式化 None**：`export` 在没有分档表、也没加 `--measure` 时
+        # 会明说"只画静态线"，那这条路径上 `measured` 就是 None。
+        # 以前这里直接 `:,.0f` 格式化，于是「诚实地说没测」反而崩成 traceback。
         out.append(f"  {r['size']:>10,}  {r['static_bound']:>12,.0f}  "
                    + (f"{cand:>12,.0f}" if cand is not None else f"{'—':>12}")
-                   + f"  {r['measured']:>12,.0f}  "
+                   + (f"  {m:>12,.0f}  " if m is not None else f"  {'—':>12}  ")
                    + (f"{ratio:>13.3e}" if ratio is not None else f"{'—':>13}"))
     out.append("")
+    if not any_measured:
+        out.append("  （未实测：只有静态线。要实测先 `elench measure`，或加 `--measure`）")
     out.append("  **怎么读这张表**：")
     if ops_unit:
         out.append("  - 两个数**同单位（操作数）**——可以直接比大小：`实测 ≤ κ承诺` 才合法")

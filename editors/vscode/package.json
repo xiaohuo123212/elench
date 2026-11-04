@@ -2,7 +2,7 @@
   "name": "elench",
   "displayName": "Elench",
   "description": "Elench（.eln / .tu）：语法高亮 + 内置解释器。拖进 VS Code 即可检查、算成本、跑门禁、直接运行；带环境诊断。",
-  "version": "0.6.18",
+  "version": "0.6.40",
   "publisher": "elench",
   "license": "Apache-2.0",
   "engines": {
