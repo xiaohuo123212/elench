@@ -82,6 +82,48 @@ def dry_run() -> int:
     return 0 if ok else 1
 
 
+def _last_synced_dev(parent: str) -> str:
+    """上一次同步对应的 dev 提交：从父提交的说明里找 `dev <sha>`。
+
+    公开库的提交说明是**唯一**能记录"上次同步到哪"的地方——
+    不能在别处存状态文件（那是又一份会漂移的真相）。
+    """
+    body = git("log", "-1", "--format=%B", parent, check=False) or ""
+    for line in body.splitlines():
+        if "dev " in line:
+            tail = line.split("dev ", 1)[1]
+            sha = "".join(c for c in tail if c.isalnum())[:40]
+            if len(sha) >= 7:
+                return sha
+    return ""
+
+
+def _public_message(dev: str, parent: str) -> str:
+    """公开库的提交说明：**给外面的人看**，不是给自己看。
+
+    以前只写 `Sync from main (dev xxxxxxx)` —— 读者看到的是"同步了一下"，
+    既不知道改了什么，也不知道 `dev` 是什么（那是私有仓库的哈希）。
+
+    现在：标题说清楚版本/范围，正文列出**自上次同步以来的真实提交**。
+    """
+    last = _last_synced_dev(parent)
+    rng = f"{last}..HEAD" if last else "HEAD"
+    subjects = []
+    try:
+        out = git("log", "--no-merges", "--reverse", "--format=%s", rng, check=False) or ""
+        subjects = [ln.strip() for ln in out.splitlines() if ln.strip()]
+    except Exception:                                   # noqa: BLE001
+        subjects = []
+    # 隐私：dev 的提交说明是内部用语，只取**数量**与**前若干条**做摘要，
+    # 且不暴露私有哈希（`dev` 哈希只留在标题的括号里，便于对照调试）。
+    title = f"Release {dev}: {len(subjects)} change(s) since last sync" if subjects \
+        else f"Release {dev}"
+    body = "\n".join(f"- {s}" for s in subjects[:40])
+    if len(subjects) > 40:
+        body += f"\n- … and {len(subjects) - 40} more"
+    return title + "\n\n" + body if body else title
+
+
 def main() -> int:
     if "--dry-run" in sys.argv:
         return dry_run()
@@ -96,7 +138,7 @@ def main() -> int:
         return 0
 
     dev = git("rev-parse", "--short", "HEAD")
-    msg = f"Sync from main (dev {dev})"
+    msg = _public_message(dev, parent)
     new = git("commit-tree", tree, "-p", parent, "-m", msg)
     print(f"  新公开提交 {new[:8]}（父 {parent[:8]}，树 {tree[:8]}）")
 

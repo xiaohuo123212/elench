@@ -1,3 +1,67 @@
+<!-- english -->
+
+# Elench / Elenchus
+
+**Cost contracts as machine-checkable code.** An upper bound is part of the
+signature, and the compiler derives its own bound κ to check it — with three
+honest outcomes: *met*, *debt*, or *undecidable*.
+
+```elench
+// sum.tu — the contract
+spec average(const vector<u64>& scores) -> u64 {
+    effects { alloc };
+    target { time: { max: O(scores.length()) }, allocation: { max: 0 }, };
+}
+```
+
+```elench
+// sum.eln — the implementation
+pub func average(const vector<u64>& scores) -> u64! { ... }
+```
+
+`elench cost sum` computes κ symbolically and compares it with `target`.
+If it cannot derive a bound, it says so — **"unknown" is a first-class answer**,
+never a guess.
+
+## Install
+
+```bash
+npm install -g elench-lang     # the command is `elench`
+npx elench-lang --help         # try without installing
+```
+
+Requires **Python ≥ 3.10** on the machine (`python3`/`python` on PATH, or set
+`PYTHON=/path/to/python`). The npm package is a thin wrapper; it ships the
+sources, not a Python runtime.
+
+## Quick start
+
+```bash
+elench check sum      # static checks: syntax / types / contracts
+elench cost sum       # derive κ, compare with target
+elench cost sum --explain   # if it misses: which line, what to fix
+elench export sum --full --out=report.svg
+```
+
+## Status
+
+A research prototype, not production-ready. 19 subcommands, ~700 commits of
+history, 127 test files. C++ code generation covers a small slice (5/15 samples)
+and is parked while the backend is redesigned.
+
+## Layout
+
+| Path | What |
+|---|---|
+| `src/` | the toolchain (Python) |
+| `文档/样例/` | sample programs (`.tu` contract + `.eln` implementation) |
+| `editors/vscode/` | syntax highlighting for `.tu` / `.eln` |
+| `tools/` | audit, parity, and experiment scripts |
+
+**中文文档见下方。** 中文说明是主文档；上方的英文是给外部读者的入口。
+
+---
+
 # AI 导向编程语言
 
 > **许可证**：代码与文档均为 [Apache-2.0](LICENSE)。
