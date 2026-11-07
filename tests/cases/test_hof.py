@@ -42,7 +42,7 @@ func gt10(u64 x) -> u64 { if (x > 10) { return 1; } return 0; }
 func add(u64 a, u64 b) -> u64 { return a + b; }
 """
 
-TU = ("spec f(const Vec<u64>& xs) -> u64 { effects {}; "
+TU = ("spec f(const vector<u64>& xs) -> u64 { effects {}; "
       "target { time: { max: O(xs.length()) }, allocation: { max: 0 }, }; }\n")
 
 
@@ -55,7 +55,7 @@ def check(name, cond, detail=""):
 
 
 def run(body, xs):
-    ch = PRELUDE + "func f(const Vec<u64>& xs) -> u64 {\n" + body + "\n}\n"
+    ch = PRELUDE + "func f(const vector<u64>& xs) -> u64 {\n" + body + "\n}\n"
     tu = parse_source(TU, "m.tu").module
     mod = parse_source(ch, "m.eln").module
     return Interp(mod, tu).call("f", [list(xs)])
@@ -63,16 +63,16 @@ def run(body, xs):
 
 def main() -> int:
     print("=== map / filter / fold / count_if ===")
-    check("map 逐元素变换", run("""    const Vec<u64> d = map(xs, twice);
+    check("map 逐元素变换", run("""    const vector<u64> d = map(xs, twice);
     return d[0];""", [1, 2]) == 2)
-    check("filter 只留满足的", run("""    const Vec<u64> b = filter(xs, gt10);
+    check("filter 只留满足的", run("""    const vector<u64> b = filter(xs, gt10);
     return b.length();""", [1, 11, 3, 20]) == 2)
     check("fold 求和", run("""    return fold(xs, 0, add);""", [1, 2, 3]) == 6)
     check("count_if 计数", run("""    return count_if(xs, gt10);""", [1, 11, 3, 20]) == 2)
 
     print("=== 函数实参不是名字时被拒绝（有意为之） ===")
     try:
-        run("""    const Vec<u64> d = map(xs, twice(1));
+        run("""    const vector<u64> d = map(xs, twice(1));
     return d.length();""", [1])
         check("给了调用表达式 → 报错", False, "居然通过了")
     except Exception as exc:                     # noqa: BLE001
@@ -80,8 +80,8 @@ def main() -> int:
               "具名" in str(exc) or "成本" in str(exc), str(exc)[:60])
 
     print("=== 成本 = n(xs) × κ(回调) + n(xs) ===")
-    ch = PRELUDE + """func f(const Vec<u64>& xs) -> u64 {
-    const Vec<u64> d = map(xs, twice);
+    ch = PRELUDE + """func f(const vector<u64>& xs) -> u64 {
+    const vector<u64> d = map(xs, twice);
     return d.length();
 }
 """

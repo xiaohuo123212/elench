@@ -35,7 +35,7 @@ from otel import NAMESPACE, series, sizes_to, to_csv, to_otlp, to_svg
 from parser import parse_source
 from symbolic import Cost
 
-SAMPLE = os.path.join(HERE, "..", "文档", "设计", "目前设计", "样例")
+SAMPLE = os.path.join(HERE, "..", "文档", "样例")
 
 _passed = 0
 _failed = []

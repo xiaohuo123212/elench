@@ -52,13 +52,13 @@ def check(ok, label, detail=""):
 # ---------------------------------------------------------------- 样本
 
 SUM_TU = """
-spec total(const Vec<u64>& xs) -> u64 {
+spec total(const vector<u64>& xs) -> u64 {
     effects {};
     target { time: { max: O(xs.length()) }, allocation: { max: 0 }, };
 }
 """
 SUM_PLAIN = """
-func total(const Vec<u64>& xs) -> u64 {
+func total(const vector<u64>& xs) -> u64 {
     u64 s = 0;
     u64 i = 0;
     while (i < xs.length()) {
@@ -70,7 +70,7 @@ func total(const Vec<u64>& xs) -> u64 {
 """
 SUM_NOISY = """
 // 文件头注释：if k == "call" { return 1; }
-func total(const Vec<u64>& xs) -> u64 {
+func total(const vector<u64>& xs) -> u64 {
     u64 s = 0;                      // 累加器
     /// 文档注释：target { time: O(n^3) }，κ = 999
     u64 i = 0;
@@ -86,20 +86,20 @@ func total(const Vec<u64>& xs) -> u64 {
 
 DISPATCH_TU = """
 choose kernel over { by_scan, by_rev };
-spec host(const Vec<u64>& xs) -> u64 {
+spec host(const vector<u64>& xs) -> u64 {
     effects {};
     benchmodel { n = xs.length() };
     target { time: { max: O(xs.length()) }, allocation: { max: 0 }, };
 }
-spec by_scan(const Vec<u64>& xs) -> u64 { effects {}; target { time: { max: O(xs.length()) }, allocation: { max: 0 }, }; }
-spec by_rev(const Vec<u64>& xs) -> u64 { effects {}; target { time: { max: O(xs.length()) }, allocation: { max: 0 }, }; }
+spec by_scan(const vector<u64>& xs) -> u64 { effects {}; target { time: { max: O(xs.length()) }, allocation: { max: 0 }, }; }
+spec by_rev(const vector<u64>& xs) -> u64 { effects {}; target { time: { max: O(xs.length()) }, allocation: { max: 0 }, }; }
 """
 DISPATCH_PLAIN = """
-func host(const Vec<u64>& xs) -> u64 {
+func host(const vector<u64>& xs) -> u64 {
     if (xs.length() == 0) { return 0; }
     return ?!kernel(xs);
 }
-kernels kernel(const Vec<u64>& xs) -> u64 {
+kernels kernel(const vector<u64>& xs) -> u64 {
     by_scan {
         u64 s = 0;
         for (x in xs) { s = s + x; }
@@ -118,12 +118,12 @@ kernels kernel(const Vec<u64>& xs) -> u64 {
 """
 DISPATCH_NOISY = """
 // choose kernel over { 假的, 候选 };
-func host(const Vec<u64>& xs) -> u64 {
+func host(const vector<u64>& xs) -> u64 {
     // return ?!kernel(xs);   —— 注释掉的旧写法
     if (xs.length() == 0) { return 0; }   // if (true) { }
     return ?!kernel(xs);
 }
-kernels kernel(const Vec<u64>& xs) -> u64 {
+kernels kernel(const vector<u64>& xs) -> u64 {
     by_scan {
         u64 s = 0;
         for (x in xs) {      // for (y in xs) { s = s + 1; }
@@ -146,21 +146,21 @@ kernels kernel(const Vec<u64>& xs) -> u64 {
 """
 
 STRUCT_TU = """
-spec build(const Vec<u64>& xs) -> u64 {
+spec build(const vector<u64>& xs) -> u64 {
     effects {};
     target { time: { max: O(xs.length()) }, allocation: { max: 0 }, };
 }
 """
 STRUCT_PLAIN = """
 struct Pair { key: u64, value: u64 }
-func build(const Vec<u64>& xs) -> u64 {
+func build(const vector<u64>& xs) -> u64 {
     Pair p = Pair{ key: xs.length(), value: 1 };
     return p.key;
 }
 """
 STRUCT_NOISY = """
 struct Pair { key: u64, value: u64 }   // struct Fake { a: u64 }
-func build(const Vec<u64>& xs) -> u64 {
+func build(const vector<u64>& xs) -> u64 {
     // Pair p = Pair{ key: 0, value: 0 };
     Pair p = Pair{ key: xs.length(), value: 1 };
     return p.key;

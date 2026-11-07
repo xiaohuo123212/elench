@@ -6,11 +6,11 @@
 ## 类型
 
 ```elench
-struct Entry { key: Vec<u8>, value: Json, }
-enum Json { Null, Bool(u64), Num(u64), Str(Vec<u8>), Arr(Vec<Json>), Obj(Vec<Entry>), }
+struct Entry { key: vector<u8>, value: Json, }
+enum Json { Null, Bool(u64), Num(u64), Str(vector<u8>), Arr(vector<Json>), Obj(vector<Entry>), }
 ```
 
-**递归**由 `Arr(Vec<Json>)` 表达；运行期就是嵌套 `EnumVal`，值有限 → 不需要新机制。
+**递归**由 `Arr(vector<Json>)` 表达；运行期就是嵌套 `EnumVal`，值有限 → 不需要新机制。
 
 ## 口径
 
@@ -44,14 +44,14 @@ from interp import Interp              # noqa: E402
 from parser import parse_source        # noqa: E402
 
 FAILED = []
-TU = """struct Entry { key: Vec<u8>, value: Json, }
-enum Json { Null, Bool(u64), Num(u64), Str(Vec<u8>), Arr(Vec<Json>), Obj(Vec<Entry>), }
-spec f(const Vec<u8>& text) -> u64 {
+TU = """struct Entry { key: vector<u8>, value: Json, }
+enum Json { Null, Bool(u64), Num(u64), Str(vector<u8>), Arr(vector<Json>), Obj(vector<Entry>), }
+spec f(const vector<u8>& text) -> u64 {
     effects {};
     target { time: { max: O(text.length()) }, allocation: { max: O(text.length()) }, };
 }
 """
-CH = """func f(const Vec<u8>& text) -> u64 {
+CH = """func f(const vector<u8>& text) -> u64 {
     Json j = json_parse(text)?;
     match (j) {
         Json::Null => { return 0; }

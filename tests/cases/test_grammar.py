@@ -70,7 +70,7 @@ def test_vocab():
     names = [f["name"] for f in v["functions"]]
     check("count" in names, "count 在词汇表里", str(names))
     f = next(x for x in v["functions"] if x["name"] == "count")
-    check(f["params"] == [{"name": "text", "type": "Vec<u8>&"}],
+    check(f["params"] == [{"name": "text", "type": "vector<u8>&"}],
           "参数名与类型正确", str(f["params"]))
     check(f["returns"] == "u64", "返回类型正确", f["returns"])
     check(f["effects"] == ["alloc"], "effects 正确", str(f["effects"]))
@@ -86,13 +86,13 @@ def test_vocab():
 def test_extern_and_types():
     print("[3] 外部函数 / 类型 / 常量")
     src = '''
-extern strlen(const Vec<u8>& s) -> u64 from "ucrtbase" effects { fs };
+extern strlen(const vector<u8>& s) -> u64 from "ucrtbase" effects { fs };
 
-struct Entry { key: Vec<u8> }
+struct Entry { key: vector<u8> }
 
 const u64 N = 8;
 
-spec f(const Vec<u64>& xs) -> u64 {
+spec f(const vector<u64>& xs) -> u64 {
     effects {};
     target { time: { max: O(n) } };
 }

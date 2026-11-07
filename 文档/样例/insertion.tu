@@ -1,7 +1,7 @@
 // insertion.tu —— 算法样例（κ vs ops 对拍用，2026-11-04 增）
 error InsError;
 
-spec insertion(const Vec<u64>& xs) -> u64 {
+spec insertion(const vector<u64>& xs) -> u64 {
     effects {};
 
     benchmodel {

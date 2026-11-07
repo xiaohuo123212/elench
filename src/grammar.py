@@ -84,9 +84,7 @@ def language_ebnf() -> str:
    只写"结构"，不写语义：类型合法性由 .tu 词汇表约束，成本由 κ 判定。 *)
 
 module        = { item } ;
-item          = use-decl | func-decl | struct-decl | enum-decl | trait-decl
-              | impl-decl ;
-impl-decl     = "impl" path [ "for" path ] "{" { func-decl } "}" ;
+item          = use-decl | func-decl | struct-decl | enum-decl ;
 
 use-decl      = "use" path [ "as" IDENT ] ";" ;
 func-decl     = { "pub" } "func" IDENT "(" [ params ] ")" [ "->" type ] block
@@ -100,8 +98,7 @@ struct-decl   = "struct" IDENT "{" { field } "}" ;
 field         = IDENT ":" type ";" ;
 enum-decl     = "enum" IDENT "{" variant { "," variant } "}" ;
 variant       = IDENT [ "(" type { "," type } ")" ] ;
-trait-decl    = "trait" IDENT "{" { func-sig } "}" ;
-func-sig      = "func" IDENT "(" [ params ] ")" [ "->" type ] ";" ;
+(* 已下线（E11）：`"trait"` / `"impl"` —— 语法移除，写了报 E-Trait-Removed / E-Impl-Removed。 *)
 
 (* ---------------- 类型 ---------------- *)
 type          = prim-type | path [ "<" type { "," type } ">" ] [ "&" ]
@@ -114,13 +111,15 @@ block         = "{" { stmt } "}" ;
 stmt          = const-stmt | var-stmt | assign-stmt | if-stmt | while-stmt
               | for-stmt | match-stmt | parallel-stmt | return-stmt
               | break-stmt | continue-stmt | expr-stmt | block
-              | unsafe-block | asm-stmt | spawn-stmt | scope-stmt
+                | unsafe-block ;
           const-stmt    = "const" type IDENT "=" expr ";" ;
 var-stmt      = type IDENT "=" expr ";" ;
 assign-stmt   = lvalue "=" expr ";" ;
 if-stmt       = "if" "(" expr ")" block [ "else" ( if-stmt | block ) ] ;
 while-stmt    = "while" "(" expr ")" block ;
-for-stmt      = "for" "(" IDENT "in" expr ")" block ;
+for-stmt      = "for" "(" IDENT [ "," IDENT ] "in" expr ")" block ;
+              (* 带下标：`for (i, x in xs)`，i: u64 由语言维护 *)
+              (* 区间：`for (i in 0..n)`，半开 [a, b) *)
 match-stmt    = "match" "(" expr ")" "{" arm { "," arm } "}" ;
 arm           = pattern "=>" ( expr | block ) ;
 pattern       = IDENT | IDENT "(" [ IDENT { "," IDENT } ] ")" | "self" ;
@@ -129,10 +128,9 @@ return-stmt   = "return" [ expr ] ";" ;
 break-stmt    = "break" ";" ;
 continue-stmt = "continue" ";" ;
 expr-stmt     = expr ";" ;
+(* 已下线（2026-11-05）："spawn" / "asm" / "scope" —— 写了报 E-Spawn-Removed / E-Asm-Removed / E-Scope-Removed。
+   spawn 让 κ 依赖核数、asm 让操作数不可数、scope 只服务于 spawn。 *)
 unsafe-block  = "unsafe" block ;
-asm-stmt      = "asm" "(" STRING { "," STRING } ")" ";" ;
-spawn-stmt    = "spawn" IDENT "(" [ args ] ")" ";" ;
-scope-stmt    = "scope" block ;
 rewrite-stmt  = "rewrite" IDENT block ;
 
   (* assume-stmt 已移除（2026-11-04）：关键字 "assume" 仍能被词法识别，
@@ -253,6 +251,16 @@ def render(tu_mod, fmt: str = "both") -> str:
         "vocabulary": module_vocab(tu_mod),
         "holes": skeletons(tu_mod),
     }
+    if fmt in ("skeleton", "skeletons", "skel"):
+        # **打洞骨架 → 可粘的 `.eln` 空实现**（Code4AI ① 的缺口）。
+        # 只给签名与一个 `// TODO`，**不给实现**：填什么是作者的事。
+        out = ["// 由 `elench grammar --format=skeleton` 生成：签名齐全，body 待填。"]
+        for s in payload["holes"]:
+            out.append("")
+            out.append(s["signature"] + " {")
+            out.append("    // TODO: 填实现（成本契约见对应的 .tu）")
+            out.append("}")
+        return "\n".join(out) + "\n"
     if fmt == "ebnf":
         return ebnf
     if fmt == "json":

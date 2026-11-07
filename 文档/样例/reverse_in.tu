@@ -1,7 +1,7 @@
 // reverse_in.tu —— 算法样例（κ vs ops 对拍用，2026-11-04 增）
 error RevError;
 
-spec reverse_in(const Vec<u64>& xs) -> u64 {
+spec reverse_in(const vector<u64>& xs) -> u64 {
     effects {};
 
     benchmodel {

@@ -134,14 +134,14 @@ def xs(n):
 # ---------------------------------------------------------------- ① 用户函数
 #: 无 target → 走**内联**分支；`compute` 返回同一个容器，尺寸/值都可比。
 INLINE = """
-func f(const Vec<u64>& xs) -> u64 { return xs.length(); }
-func compute(const Vec<u64>& xs) -> Vec<u64> { return xs; }
-func plain(const Vec<u64>& xs) -> u64 { return f(xs); }
-func nested(const Vec<u64>& xs) -> u64 { return f(compute(xs)); }
+func f(const vector<u64>& xs) -> u64 { return xs.length(); }
+func compute(const vector<u64>& xs) -> vector<u64> { return xs; }
+func plain(const vector<u64>& xs) -> u64 { return f(xs); }
+func nested(const vector<u64>& xs) -> u64 { return f(compute(xs)); }
 """
 
 TARGET = """
-spec f(const Vec<u64>& xs) -> u64 {
+spec f(const vector<u64>& xs) -> u64 {
     effects {};
     target { time: { max: O(xs.length()) }, allocation: { max: 0 }, };
 }
@@ -192,23 +192,23 @@ def test_user_fn_target():
 
 # ---------------------------------------------------------------- ② 递归
 RECUR = """
-func down(const Vec<u64>& xs, u64 i) -> u64 {
+func down(const vector<u64>& xs, u64 i) -> u64 {
     if (i == 0) { return xs.length(); }
     return 1 + down(xs, i - 1);
 }
-func down_nested(const Vec<u64>& xs, u64 i) -> u64 {
+func down_nested(const vector<u64>& xs, u64 i) -> u64 {
     if (i == 0) { return xs.length(); }
     return 1 + down(compute(xs), i - 1);
 }
-func compute(const Vec<u64>& xs) -> Vec<u64> { return xs; }
+func compute(const vector<u64>& xs) -> vector<u64> { return xs; }
 """
 
 RECUR_TU = """
-spec down(const Vec<u64>& xs, u64 i) -> u64 {
+spec down(const vector<u64>& xs, u64 i) -> u64 {
     effects {};
     target { time: { max: O(xs.length()) }, allocation: { max: 0 }, };
 }
-spec down_nested(const Vec<u64>& xs, u64 i) -> u64 {
+spec down_nested(const vector<u64>& xs, u64 i) -> u64 {
     effects {};
     target { time: { max: O(xs.length()) }, allocation: { max: 0 }, };
 }
@@ -237,18 +237,18 @@ def test_recursion():
 
 # ---------------------------------------------------------------- ③ 函数值
 FNVAL = """
-func compute(const Vec<u64>& xs) -> Vec<u64> { return xs; }
-func apply_id(const Vec<u64>& xs, func(Vec<u64>) -> u64 g) -> u64 { return g(xs); }
-func apply_nested(const Vec<u64>& xs, func(Vec<u64>) -> u64 g) -> u64 {
+func compute(const vector<u64>& xs) -> vector<u64> { return xs; }
+func apply_id(const vector<u64>& xs, func(vector<u64>) -> u64 g) -> u64 { return g(xs); }
+func apply_nested(const vector<u64>& xs, func(vector<u64>) -> u64 g) -> u64 {
     return g(compute(xs));
 }
-func host_id(const Vec<u64>& xs) -> u64 { return apply_id(xs, compute); }
-func host_nested(const Vec<u64>& xs) -> u64 { return apply_nested(xs, compute); }
+func host_id(const vector<u64>& xs) -> u64 { return apply_id(xs, compute); }
+func host_nested(const vector<u64>& xs) -> u64 { return apply_nested(xs, compute); }
 """
 
 FNVAL_TU = """
-spec apply_id(const Vec<u64>& xs, func(Vec<u64>) -> u64 g) -> u64 { effects {}; }
-spec apply_nested(const Vec<u64>& xs, func(Vec<u64>) -> u64 g) -> u64 { effects {}; }
+spec apply_id(const vector<u64>& xs, func(vector<u64>) -> u64 g) -> u64 { effects {}; }
+spec apply_nested(const vector<u64>& xs, func(vector<u64>) -> u64 g) -> u64 { effects {}; }
 """
 
 
@@ -295,14 +295,14 @@ def test_fn_value():
 #: 这些分支**修前就已经**计了实参：多一个 `compute(xs)`，κ 只许多 `κc + 1`，
 #: 多出两倍就是「又加了一遍」。
 GUARD = """
-func compute(const Vec<u64>& xs) -> u64 { return 1; }
-func compute_v(const Vec<u64>& xs) -> Vec<u64> { return xs; }
-func g_std(const Vec<u64>& xs) -> u64 { return sum_of(xs); }
-func g_std_c(const Vec<u64>& xs) -> u64 { return sum_of(compute_v(xs)); }
-func g_max(const Vec<u64>& xs, u64 b) -> u64 { return max(b, 1); }
-func g_max_c(const Vec<u64>& xs, u64 b) -> u64 { return max(b, compute(xs)); }
-func g_mc(const Vec<u64>& xs) -> u64 { return xs.at(1); }
-func g_mc_c(const Vec<u64>& xs) -> u64 { return xs.at(compute(xs)); }
+func compute(const vector<u64>& xs) -> u64 { return 1; }
+func compute_v(const vector<u64>& xs) -> vector<u64> { return xs; }
+func g_std(const vector<u64>& xs) -> u64 { return sum_of(xs); }
+func g_std_c(const vector<u64>& xs) -> u64 { return sum_of(compute_v(xs)); }
+func g_max(const vector<u64>& xs, u64 b) -> u64 { return max(b, 1); }
+func g_max_c(const vector<u64>& xs, u64 b) -> u64 { return max(b, compute(xs)); }
+func g_mc(const vector<u64>& xs) -> u64 { return xs.at(1); }
+func g_mc_c(const vector<u64>& xs) -> u64 { return xs.at(compute(xs)); }
 """
 
 

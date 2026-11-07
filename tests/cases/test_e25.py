@@ -99,7 +99,7 @@ def main() -> int:
     check(steps > 0, "浮点声明被真执行", str(steps))
 
     print("[4] 解引用：`*r`（v0 引用即值）")
-    val, steps, kappa = run("""func f(const Vec<u64>& xs) -> u64! {
+    val, steps, kappa = run("""func f(const vector<u64>& xs) -> u64! {
     const u64& r = xs.at(0);
     return *r;
 }""", [[11, 22, 33]])

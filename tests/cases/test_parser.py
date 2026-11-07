@@ -39,7 +39,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 from lexer import Kind
 from parser import Node, parse_source
 
-SAMPLE = os.path.join(HERE, "..", "文档", "设计", "目前设计", "样例")
+SAMPLE = os.path.join(HERE, "..", "文档", "样例")
 
 
 # ---------------------------------------------------------------- 工具
@@ -138,7 +138,7 @@ def test_samples():
 def test_benchmodel():
     print("[?] benchmodel 三段式（v0.69）")
     src = """
-spec f(const Vec<u64>& xs, u64 key) -> u64 {
+spec f(const vector<u64>& xs, u64 key) -> u64 {
     effects {};
     benchmodel {
         data {
@@ -176,7 +176,7 @@ spec f(const Vec<u64>& xs, u64 key) -> u64 {
           "第三个参数是步长 `*`")
 
     # 旧写法必须报错
-    r2 = parse_source("spec g(const Vec<u64>& xs) -> u64 { effects {}; "
+    r2 = parse_source("spec g(const vector<u64>& xs) -> u64 { effects {}; "
                       "model small { xs: a(); } ; }", "o.tu")
     check(any(d.code == "E-Clause-OldModel" for d in r2.diagnostics),
           "旧 `model` 报 E-Clause-OldModel",
@@ -249,7 +249,7 @@ def test_types():
 
     tk = spec_by_name(tu.module, "tokenize")
     names = [c.name for c in walk(tk, "type-name")]
-    check("Vec" in names, "tokenize 参数是 Vec<u8>", f"实际 {names[:4]}")
+    check("vector" in names, "tokenize 参数是 vector<u8>", f"实际 {names[:4]}")
 
 
 # ---------------------------------------------------------------- 4. enum
@@ -369,9 +369,9 @@ func f(Token t) -> i64 {
     check("Token.Plus" in paths, "`Token::Plus` 解析成 path Token.Plus", str(paths))
 
     # 静态调用仍走 field
-    src2 = "func g() -> Vec<u64> {\n    return FixedVec<u64, 8>::make();\n}"
+    src2 = "func g() -> vector<u64> {\n    return array<u64, 8>::make();\n}"
     r2 = parse_source(src2, "s.eln")
-    check(not r2.diagnostics, "`FixedVec<T,N>::make()` 仍能解析",
+    check(not r2.diagnostics, "`array<T,N>::make()` 仍能解析",
           "; ".join(d.code for d in r2.diagnostics))
 
 
@@ -379,7 +379,7 @@ func f(Token t) -> i64 {
 
 def test_scale_in():
     print("[6.6] `scale` 用 `in`（v0.69）")
-    ok = """spec f(const Vec<u64>& xs) -> u64 {
+    ok = """spec f(const vector<u64>& xs) -> u64 {
   effects {};
   benchmodel {
     data { xs = sorted_u64s(); }
@@ -407,7 +407,7 @@ def test_choose_kernel_dispatch():
     src = """
 error CalcError;
 
-spec average(const Vec<u8>& scores) -> u64! {
+spec average(const vector<u8>& scores) -> u64! {
     effects   {alloc};
     benchmodel {
         data  { scores = make_u8s(); }
@@ -417,7 +417,7 @@ spec average(const Vec<u8>& scores) -> u64! {
         time      : { max: O(scores.length()) },
         allocation: { max: 0 },
     };
-    choose sum_kernel(const Vec<u8>& scores) -> u64 {
+    choose sum_kernel(const vector<u8>& scores) -> u64 {
         over     {sum_by_index, sum_by_iter pending};
         objective time;
     };
@@ -443,12 +443,12 @@ spec average(const Vec<u8>& scores) -> u64! {
     check(names.get("objective") == "time", "objective")
 
     ai_src = """
-pub func average(const Vec<u8>& scores) -> u64! {
+pub func average(const vector<u8>& scores) -> u64! {
     const u64 n = scores.length();
     if (n == 0) { return Err(CalcError.Empty); }
     const u64 total = ?!sum_kernel(scores);
     return total / n;
-} kernels sum_kernel(const Vec<u8>& scores) -> u64 {
+} kernels sum_kernel(const vector<u8>& scores) -> u64 {
     sum_by_index {
         u64 s = 0; u64 i = 0;
         while (i < n) { s = s + scores.at(i); i = i + 1; }

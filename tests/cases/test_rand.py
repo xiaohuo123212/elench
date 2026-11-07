@@ -86,9 +86,9 @@ def main() -> int:
     check("不同任务下标 → 不同流", t0 != t1, f"{t0} vs {t1}")
 
     print("=== 效果：必须声明 nondet ===")
-    tu_bad = f"spec f(const Vec<u64>& xs) -> u64 {{ effects {{}}; {T}}}\n"
-    tu_ok = f"spec f(const Vec<u64>& xs) -> u64 {{ effects {{ nondet }}; {T}}}\n"
-    body = "func f(const Vec<u64>& xs) -> u64 { return rand_u64(); }\n"
+    tu_bad = f"spec f(const vector<u64>& xs) -> u64 {{ effects {{}}; {T}}}\n"
+    tu_ok = f"spec f(const vector<u64>& xs) -> u64 {{ effects {{ nondet }}; {T}}}\n"
+    body = "func f(const vector<u64>& xs) -> u64 { return rand_u64(); }\n"
     check("不声明 → E-Effect-Missing",
           "E-Effect-Missing" in [d.code for d in check_module(tu_bad, body, "m").diagnostics])
     check("声明了 → 通过",

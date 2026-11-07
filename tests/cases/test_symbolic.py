@@ -33,7 +33,7 @@ from cost_interp import CostInterp, report
 from parser import parse_source
 from symbolic import Cost
 
-SAMPLE = os.path.join(HERE, "..", "文档", "设计", "目前设计", "样例")
+SAMPLE = os.path.join(HERE, "..", "文档", "样例")
 
 _passed = 0
 _failed = []
@@ -88,7 +88,7 @@ def test_statements():
           cost_of("func f() -> u64 { u64 a = 1; u64 b = 2; return a; }"))
 
     print("[4] 分支取 max")
-    src = ("func f(const Vec<u64>& xs) -> u64 { const u64 n = xs.length(); "
+    src = ("func f(const vector<u64>& xs) -> u64 { const u64 n = xs.length(); "
            "if (n == 0) { return 0; } return 1; }")
     r = cost_of(src)
     # 条件 1 + max(两支) + 后面那条 return：两支成本相同时 max 会化简掉，
@@ -96,7 +96,7 @@ def test_statements():
     check(r.isdigit(), "if 的两条路径已合并成一个数", r)
 
     # 一支常数、一支线性 → max 能判定，化简掉（这是**正确的**）
-    src2 = ("func f(const Vec<u64>& xs) -> u64 { const u64 n = xs.length(); "
+    src2 = ("func f(const vector<u64>& xs) -> u64 { const u64 n = xs.length(); "
             "u64 i = 0; if (n == 0) { return 0; } "
             "while (i < n) { i = i + 1; } return i; }")
     r2 = cost_of(src2)
@@ -104,7 +104,7 @@ def test_statements():
           "常数 vs 线性 → max 化简成线性", r2)
 
     # 两支都是循环，但遍历不同的容器 → 比不了，必须保留 max
-    src3 = ("func f(const Vec<u64>& a, const Vec<u64>& b) -> u64 { const u64 x = a.length(); "
+    src3 = ("func f(const vector<u64>& a, const vector<u64>& b) -> u64 { const u64 x = a.length(); "
             "u64 t = 0; "
             "if (x == 0) { u64 i = 0; while (i < a.length()) { t = t + 1; i = i + 1; } } "
             "else { u64 j = 0; while (j < b.length()) { t = t + 1; j = j + 1; } } "
@@ -115,12 +115,12 @@ def test_statements():
 
 def test_loops():
     print("[5] 循环：圈数 × 每圈")
-    src = ("func f(const Vec<u64>& xs) -> u64 { u64 i = 0; "
+    src = ("func f(const vector<u64>& xs) -> u64 { u64 i = 0; "
            "while (i < xs.length()) { i = i + 1; } return i; }")
     r = cost_of(src)
     check("n(xs)" in r and "×" in r, "while 上界进入成本式", r)
 
-    src2 = ("func f(const Vec<u64>& xs) -> u64 { u64 s = 0; "
+    src2 = ("func f(const vector<u64>& xs) -> u64 { u64 s = 0; "
             "for (x in xs) { s = s + x; } return s; }")
     r2 = cost_of(src2)
     check("n(xs)" in r2 and "×" in r2, "for 用容器长度做圈数", r2)
@@ -128,14 +128,14 @@ def test_loops():
 
 def test_target_and_inline():
     print("[6] 跨函数：有 target 用 target，没有就内联")
-    decl = """spec g(const Vec<u64>& xs) -> u64 {
+    decl = """spec g(const vector<u64>& xs) -> u64 {
     effects {};
     target { time: { max: O(xs.length()) }, };
 }
-spec h(const Vec<u64>& xs) -> u64 { effects {}; }"""
-    impl = """func f(const Vec<u64>& xs) -> u64 { return g(xs); }
-func g(const Vec<u64>& xs) -> u64 { u64 i = 0; while (i < xs.length()) { i = i + 1; } return i; }
-func h(const Vec<u64>& xs) -> u64 { return 1; }"""
+spec h(const vector<u64>& xs) -> u64 { effects {}; }"""
+    impl = """func f(const vector<u64>& xs) -> u64 { return g(xs); }
+func g(const vector<u64>& xs) -> u64 { u64 i = 0; while (i < xs.length()) { i = i + 1; } return i; }
+func h(const vector<u64>& xs) -> u64 { return 1; }"""
     mod = parse_source(impl, "x.eln").module
     dmod = parse_source(decl, "x.tu").module
     ci = CostInterp(mod, dmod)
@@ -143,7 +143,7 @@ func h(const Vec<u64>& xs) -> u64 { return 1; }"""
     check("n(xs)" in f_cost, "f 调 g：用了 g 的 target（n(xs)）", f_cost)
 
     # h 没有 target → 内联，得到它的实际成本 2
-    impl2 = "func f(const Vec<u64>& xs) -> u64 { return h(xs); }\nfunc h(const Vec<u64>& xs) -> u64 { return 1; }"
+    impl2 = "func f(const vector<u64>& xs) -> u64 { return h(xs); }\nfunc h(const vector<u64>& xs) -> u64 { return 1; }"
     mod2 = parse_source(impl2, "x.eln").module
     ci2 = CostInterp(mod2, None)
     check(ci2.cost_of("f").render() == "5",
@@ -153,8 +153,8 @@ func h(const Vec<u64>& xs) -> u64 { return 1; }"""
 
 def test_recursion():
     print("[7] 内联成环要报错，不能转不停")
-    src = ("func f(const Vec<u64>& xs) -> u64 { return g(xs); }\n"
-           "func g(const Vec<u64>& xs) -> u64 { return f(xs); }")
+    src = ("func f(const vector<u64>& xs) -> u64 { return g(xs); }\n"
+           "func g(const vector<u64>& xs) -> u64 { return f(xs); }")
     mod = parse_source(src, "x.eln").module
     ci = CostInterp(mod, None)
     try:
@@ -166,7 +166,7 @@ def test_recursion():
 
 def test_top():
     print("[8] 抽不出上界 → ⊤，不猜")
-    src = ("func f(const Vec<u64>& xs) -> u64 { u64 i = 0; "
+    src = ("func f(const vector<u64>& xs) -> u64 { u64 i = 0; "
            "while (i < unknown_thing(i)) { i = i + 1; } return i; }")
     r = cost_of(src)
     check("⊤" in r, "抽不出 → ⊤", r)

@@ -17,11 +17,12 @@ M0 范围：**没有成本分析**，故 `state` 只能给出 draft / planned / 
 用法：
   cd src
   $env:PYTHONIOENCODING="utf-8"
-  python dsh.py check ../文档/设计/目前设计/样例/calculator.tu
+  python dsh.py check ../文档/样例/calculator.tu
 """
 
 from __future__ import annotations
 
+from typenames import canon, display
 import io
 import json
 import os
@@ -58,8 +59,6 @@ USAGE = """elench —— 成本契约语言 Elench 的工具链（v0.70-M1）
     stats     <模块> <函数> [--ops] 跑一次：调用数 / 分配数 / 迭代数 / **操作数**
                                   --ops：打开操作数计数并输出 JSON（与 κ 同单位）
     bench     <模块> <函数>       单函数隔离测量（只给判定与比值，不做全量统计）
-    tightness <模块> [--sizes=16,64,256] [--runs=5] [--format=md|json|csv] [--out=文件]
-                                  紧度曲线：κ / ops_typ / slack_typ / ops_worst / slack_wc_ub
 
     export    <模块> [--format=table|otlp|svg|csv] [--out=文件] [--function=名] [--timing]
                                   导出「静态上界 vs 实测」（默认实测=**操作数**，与 κ 同单位）
@@ -67,6 +66,10 @@ USAGE = """elench —— 成本契约语言 Elench 的工具链（v0.70-M1）
                                   不给 --out 就打到终端；给 --out 就写文件
                                   csv/svg/otlp 建议配 --out（否则粘不回文件）
                                   --push：按 OTLP/HTTP 推到 collector（配 OTEL_* 环境变量）
+    export    <模块> --full [--sizes=16,64,256] [--runs=20] [--out=文件]
+                                  完整报告：三节（上界 / 超额倍数 / 紧度）；不给 --out 打终端
+                                  --out 按后缀出：.svg 曲线 / .md 表 / .csv 数据 / .otel OTLP
+                                  --full 与 --timing 互斥（单位不同，会明确拒绝）
 
   观测（配 export --push）
     otel      <sink|view|dashboard>  本机 OTLP 接收端 / 查看 / 网页看板
@@ -75,8 +78,12 @@ USAGE = """elench —— 成本契约语言 Elench 的工具链（v0.70-M1）
                                    elench otel dashboard --file otel.ndjson --port 8080
 
   决策点 ?! 与门禁
-    dispatch  <模块>              三层筛：每个 ?! 要不要测、分几段（只出计划，不生成表）
-    measure   <模块>              真跑候选，用实测生成分档表（可提交、可 diff）
+    dispatch  <模块> [<choose名>] 三层筛：每个 ?! 要不要测、分几段（只出计划，不生成表）
+                                  给 <choose名> 就只看那一个 ?!（不收 --only）
+    measure   <模块> [<choose名>] 真跑候选，用实测生成分档表（可提交、可 diff）
+                                  给 <choose名> 只重测这一段并**按段合并**回表，
+                                  其余 label 的段与注释逐字不变（git diff 只显示这一段）
+                                  表必须先存在（不存在就报错，提示先跑一次全量）
     build     <模块> [--out=路径] [--measure] [--deny-debt]
                                   构建门禁：含 pending 就失败
                                   默认只跑静态 dispatch；--measure 才真跑测量（慢）
@@ -399,6 +406,63 @@ def _recursion_gate(tu_mod, ch_mod) -> bool:
 
 
 
+def _merge_dispatch_table(path: str, mod: str, label: str, segs, degraded: bool) -> None:
+    """**只替换 `label` 那一段**，其余段、注释、顺序原样保留。
+
+    表是按 label 分块的纯文本（`interp.load_dispatch_table` 逐行正则解析），
+    所以按块拼接就够了：`git diff` 里只会出现这一段的变化。
+    """
+    import re as _re
+    lines = io.open(path, encoding="utf-8").read().split("\n") if False else \
+        io.open(path, encoding="utf-8").read().split("\n")
+    head, blocks = [], []
+    for ln in lines:
+        m = _re.match(r"^label:\s*(\w+)\s*$", ln)
+        if m:
+            blocks.append([m.group(1), [ln]])
+        elif blocks:
+            blocks[-1][1].append(ln)
+        else:
+            head.append(ln)
+    new_block = ["label: %s" % label, "segments:"]
+    for a, b, who in segs:
+        new_block.append("  - {lo: %s, hi: %s, candidate: %s}" % (a, b, who))
+    hit = False
+    for blk in blocks:
+        if blk[0] == label:
+            blk[1] = new_block
+            hit = True
+    if not hit:
+        blocks.append([label, new_block])
+    out = [h for h in head if h.strip() and not h.startswith("module:")] + ["module: " + mod]
+    for _, blk_lines in blocks:
+        out.extend([x for x in blk_lines if x.strip() != ""])
+    io.open(path, "w", encoding="utf-8", newline="\n").write("\n".join(out) + "\n")
+
+
+def _write_dispatch_table(path: str, mod: str, labels: dict, degraded: bool) -> None:
+    """写分档表：**一个文件装多个 label**（每个 label 一段 `label:` + `segments:`）。
+
+    以前 `_body` 与 `open(..., "w")` 都在每个 label 的循环体内，第二个 label 直接
+    覆盖第一个——多 label 静默丢数据且不报错。现在攒成 `{label: segs}` 一次写全。
+
+    格式**故意不变**：`interp.load_dispatch_table` 是逐行正则解析的，
+    它本来就按 `label:` 累积成 `{label: [(lo,hi,候选)]}`，多个 `label:` 段天然可读。
+    """
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write("# 由 `elench measure` 生成；MUST NOT 手改。\n")
+        if degraded:
+            f.write("# DEGRADED: 未覆盖 benchmodel.scale 声明的全部规模，不可用于承诺\n")
+            f.write("degraded: true\n")
+        f.write("module: %s\n" % mod)
+        for lab in sorted(labels):
+            f.write("label: %s\n" % lab)
+            f.write("segments:\n")
+            for a, b, who in labels[lab]:
+                f.write("  - {lo: %s, hi: %s, candidate: %s}\n" % (a, b, who))
+
+
+
 def _tbl_for(tu_p: str) -> str:
     """模块对应的分档表路径。
 
@@ -683,6 +747,15 @@ def cmd_fmt(argv: List[str]) -> int:
     for path in files:
         with open(path, "r", encoding="utf-8") as f:
             src = f.read()
+        # **语法错必须非零退出**（L-12 实测：以前 fmt 对语法错的文件报"无变化"并
+        # exit 0——CI 会把它当成"格式没问题"）。
+        from parser import parse_source as _psf
+        _rf = _psf(src, os.path.basename(path))
+        if not _rf.ok:
+            for _d in _rf.diagnostics:
+                print(f"✗ {_d.code} @{_d.line}:{_d.col}  [{os.path.basename(path)}] {_d.msg}",
+                      file=sys.stderr)
+            return 1
         out = format_source(src)
         changed = (out != src)
         if changed:
@@ -832,6 +905,16 @@ def _resolve_module_path(arg: str, ext: str = ".tu"):
     return None
 
 
+def _facts_for(ci, name):
+    """取该函数 spec 的 requires 事实（A1）。没有 spec / 没有 requires 就返回空。"""
+    try:
+        from cost_check import facts_of_spec
+        sp = getattr(ci, "specs", {}).get(name)
+        return facts_of_spec(sp) if sp is not None else {}
+    except Exception:                                  # noqa: BLE001
+        return {}
+
+
 def _load_pair(argv: List[str]):
     """从 argv 里取出 (tu_path, ch_path)；ch 可省，按同名推导。"""
     if not argv:
@@ -862,6 +945,37 @@ def _load_pair(argv: List[str]):
     return tu, ch
 
 
+def _abort_on_parse_errors(*paths) -> bool:
+    """解析有 error 就别往下跑，返回 False。
+
+    **为什么要有**：`measure` / `bench` / `stats` 以前不看解析诊断就继续，
+    于是把「这个块写错位置了」报成「没有 benchmodel.scale」这种二次错误。
+    作者照那句话去改，改不对——因为它指的根本不是病因。
+    """
+    from parser import parse_source
+    bad = []
+    for pth in paths:
+        if not pth or not os.path.exists(pth):
+            continue
+        try:
+            src = open(pth, encoding="utf-8").read()
+        except OSError:
+            continue
+        res = parse_source(src, os.path.basename(pth))
+        for d in (getattr(res, "diagnostics", None) or []):
+            if getattr(d, "severity", "error") == "error":
+                bad.append((pth, d))
+    if not bad:
+        return True
+    print("✗ 解析没通过，后面的测量没有意义：", file=sys.stderr)
+    for pth, d in bad[:8]:
+        print("  %s @%s:%s  [%s] %s" % (getattr(d, "code", "?"), getattr(d, "line", "?"),
+                                        getattr(d, "col", "?"), os.path.basename(pth),
+                                        getattr(d, "message", "")), file=sys.stderr)
+    return False
+
+
+
 def cmd_grammar(argv: List[str]) -> int:
     """`elench grammar <模块.tu>` —— 导出**受限语法**（给 LLM 的受限解码用）。
 
@@ -890,7 +1004,7 @@ def cmd_grammar(argv: List[str]) -> int:
 
     tu_p, _ch = _load_pair(rest)
     if tu_p is None:
-        print("用法：elench grammar <模块.tu> [--format=ebnf|json|both] [--out=文件]",
+        print("用法：elench grammar <模块.tu> [--format=ebnf|json|skeleton|both] [--out=文件]",
               file=sys.stderr)
         return 2
     tu_mod = parse_source(io_read(tu_p), os.path.basename(tu_p)).module
@@ -906,6 +1020,139 @@ def cmd_grammar(argv: List[str]) -> int:
         print(f"已写出 {out_path}")
     else:
         print(text)
+    return 0
+
+
+def cmd_effects(argv: List[str]) -> int:
+    """`elench effects <模块>` —— **成本按 effect 分列**（Code4AI ⑤）。
+
+    做法：按**语句**切分——每条语句的 κ 由成本模型算，它触及的 effect 由
+    `checker.node_effects` 算，然后归到一个桶里。
+    桶是**互斥**的：纯计算 / 单个 effect / 混合(io+fs)——所以各桶相加 = 函数总 κ，
+    不会重复计数。**只读，不改任何 κ。**
+    """
+    from parser import parse_source as _ps
+    from cost_interp import CostInterp as _CI
+    import checker as _ck
+    tu_p, ch_p = _load_pair(argv)
+    if tu_p is None or ch_p is None:
+        print("用法: elench effects <模块>", file=sys.stderr)
+        return 2
+    tu_mod = _ps(io_read(tu_p), os.path.basename(tu_p)).module
+    ch_mod = _ps(io_read(ch_p), os.path.basename(ch_p)).module
+    fns = [c for c in (ch_mod.children or []) if getattr(c, "kind", "") == "fn"]
+    # **必须先把 extern 的 effects 收集进表**，否则 `print_line(...)` 这类调用
+    # 的 effect 查不到，会被算成"纯计算"——那会把 io/fs 的账记错。
+    try:
+        _ck._collect_extern_effects(ch_mod)
+    except Exception:                              # noqa: BLE001
+        pass
+    print(f"  module {os.path.splitext(os.path.basename(ch_p))[0]}")
+    print("  （按语句切分；桶互斥，各桶相加 = 该函数总 κ。纯计算不含任何 effect。）")
+    print()
+
+    for fn in fns:
+        nm = getattr(fn, "name", "") or ""
+        body = next((c for c in fn.children if c.kind == "block"), None)
+        if body is None:
+            continue
+        ci = _CI(ch_mod, tu_mod)
+        env = {}
+        buckets = {}                       # 桶名 → Cost
+        for st in body.children:
+            try:
+                c = ci._stmt(st, env)
+            except Exception:              # noqa: BLE001
+                continue
+            ef = sorted(_ck.node_effects(st, ch_mod) or [])
+            key = "纯计算" if not ef else ("混合(" + "+".join(ef) + ")" if len(ef) > 1 else ef[0])
+            from cost_domain.symbolic import Cost as _Cost
+            buckets[key] = _Cost.add(buckets[key], c) if key in buckets else c
+        if not buckets:
+            continue
+        print(f"    {nm}")
+        for k, c in sorted(buckets.items(), key=lambda kv: -len(kv[1].render())):
+            print(f"      {k:<14} {c.render()}")
+        print()
+    return 0
+
+
+def cmd_spec(argv: List[str]) -> int:
+    """`elench spec <模块>` —— **生成 spec 草案**（声明草案生成的最小版）。
+
+    设计要点（见 `设计-E-声明草案生成.md`）：
+    - **effects 能推**（读实现）；
+    - **target 不能推**——从实现推出来的 target 会让"实现满足 spec"变成自证。
+      所以草案里 target **留空**，只给「静态 κ」当参考，并写明"这是现状，不是承诺"。
+
+    空 target 的 spec 是**合法的**（`check` 会说 `有实现但无 target`），
+    所以草案能编译、能被后续工具处理，只是 `cost` 会提示它还没承诺。
+    """
+    from parser import parse_source as _ps
+    from cost_interp import CostInterp as _CI
+    tu_p, ch_p = _load_pair(argv)
+    if tu_p is None or ch_p is None:
+        print("用法: elench spec <模块>", file=sys.stderr)
+        return 2
+    tu_mod = _ps(io_read(tu_p), os.path.basename(tu_p)).module
+    ch_mod = _ps(io_read(ch_p), os.path.basename(ch_p)).module
+    have = {c.name for c in (tu_mod.children or []) if getattr(c, "kind", "") == "spec"}
+    fns = [c for c in (ch_mod.children or []) if getattr(c, "kind", "") == "fn"]
+
+    def _type_str(n):
+        """把类型节点还原成源码写法（含 `vector<u64>&` 这类泛型与引用）。"""
+        if n is None:
+            return ""
+        k = getattr(n, "kind", "")
+        if k == "type-ref" and n.children:
+            return _type_str(n.children[0]) + "&"
+        if k == "type-name":
+            base = n.name or ""
+            for c in (n.children or []):
+                if getattr(c, "kind", "") == "type-args":
+                    inner = ", ".join(_type_str(x) for x in (c.children or []))
+                    return f"{base}<{inner}>"
+            return base
+        if getattr(n, "name", None):
+            return n.name
+        return "?"
+
+    ci = None
+    try:
+        ci = _CI(ch_mod, tu_mod)
+    except Exception:                                  # noqa: BLE001
+        ci = None
+
+    missing = 0
+    for fn in fns:
+        nm = getattr(fn, "name", "") or ""
+        if not nm or nm in have:
+            continue
+        missing += 1
+        ps = next((c for c in fn.children if c.kind == "params"), None)
+        parts = []
+        for prm in (ps.children if ps else []):
+            ty = next((c for c in prm.children if c.kind in ("type-ref", "type-name")), None)
+            parts.append(f"{_type_str(ty)} {prm.name}")
+        ret = next((c for c in fn.children if c.kind in ("type-ref", "type-name")), None)
+        k = None
+        if ci is not None:
+            try:
+                k = ci.cost_of(nm).render()
+            except Exception:                          # noqa: BLE001
+                k = None
+        print(f"// {nm}：target **要你自己定**——从实现推出来的上界等于自证。")
+        if k:
+            print(f"// 静态 κ（成本模型算的**上界**，仅供参考）：{k}")
+        print(f"spec {nm}({', '.join(parts)}) -> {_type_str(ret)} {{")
+        print("    effects { };")
+        print("    // target { time: { max: ??? } };   // ← 填这里；不写也能过 check，但 cost 会报「无 target」")
+        print("}")
+        print()
+    if missing == 0:
+        print("  每个函数都有 spec 了。")
+    else:
+        print(f"  共 {missing} 个函数缺 spec（草案如上，复制进 .tu 后填 target）")
     return 0
 
 
@@ -934,8 +1181,19 @@ def cmd_cpp(argv: List[str]) -> int:
     if tu_p is None or ch_p is None:
         print("用法: elench cpp <模块> [--output=x.cpp] [--run]", file=sys.stderr)
         return 2
-    tu_mod = _ps(io_read(tu_p), os.path.basename(tu_p)).module
-    ch_mod = _ps(io_read(ch_p), os.path.basename(ch_p)).module
+    # **解析失败必须非零退出**（L-12 实测：以前语法错也 exit 0，
+    # CI 会把"生成了错的 C++"当成成功）。
+    _res = []
+    for _p in (tu_p, ch_p):
+        _r = _ps(io_read(_p), os.path.basename(_p))
+        if not _r.ok:
+            for _d in _r.diagnostics:
+                print(f"✗ {_d.code} @{_d.line}:{_d.col}  [{os.path.basename(_p)}] {_d.msg}",
+                      file=sys.stderr)
+        _res.append(_r)
+    if any(not _r.ok for _r in _res):
+        return 1
+    tu_mod, ch_mod = _res[0].module, _res[1].module
 
     try:
         text = _gen_cpp(tu_mod, ch_mod)
@@ -963,6 +1221,33 @@ def _cxx_type_of(name: str) -> str:
     return _cm.cxx_type(name) or "uint64_t"
 
 
+def _order_by_calls(fns):
+    """把被调函数排在调用者之前（C++ 模板要求定义先于使用）。
+
+    只在存在泛型函数时调用——普通代码保持源码顺序，避免改变既有输出。
+    """
+    from ast_util import descendants
+    name_of = {id(f): getattr(f, "name", "") for f in fns}
+    deps = {name_of[id(f)]: {getattr(c, "name", "") for c in descendants(f, "call")}
+            for f in fns}
+    out, seen = [], set()
+
+    def visit(f):
+        nm = name_of[id(f)]
+        if nm in seen:
+            return
+        seen.add(nm)
+        for g in fns:
+            gn = name_of[id(g)]
+            if gn != nm and gn in deps.get(nm, set()):
+                visit(g)
+        out.append(f)
+
+    for f in fns:
+        visit(f)
+    return out
+
+
 def _gen_cpp(tu_mod, ch_mod) -> str:
     """把**最小切片**翻译成 C++（不支持就抛 `CppUnsupported`）。"""
     import cxx_map as _cm
@@ -980,18 +1265,36 @@ def _gen_cpp(tu_mod, ch_mod) -> str:
     # （g++ 报 `::main must return int`）。所以改名成 `elench_main`，末尾补一个合法入口。
     need_wrapper = False
     wrapper_noargs = True
+    # **泛型 → C++ 模板**（P3，2026-11-06）：以前一律拒绝（会静默退化成
+    # uint64_t，pick("a","b") 就错）。现在生成 template <typename T>，
+    # 并把泛型函数排到使用它的函数之前——C++ 模板要求定义先于使用。
+    _has_generic = any(any(getattr(c, "kind", "") == "type-params"
+                           for c in (fn.children or [])) for fn in fns)
+    if _has_generic:
+        fns = _order_by_calls(fns)
+
     for fn in fns:
+        _tparams = {c2.name for c in (fn.children or [])
+                    if getattr(c, "kind", "") == "type-params"
+                    for c2 in (c.children or [])}
+        if _tparams:
+            out.append("template <" + ", ".join(
+                f"typename {n}" for n in sorted(_tparams)) + ">")
         ps = next((c for c in fn.children if c.kind == "params"), None)
         decls = []
         for prm in (ps.children if ps else []):
             ty = next((c for c in prm.children if c.kind in ("type-ref", "type-name")), None)
             ts = _type_str(ty)
-            cty = _cm.cxx_type(ts) or "uint64_t"
+            # **类型参数原样输出**（`T` 就是合法的 C++ 标识符）；否则会退化成 uint64_t
+            _head = (ts or "").split("<")[0].strip()
+            cty = ts if _head in _tparams else (_cm.cxx_type(ts) or "uint64_t")
             if cty.startswith("std::vector"):
                 cty = f"const {cty}&"
             decls.append(f"{cty} {prm.name}")
         rt = next((c for c in fn.children if c.kind in ("type-ref", "type-name")), None)
-        rts = _cm.cxx_type(_type_str(rt)) or "uint64_t"
+        _rts = _type_str(rt)
+        rts = _rts if (_rts or "").split("<")[0].strip() in _tparams \
+            else (_cm.cxx_type(_rts) or "uint64_t")
         cname = fn.name
         if cname == "main":
             cname = "elench_main"
@@ -1208,7 +1511,7 @@ def cmd_header(argv: List[str]) -> int:
         for _p in (_ps.children if _ps else []):
             _ty = next((c for c in _p.children if c.kind in ("type-ref", "type-name")), None)
             _ts = _type_str(_ty)
-            _cty = "const char*" if _ts.startswith("Vec") else (_cm.cxx_type(_ts) or "uint64_t")
+            _cty = "const char*" if canon(_ts).startswith("vector") else (_cm.cxx_type(_ts) or "uint64_t")
             _ds.append(f"{_cty} {_p.name}")
         _rt = next((c for c in _sp.children if c.kind in ("type-ref", "type-name")), None)
         _rts = _cm.cxx_type(_type_str(_rt)) or "uint64_t"
@@ -1223,7 +1526,7 @@ def cmd_header(argv: List[str]) -> int:
         for prm in ps:
             ty = next((x for x in prm.children if x.kind in ("type-ref", "type-name")), None)
             ts = _type_str(ty)
-            cty = "const char*" if ts.startswith("Vec") else (_cm.cxx_type(ts) or "uint64_t")
+            cty = "const char*" if canon(ts).startswith("vector") else (_cm.cxx_type(ts) or "uint64_t")
             decls.append(f"{cty} {prm.name}")
         rt = next((x for x in c.children if x.kind in ("type-ref", "type-name")), None)
         rts = _cm.cxx_type(_type_str(rt)) or "uint64_t"
@@ -1354,6 +1657,10 @@ def cmd_cost(argv: List[str]) -> int:
     from cost_check import compare, compare_exact
 
     tu_p, ch_p = _load_pair(argv)
+    if not _abort_on_parse_errors(tu_p, ch_p):
+        # **解析失败 = 检查失败 = 1**（2026-11-06）：以前这里返回 2，
+        # 而 2 在约定里是"用法错误"，与 check/build 的 1 也不一致。
+        return 1
     if tu_p is None:
         print("用法：elench cost <模块.tu> [<模块.eln>]", file=sys.stderr)
         return 2
@@ -1405,7 +1712,7 @@ def cmd_cost(argv: List[str]) -> int:
                     "reason": str(e)}
                 continue
             tgt = ci.target_cost(name)
-            v = compare(c, tgt)
+            v = compare(c, tgt, _facts_for(ci, name))
             try:
                 a = ci.alloc_of(name)
             except Exception:                          # noqa: BLE001
@@ -1479,7 +1786,7 @@ def cmd_cost(argv: List[str]) -> int:
             print(f"  {name.ljust(w)}  ⊤   ({e})")
             continue
         t = ci.target_cost(name)
-        v = compare(c, t)
+        v = compare(c, t, _facts_for(ci, name))
         mark = {"ok": "✓", "debt": "▲", "unknown": "?"}[v.kind]
         debt += 1 if v.kind == "debt" else 0
         # **E36：allocation 维度也判**（以前只解析、不判）
@@ -1502,9 +1809,31 @@ def cmd_cost(argv: List[str]) -> int:
             _at = at.render() if at is not None else "（无 target）"
             print(f"    {'':{w}}  分配 {amark} alloc ≤ {_an}   (target {_at})")
         print(f"    {'':{w}}  {v.render()}")
+
+        # **余量视图**（L-08，2026-11-06）：告诉人"还差多少就超了"。
+        # **只在两边都是数时给数字**；阶比较没有数值余量——那是 big-O 的性质，
+        # 硬算一个减法等于编数字（例如 O(n) 对 14n，余量是无穷，不是某个数）。
+        if _explain:
+            def _num_of(_c):
+                try:
+                    _r = _c.render().strip()
+                    return int(_r) if _r.lstrip('-').isdigit() else None
+                except Exception:                      # noqa: BLE001
+                    return None
+            for _dim, _act, _tgt in (("time", c, t), ("alloc", a, at)):
+                if _act is None or _tgt is None:
+                    continue
+                _an, _tn = _num_of(_act), _num_of(_tgt)
+                if _an is not None and _tn is not None:
+                    _slack = _tn - _an
+                    _tag = "余量" if _slack >= 0 else "超支"
+                    print(f"    {'':{w}}  {_tag} {abs(_slack)}（target {_tn} − 实际 {_an}，{_dim}）")
+                else:
+                    print(f"    {'':{w}}  余量 不适用（{_dim} 是阶比较；big-O 没有数值余量）")
         # **归因**（只读）：超越时说出"是哪一段抬的、删了它能不能达标"。
         # 以前只报「超标 + 比值」，读的人知道超了但不知道从哪下手。
-        if _explain and v.kind != "ok":
+        # **达标也归因**（2026-11-06）：以前只在超界时输出，于是"这条为什么贵"在达标时看不到。
+        if _explain:
             try:
                 import cost_explain as _ce
                 _sv = (c.variables() or ["n"])[0]
@@ -1629,12 +1958,20 @@ def cmd_cost(argv: List[str]) -> int:
 
 def cmd_dispatch(argv: List[str]) -> int:
     argv = _expand_module_args(argv)
+    _choose = None
+    _args = [a for a in argv if not a.startswith('--')]
+    if len(_args) >= 2 and not _args[1].endswith(('.tu', '.eln')):
+        if not os.path.exists(_args[1]) and not os.path.exists(_args[1] + ".tu"):
+            _choose = _args[1]
+            argv = [a for a in argv if a != _choose]
     """三层筛：为每个 ?! 决定要不要测、分几段。"""
     from parser import parse_source
     from cost_interp import CostInterp
     from dispatch import plan_dispatch
 
     tu_p, ch_p = _load_pair(argv)
+    if not _abort_on_parse_errors(tu_p, ch_p):
+        return 2
     if tu_p is None:
         print("用法：elench dispatch <模块.tu> [<模块.eln>]", file=sys.stderr)
         return 2
@@ -1657,6 +1994,13 @@ def cmd_dispatch(argv: List[str]) -> int:
     print()
     from bound import _descendants
     labels = sorted({k.name for k in _descendants(ci.mod, "kernels") if k.name})
+    # 位置参数 <choose名>：只处理这一个 ?!（不收 --only）
+    if _choose is not None:
+        if _choose not in labels:
+            _opts = ', '.join(labels) or '(none)'
+            print('✗ 这个模块没有 ?!%s；可选：%s' % (_choose, _opts), file=sys.stderr)
+            return 2
+        labels = [_choose]
     any_plan = False
     for label in labels:
         cands = _candidate_costs(ci, label)
@@ -1769,11 +2113,26 @@ def _accept_path(tu_p: str) -> str:
                         os.path.basename(tu_p).rsplit(".", 1)[0] + ".accept.yaml")
 
 
+def _snapshot_path(tu_p: str) -> str:
+    """接受时留的 `.tu` **全文快照**——用来回答"上次确认的到底是什么"。"""
+    return os.path.join(os.path.dirname(os.path.abspath(tu_p)),
+                        os.path.basename(tu_p).rsplit(".", 1)[0] + ".accept.tu.txt")
+
+
 def _write_accept(tu_p: str, sha: str) -> None:
     import time as _time
+    # **留快照**：光有指纹只能说"变了"，说不出"变了什么"。
+    # 而这个目录常被 gitignore（`文档/设计/`），`git diff` 也帮不上忙。
+    try:
+        with io.open(tu_p, encoding="utf-8") as _src, \
+                io.open(_snapshot_path(tu_p), "w", encoding="utf-8", newline="\n") as _dst:
+            _dst.write(_src.read())
+    except OSError:
+        pass
     with io.open(_accept_path(tu_p), "w", encoding="utf-8", newline="\n") as f:
         f.write("# 由 elench 生成：声明（.tu）最后一次被确认过的状态。\n")
         f.write("# 声明改了就要重新确认：elench build <模块> --accept-tu-change\n")
+        f.write("# 上次确认的**全文**在旁边的 .accept.tu —— 再变就用它 diff，别指望 git。\n")
         f.write(f"module: {os.path.basename(tu_p).rsplit('.', 1)[0]}\n")
         f.write(f"tu_sha256: {sha}\n")
         f.write(f"accepted_at: {_time.strftime('%Y-%m-%dT%H:%M:%S')}\n")
@@ -1841,6 +2200,10 @@ def _check_tu_accepted(tu_p: str, argv: List[str]) -> int:
         print("  这道闸防的不是「你改」（那是你的权利），"
               "是**声明被静默放宽到刚好能过**。", file=sys.stderr)
         print(f"  先看清改了什么：  git diff -- {name}", file=sys.stderr)
+        _snap = _snapshot_path(tu_p)
+        if os.path.exists(_snap):
+            print(f"  上次确认的全文：  {_snap}", file=sys.stderr)
+            print(f"  对比改了什么：    diff {_snap} {tu_p}", file=sys.stderr)
         print(f"  确认无误再放行：  elench build {modname} --accept-tu-change",
               file=sys.stderr)
         return 1
@@ -1849,12 +2212,30 @@ def _check_tu_accepted(tu_p: str, argv: List[str]) -> int:
 
 def cmd_measure(argv: List[str]) -> int:
     argv = _expand_module_args(argv)
+    # 位置参数 <choose名>：只重测这一个 ?!（不收 --only）
+    _choose = None
+    _args = [a for a in argv if not a.startswith('--')]
+    if len(_args) >= 2 and not _args[1].endswith(('.tu', '.eln')):
+        if not os.path.exists(_args[1]) and not os.path.exists(_args[1] + '.tu'):
+            _choose = _args[1]
+            argv = [a for a in argv if a != _choose]
     """动态闭环：真跑候选，用实测生成分档表（§7.8 第 ③ 步）。"""
     from parser import parse_source
     from cost_interp import CostInterp
     from dispatch import plan_dispatch, table_from_measure
 
     tu_p, ch_p = _load_pair(argv)
+    if not _abort_on_parse_errors(tu_p, ch_p):
+        return 2
+    if _choose is not None:
+        from policy import local_table_path as _ltp0
+        _t0 = _ltp0(os.path.dirname(os.path.abspath(tu_p)),
+                    os.path.basename(tu_p).rsplit('.', 1)[0])
+        if not os.path.exists(_t0):
+            print('✗ 还没有分档表：%s' % _t0, file=sys.stderr)
+            print('  增量重测要有一份已有的表；先跑一次全量：elench measure %s'
+                  % _args[0], file=sys.stderr)
+            return 2
     if tu_p is None:
         print("用法：elench measure <模块.tu> [<模块.eln>]", file=sys.stderr)
         return 2
@@ -1893,7 +2274,16 @@ def cmd_measure(argv: List[str]) -> int:
 
     from bound import _descendants
     print(f"module {os.path.basename(tu_p).rsplit('.', 1)[0]}")
-    for label in sorted({k.name for k in _descendants(ch_mod, "kernels") if k.name}):
+    _all = {}
+    _degraded = False
+    _labels = sorted({k.name for k in _descendants(ch_mod, "kernels") if k.name})
+    if _choose is not None:
+        if _choose not in _labels:
+            print('✗ 这个模块没有 ?!%s；可选：%s' % (_choose, ', '.join(_labels) or '(none)'),
+                  file=sys.stderr)
+            return 2
+        _labels = [_choose]
+    for label in _labels:
         cands = _candidate_costs(ci, label)
         if not cands:
             continue
@@ -1969,20 +2359,19 @@ def cmd_measure(argv: List[str]) -> int:
         # **就地落盘**：分档表必须成为可提交、可审查的文件，`build` 才有东西可校验。
         # 不放在函数末尾——那里有 return，容易漏执行（踩过）。
         _mod = os.path.basename(tu_p).rsplit(".", 1)[0]
-        from policy import local_table_path as _ltp, repo_table_path as _rtp
+        from policy import local_table_path as _ltp
         _tblp = _ltp(os.path.dirname(os.path.abspath(tu_p)), _mod)
-        _degraded = dev_cap is not None or len(pts) < len(full_pts)
-        _body = [f"module: {_mod}\nlabel: {label}\nsegments:\n"]
-        for _a, _b, _who in segs:
-            _body.append(f"  - {{lo: {_a}, hi: {_b}, candidate: {_who}}}\n")
-        with open(_tblp, "w", encoding="utf-8", newline="\n") as _f:
-            _f.write("# 由 `elench measure` 生成；MUST NOT 手改。\n")
-            if _degraded:
-                _f.write("# DEGRADED: 未覆盖 benchmodel.scale 声明的全部规模，"
-                         "不可用于承诺\n")
-                _f.write("degraded: true\n")
-            _f.writelines(_body)
-        print(f"  分档表 → {_tblp}")
+        _degraded = _degraded or dev_cap is not None or len(pts) < len(full_pts)
+        if _choose is not None:
+            if not os.path.exists(_tblp):
+                print('✗ 还没有分档表：%s\n  先跑一次全量 measure %s' % (_tblp, _mod),
+                      file=sys.stderr)
+                return 2
+            _merge_dispatch_table(_tblp, _mod, label, segs, _degraded)
+        else:
+            _all[label] = segs
+            _write_dispatch_table(_tblp, _mod, _all, _degraded)
+        print(f"  分档表 → {_tblp}（{len(_all)} 个 label）")
 
         # **`--commit`：另写一份入库的参考表**（`tables/<模块>.table.yaml`）。
         # 为什么值得入库：新人 clone 下来不必先跑 `measure`（那是分钟级），CI 也能直接跑；
@@ -2077,6 +2466,8 @@ def cmd_stats(argv: List[str]) -> int:
         rest = argv[3:]
     else:
         tu_p, ch_p = _load_pair([argv[0]])
+        if not _abort_on_parse_errors(tu_p, ch_p):
+            return 2
         fn, rest = argv[1], argv[2:]
     tu_p = _resolve_module_path(tu_p) if tu_p else None
     if tu_p is None:
@@ -2183,6 +2574,20 @@ def cmd_export(argv: List[str]) -> int:
     两个模式**共用同一套实参**（`bench._build_args`），换的只是"量什么"。
     """
     if ("--full" in argv) or ("--report" in argv):
+        # **`--timing` 与 `--full` 不同单位**：报告三节全按操作数讲（κ 与 ops 同单位），
+        # 而 `--timing` 量的是纳秒。混起来就会出现「纳秒÷操作数」这种没意义的数。
+        # 与其算个假比值，不如明确拒绝——**不许静默忽略参数**。
+        if "--timing" in argv:
+            print("✗ `--full` 不支持 `--timing`：报告按操作数讲（与 κ 同单位），纳秒与它不可换算。要纳秒请用 `elench export <模块> --timing`。", file=sys.stderr)
+            return 2
+        # **OTLP 有现成实现**（`otel.to_otlp`，非 --full 那条路在用）：
+        # `--full` 只是报告形态，不该在这一步另写一份。直接交给 OTLP 路径。
+        # 修前实测：`--full --out=t.otel` 不报错、也不出 .otel——
+        # SVG 分支把 out_path 当基名，写出了 `t-图.svg`。
+        _o0 = next((a.split("=", 1)[1] for a in argv if a.startswith("--out=")), "")
+        if (_o0.lower().endswith((".otel", ".otlp", ".otlp.json"))
+                or "--push" in argv):
+            return cmd_export([a for a in argv if a not in ("--full", "--report")])
         _sizes = None            # None = 由模块的 benchmodel.scale 决定
         _runs = 20
         _pos = []
@@ -2496,6 +2901,8 @@ def cmd_bench(argv: List[str]) -> int:
         tu_p, ch_p, fn_name = argv[0], argv[1], argv[2]
     else:
         tu_p, ch_p = _load_pair([argv[0]])
+        if not _abort_on_parse_errors(tu_p, ch_p):
+            return 2
         fn_name = argv[1]
     tu_p = _resolve_module_path(tu_p) if tu_p else None
     if tu_p is None:
@@ -2686,7 +3093,7 @@ def cmd_run(argv: List[str]) -> int:
         ty_name = (ty.name or "") if ty is not None else ""
         # `const Vec<u64>& xs` 解析成 `type-ref`；`u64 k` 是 `type-name`。
         if (ty is not None and ty.kind == "type-ref") \
-                or ty_name.startswith("Vec") or ty_name.startswith("FixedVec"):
+                or canon(ty_name).startswith("vector") or canon(ty_name).startswith("array"):
             if vi >= len(vec_args):
                 print(f"✗ 参数 {prm.name} 是向量，需要 `--vec=…`", file=sys.stderr)
                 return 2
@@ -2914,31 +3321,37 @@ def cmd_build(argv: List[str]) -> int:
         # 的程序照样 exit 0。门禁必须**逐个维度**判：time 用 compare（按阶），
         # allocation 用 compare_exact（按数量）。
         from cost_check import compare as _cmp, compare_exact as _cmpe
+        # **维度表**（P2，2026-11-06）：加第三个维度只需加一行，门禁本体不动。
+        # 标签沿用历史的 `alloc`（报表里已经是这个名字）；
+        # **比较策略必须逐维不同**：time 按阶、allocation 按数值——不能统一。
+        _GATE_DIMS = (
+            ("time", lambda _ci, _n: _ci.cost_of(_n),
+             lambda _ci, _n: _ci.target_cost(_n), _cmp),
+            ("alloc", lambda _ci, _n: _ci.alloc_of(_n),
+             lambda _ci, _n: _ci.target_cost(_n, "allocation"), _cmpe),
+        )
+        _r5 = "R5" in _relax_names([a.split("=", 1)[1] for a in argv
+                                    if a.startswith("--relax=")])
         _debt, _unknown = [], []
         for _n in ci.fns:
-            _dims = []
-            try:
-                _dims.append(("time", _cmp(ci.cost_of(_n), ci.target_cost(_n))))
-            except Exception:                          # noqa: BLE001
-                _dims.append(("time", None))
-            # **R5 放宽**：不要求建模分配 ⇒ 允许该维度"未知"。
-            # 但**已知超支（debt）仍然拒绝**——放宽的是"要不要建模"，
-            # 不是"能不能超"。把能算出来的 debt 也摘掉 = 假阳性。
-            try:
-                _av = _cmpe(ci.alloc_of(_n), ci.target_cost(_n, "allocation"))
-            except Exception:                          # noqa: BLE001
-                _av = None
-            if _av is not None:
-                _r5 = "R5" in _relax_names([a.split("=", 1)[1] for a in argv
-                                            if a.startswith("--relax=")])
-                if not (_r5 and _av.kind == "unknown"):
-                    _dims.append(("alloc", _av))
-            for _dim, _v in _dims:
-                if _v is None:
-                    continue
+            for _dim, _actual, _target, _cmpf in _GATE_DIMS:
+                try:
+                    _tv = _target(ci, _n)
+                except Exception:                      # noqa: BLE001
+                    _tv = None
                 # **没有该维度的 target ⇒ 不适用**（没承诺就不用守），
                 # 不能算成 unknown——否则每个没写 allocation 的函数都会被拒绝。
-                if ci.target_cost(_n, "allocation" if _dim == "alloc" else "time") is None:
+                if _tv is None:
+                    continue
+                try:
+                    _v = _cmpf(_actual(ci, _n), _tv)
+                except Exception:                      # noqa: BLE001
+                    _v = None
+                if _v is None:
+                    continue
+                # **R5 放宽**：不要求建模分配 ⇒ 允许该维度"未知"。
+                # 但已知超支（debt）仍然拒绝——放宽的是"要不要建模"，不是"能不能超"。
+                if _dim == "alloc" and _r5 and _v.kind == "unknown":
                     continue
                 if _v.kind == "debt":
                     _debt.append(f"{_n}[{_dim}]")
@@ -2956,10 +3369,10 @@ def cmd_build(argv: List[str]) -> int:
         # **只用 --deny-debt 会漏掉 κ=⊤ 的程序**（unknown 不是 debt）。
         # 这是实测出来的洞（tools/relax_sweep.py：C1 在 6 种配置下全部通过）。
         # 不改变语义，只提醒——要不要拒绝"不知道"由 CI 决定。
-        if ("--deny-debt" in argv) and ("--deny-unknown" not in argv) and _unknown:
-            print(f"  提示：另有 {len(_unknown)} 处**无法判定**未被拒绝"
-                  f"（{', '.join(sorted(_unknown))}）；CI 请加 `--deny-unknown`。")
-        if ("--deny-unknown" in argv) and _unknown:
+        # **门禁必须是全函数**（2026-11-06）：以前 `--deny-debt` 遇到 unknown
+        # 只打印提示就 exit 0 —— 那等于"不知道"被当成"没问题"，
+        # 而上界语言最不能出的错就是这个。现在 `--deny-debt` 同样拒绝 unknown。
+        if _unknown and (("--deny-debt" in argv) or ("--deny-unknown" in argv)):
             print(f"✗ 拒绝构建：{len(_unknown)} 处无法判定（--deny-unknown）："
                   + ", ".join(sorted(_unknown)))
             print("  出路：写出可判的 target（含同样的尺寸量）、或补 `benchmodel` 的 scale / `repeats`。",
@@ -2970,6 +3383,72 @@ def cmd_build(argv: List[str]) -> int:
 
 VERSION = "1.0.0"
 ARGV_VERSION = ("--version", "-V", "version")
+
+
+def _write_table(rows, path: str) -> int:
+    """把测量行写成数据表：`.md` 出 Markdown，`.csv` 出逗号分隔。
+
+    列固定：函数 / 规模 / κ / 实测 / 相对（κ÷实测）/ 承诺上限。
+    `相对` 为空表示该点没测到——**不写 0**，因为 0 会被读成"成本为零"。
+    """
+    import csv as _csv
+    cols = ["函数", "规模", "κ", "实测", "相对(κ÷实测)", "承诺上限"]
+    body = []
+    for r in rows:
+        rel = (r["bound"] / r["typical"]) if r.get("typical") else None
+        body.append([
+            r.get("function", ""),
+            r.get("size", ""),
+            r.get("bound", ""),
+            r.get("typical", ""),
+            f"{rel:.2f}" if rel is not None else "",
+            "" if r.get("target") is None else r["target"],
+        ])
+    if path.lower().endswith(".csv"):
+        with io.open(path, "w", encoding="utf-8", newline="") as fh:
+            w = _csv.writer(fh)
+            w.writerow(cols)
+            w.writerows(body)
+    else:
+        out = ["| " + " | ".join(cols) + " |",
+               "|" + "|".join(["---"] * len(cols)) + "|"]
+        for row in body:
+            out.append("| " + " | ".join(str(c) for c in row) + " |")
+        io.open(path, "w", encoding="utf-8", newline="\n").write("\n".join(out) + "\n")
+    print(f"已写出表：{path}（{len(body)} 行）")
+    return 0
+
+
+
+def _measure_curve(prog: str, sizes, runs: int):
+    """**唯一的测量入口**：跑程序、拿 `(n, κ, ops, slack)`，按规模逐点。
+
+    两个命令（`export --full` 与即将删除的 `tightness`）本来各写一遍同样的循环，
+    容易漂（默认 runs 不同、跳行条件不同）。现在只此一处。
+
+    `slack = κ / ops`；`ops <= 0` 的点直接跳过——除零没有意义，
+    而且它表示"这次没测到"，不是"成本为 0"。
+    """
+    from kappa_vs_measured import measure_one
+    out = []
+    for size in (sizes or [16, 64, 256]):
+        for r in measure_one(prog, size, runs):
+            if r.get("error") or "max_actual" not in r:
+                continue
+            ops = float(r["max_actual"] or 0)
+            if ops <= 0:
+                continue
+            kv = float(r.get("kappa_at_n") or 0)
+            out.append({
+                "function": r["function"],
+                "n": size,
+                "kappa": kv,
+                "ops": ops,
+                "slack": (kv / ops) if ops else None,
+                "target": r.get("target_at_n"),
+            })
+    return out
+
 
 
 def _full_report(module_arg: str, sizes, runs, wc_path=None, out_path=None,
@@ -3048,24 +3527,19 @@ def _full_report(module_arg: str, sizes, runs, wc_path=None, out_path=None,
     if not sizes:
         sizes = [16, 64, 256]
 
+    _curve = _measure_curve(prog, sizes, runs)
     rows = []
-    for size in sizes:
-        for r in measure_one(prog, size, runs):
-            if r.get("error") or "max_actual" not in r:
-                continue
-            typical = float(r["max_actual"] or 0)
-            if typical <= 0:
-                continue
-            rows.append({
-                "function": r["function"],
-                "size": size,
-                "bound": float(r.get("kappa_at_n") or 0),
-                "target": r.get("target_at_n"),
-                "typical": typical,
-                "alloc_bound": r.get("alloc_kappa_at_n"),
-                "alloc_target": r.get("alloc_target_at_n"),
-                "allocs": r.get("allocs_max", 0),
-            })
+    for _c in _curve:
+        rows.append({
+            "function": _c["function"],
+            "size": _c["n"],
+            "bound": _c["kappa"],
+            "target": _c["target"],
+            "typical": _c["ops"],
+            "alloc_bound": None,
+            "alloc_target": None,
+            "allocs": 0,
+        })
     if not rows:
         import glob as _glob
         _samples = __import__("kappa_vs_measured").SAMPLES
@@ -3209,10 +3683,18 @@ def _full_report(module_arg: str, sizes, runs, wc_path=None, out_path=None,
 
     # ---------- 图：默认**一个文件装多张图**（多面板，不是一张图里挤两条语义） ----------
     try:
+        # **按后缀分流**（`.md` / `.csv`）：以前只认 `.svg`，给个 `x.md` 会把 SVG 内容写进去。
+        # 控制台的三节报告仍然照旧；这里只是把**同一份 rows** 另存成数据表。
+        if out_path and out_path.lower().endswith((".md", ".csv")):
+            return _write_table(rows, out_path)
+
         from chart import line_chart, stack_svgs
         _base = os.path.splitext(os.path.basename(module_arg.rstrip("/\\")))[0]
+        # **不给 `--out` 时，图写在模块旁边，不写进当前目录**。
+        # 以前用 `os.getcwd()`，于是仓库根目录会冒出 `pick-图.svg` / `blur-图.svg`
+        # 这类"谁生成的？"的孤儿文件（2026-11-07 查出来的）。
         _out_base = (os.path.splitext(out_path)[0] if out_path
-                     else os.path.join(os.getcwd(), _base))
+                     else os.path.join(os.path.dirname(module_arg.rstrip("/\\")) or ".", _base))
         _by_fn = {}
         for _r in rows:
             _by_fn.setdefault(_r["function"], []).append(_r)
@@ -3367,167 +3849,6 @@ def cmd_otel(argv: List[str]) -> int:
         sys.argv = old
 
 
-def cmd_tightness(argv: List[str]) -> int:
-    """**紧度曲线**：κ(n) ÷ ops_typ(n)，对多个规模出表。
-
-    ## 为什么单独一个动词、不挂到 `export`
-
-    `export` 是纯静态的（不执行用户代码）；紧度要**把程序跑起来**才有 ops。
-    把测量塞进 export 等于让"导出源码"顺带执行用户代码——副作用、非终止都会
-    在导出时发生。跑代码必须**显式**。
-
-    ## 指标名字必须准确
-
-    随机输入测的是**典型成本**，所以这里出的是 `slack_typ = κ ÷ ops_typ`，
-    **不是** `tightness_wc = κ ÷ ops_worst`。因为 `ops_worst ≥ ops_typ`，
-    本表的数值是真实紧度的**上界**（偏乐观）。
-    """
-    argv = _expand_module_args(argv)
-    if not argv:
-        print("用法：elench tightness <模块> [--sizes 16,64,256] [--runs 20] "
-              "[--out 文件.md|.json|.csv]", file=sys.stderr)
-        return 2
-
-    sizes = [16, 64, 256]
-    runs = 20
-    out = None
-    fmt = None
-    wc_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                           "tools", "worstcase.json")
-    pos = []
-    for a in argv:
-        if a.startswith("--sizes="):
-            sizes = [int(x) for x in a.split("=", 1)[1].split(",") if x.strip()]
-        elif a.startswith("--runs="):
-            runs = int(a.split("=", 1)[1])
-        elif a.startswith("--out="):
-            out = a.split("=", 1)[1]
-        elif a.startswith("--format="):
-            fmt = a.split("=", 1)[1]
-        elif a.startswith("--worstcase="):
-            wc_path = a.split("=", 1)[1]
-        elif not a.startswith("--"):
-            pos.append(a)
-    if not pos:
-        print("✗ 缺少模块名", file=sys.stderr)
-        return 2
-
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    tools = os.path.join(root, "tools")
-    try:
-        from kappa_vs_measured import measure_one        # noqa: E402
-    except Exception:                                    # noqa: BLE001
-        if tools not in sys.path:
-            sys.path.insert(0, tools)
-        try:
-            from kappa_vs_measured import measure_one    # noqa: E402
-        except Exception as exc:                         # noqa: BLE001
-            print(f"✗ 无法加载测量器：{type(exc).__name__}: {exc}", file=sys.stderr)
-            return 2
-
-    # **原样把参数递给 measure_one**：它既能收名字（在样例目录里找），也能收路径。
-    # 以前这里先 basename 掉，于是 `tightness 示例/pick` 被当成名字去内部样例目录里找，
-    # 永远找不到，统一报「没有可对照的函数」——而模块明明就在当前目录。
-    prog_arg = pos[0]
-    prog = os.path.basename(prog_arg).rsplit(".", 1)[0]
-    rows = []
-    for n in sizes:
-        for r in measure_one(prog_arg, n, runs):
-            if r.get("error") or "max_actual" not in r:
-                continue
-            ops = float(r["max_actual"] or 0)
-            kv = float(r.get("kappa_at_n") or 0)
-            if ops <= 0:
-                continue
-            rows.append({
-                "program": r.get("program", prog),
-                "function": r.get("function", "?"),
-                "n": n,
-                "kappa": kv,
-                "ops_typ": ops,
-                "slack_typ": kv / ops,
-                "holds": bool(r.get("holds")),
-            })
-
-    if not rows:
-        print("✗ 没有可对照的函数（需要带 target 的 spec）", file=sys.stderr)
-        return 1
-
-    # **真紧度的分母**：`tools/worstcase.py` 搜到的最坏观测值（下界逼近）
-    wc = {}
-    try:
-        if wc_path and os.path.exists(wc_path):
-            wc = json.load(io.open(wc_path, encoding="utf-8"))
-    except Exception:                                    # noqa: BLE001
-        wc = {}
-    for r in rows:
-        r["ops_worst_obs"] = None
-        r["slack_wc_ub"] = None
-        for w in wc.get(r["program"], []):
-            if w.get("function") == r["function"] and w.get("n") == r["n"]:
-                ops_w = float(w.get("ops_worst_obs") or 0)
-                if ops_w > 0:
-                    r["ops_worst_obs"] = ops_w
-                    r["slack_wc_ub"] = r["kappa"] / ops_w
-                break
-
-    lines = ["# 紧度曲线（slack_typ = κ ÷ ops_typ）", "",
-             f"> 规模 {sizes}，每点 {runs} 组输入取**最坏**（注意：仍不是对抗性输入）。",
-             "> 随机输入测的是典型成本，故 `slack_typ` 是真实紧度 `tightness_wc` 的**上界**（偏乐观）。",
-             "> `slack_wc_ub` 用 `tools/worstcase.py` 搜到的最坏观测值当分母——它仍是**下界逼近**，",
-             "> 不是精确值；未收敛的条目要在 `worstcase.json` 里看 `converged`。",
-             ""]
-    lines.append("| 函数 | n | κ | ops_typ | slack_typ | ops_worst | slack_wc_ub | 界成立 |")
-    lines.append("|---|---|---|---|---|---|---|---|")
-    for r in rows:
-        _w = f"{r['ops_worst_obs']:,.0f}" if r["ops_worst_obs"] else "—"
-        _wu = f"{r['slack_wc_ub']:.2f}" if r["slack_wc_ub"] else "—"
-        lines.append(f"| {r['program']}.{r['function']} | {r['n']} | "
-                     f"{r['kappa']:,.0f} | {r['ops_typ']:,.0f} | "
-                     f"{r['slack_typ']:.2f} | {_w} | {_wu} | "
-                     f"{'✓' if r['holds'] else '✗'} |")
-    md = "\n".join(lines) + "\n"
-
-    # 形状分类：按函数看 slack 随 n 的变化
-    by_fn: Dict[str, List[Dict[str, Any]]] = {}
-    for r in rows:
-        by_fn.setdefault(f"{r['program']}.{r['function']}", []).append(r)
-    cls = []
-    for name, rs in by_fn.items():
-        rs = sorted(rs, key=lambda x: x["n"])
-        if len(rs) < 2:
-            continue
-        # **判形状要用真紧度**（有 worstcase 就用它）。
-        # 用 `slack_typ` 会误报：早退函数的典型 ops 不随 n 涨，
-        # 于是 `slack_typ` 一路上升，看起来像"主导项算松了"，其实紧度很稳。
-        _key = ("slack_wc_ub" if all(r.get("slack_wc_ub") for r in rs)
-                else "slack_typ")
-        ratio = rs[-1][_key] / rs[0][_key] if rs[0][_key] else 0
-        if ratio > 1.15:
-            verdict = "随 n 上升 → **主导项可能算松了**（危险）"
-        elif ratio < 0.87:
-            verdict = "随 n 下降 → 常数项主导（安全）"
-        else:
-            verdict = "基本平 → 形状对得上"
-        cls.append((name, rs[0][_key], rs[-1][_key], ratio, verdict))
-    if cls:
-        lines2 = ["", "## 形状分类（前 20% = slack 最大者；优先用 slack_wc_ub）", "",
-                  "| 函数 | slack(n_min) | slack(n_max) | 比值 | 判读 |",
-                  "|---|---|---|---|---|"]
-        for name, a, b, ratio, verdict in sorted(cls, key=lambda x: -x[2]):
-            lines2.append(f"| {name} | {a:.2f} | {b:.2f} | {ratio:.2f} | {verdict} |")
-        md += "\n".join(lines2) + "\n"
-
-    print(md)
-
-    from emit import emit
-    emit(md, rows, out=out, fmt=fmt, cols=["program", "function", "n", "kappa", "ops_typ", "slack_typ",
-                                        "ops_worst_obs", "slack_wc_ub", "holds"],
-         meta={"sizes": sizes, "runs": runs, "metric": "slack_typ"})
-    return 0
-    return 0
-
-
 def main(argv=None) -> int:
     """控制台入口（友好错误层）。
 
@@ -3628,8 +3949,6 @@ def _main_impl(argv=None) -> int:
         return cmd_dispatch(rest)
     if cmd == "measure":
         return cmd_measure(rest)
-    if cmd == "tightness":
-        return cmd_tightness(rest)
     if cmd == "otel":
         return cmd_otel(rest)
     if cmd == "stats":
@@ -3638,6 +3957,10 @@ def _main_impl(argv=None) -> int:
         return cmd_header(rest)
     if cmd == "grammar":
         return cmd_grammar(rest)
+    if cmd == "effects":
+        return cmd_effects(rest)
+    if cmd == "spec":
+        return cmd_spec(rest)
     if cmd == "cpp":
         return cmd_cpp(rest)
     if cmd == "build":

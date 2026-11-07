@@ -94,19 +94,19 @@ case("B06 缺箭头", "E-Parse", code="spec a() u64 { effects {}; }")
 case("B07 缺 spec 名", "E-Parse", code="spec () -> u64 { effects {}; }")
 case("B08 tar7et 拼错", "E-Parse", code="spec a() -> u64 { effects {}; targat { time: { max: O(1) }, }; }")
 case("B09 target 缺分号", "E-Parse", code="spec a() -> u64 { effects {}; target { time: { max: O(1) }, } }")
-case("B10 benchmodel 缺 data 段", "E-Bench-MissingData", code="spec a(const Vec<u64>& x) -> u64 { effects {}; benchmodel { scale { x in range(1, 4, *2); } } }")
+case("B10 benchmodel 缺 data 段", "E-Bench-MissingData", code="spec a(const vector<u64>& x) -> u64 { effects {}; benchmodel { scale { x in range(1, 4, *2); } } }")
 case("B11 顶层 kernel（v0.66 已下线）", "E-Kernel-KeywordRemoved",
      code="kernel k(x: u64) -> u64;\nspec a() -> u64 { effects {}; }")
 case("B12 effects pure 裸写（v0.62 禁止）", "E-Effects-BarePure", code="spec a() -> u64 { effects pure; }")
 case("B13 effects 里 pure 混用", "E-Effects-PureMixed", code="spec a() -> u64 { effects {pure, alloc}; }")
 case("B14 choose 用 model（已下线）", "E-Clause-OldModel",
-     tu=("spec a(const Vec<u64>& x) -> u64 { effects {};\n"
-         "    choose L(const Vec<u64>& x) -> u64 { over {k}; model {s}; objective time; }\n"
+     tu=("spec a(const vector<u64>& x) -> u64 { effects {};\n"
+         "    choose L(const vector<u64>& x) -> u64 { over {k}; model {s}; objective time; }\n"
          "}"),
-     ai="func a(const Vec<u64>& x) -> u64 { const u64 n = x.length(); return ?!L(x); }")
+     ai="func a(const vector<u64>& x) -> u64 { const u64 n = x.length(); return ?!L(x); }")
 case("B15 枚举变体缺逗号", "E-Parse", code="enum E { A B }")
 case("B16 结构体字段缺冒号", "E-Parse", code="struct S { x u64, } struct")
-case("B17 trait 方法缺分号", "E-Parse", code="trait T { func m(self) -> u64 } trait")
+case("B17 枚举缺分号", "E-Parse", code="enum E { A, B } enum")
 case("B18 use 缺分号", "E-Parse", code="use core.x")
 case("B19 const 缺等号", "E-Parse", code="const X: u64 1;")
 case("B20 const 缺分号", "E-Parse", code="const X: u64 = 1")
@@ -129,7 +129,7 @@ case("V01 用旧关键字 fn", "E-Func-KeywordRemoved", code="fn a() -> u64 { re
 case("V02 用旧关键字 val", "E-Decl-OldKeyword", code="func a() -> u64 { val x = 1; return x; }")
 case("V03 用旧关键字 var", "E-Decl-OldKeyword", code="func a() -> u64 { var x = 1; return x; }")
 case("V04 用旧写法 end fn", "E-End-Removed", code="func a() -> u64 { return 1; } end fn")
-case("V05 旧写法 &mut T", "E-Ref-OldMut", code="spec a(x: &mut Vec<u8>) -> u64 { effects {}; }")
+case("V05 旧写法 &mut T", "E-Ref-OldMut", code="spec a(x: &mut vector<u8>) -> u64 { effects {}; }")
 case("V06 旧写法 []T", "E-Type-OldSlice", code="spec a(x: []u8) -> u64 { effects {}; }")
 case("V07 旧写法 BoundedVector", "E-Type-OldBounded",
      code="spec a(x: BoundedVector[X, Y]) -> u64 { effects {}; }")
@@ -149,14 +149,14 @@ case("V12 用了 T! 但没 error 声明", "E-Error-DeclMissing",
 # ================================================================ v0.68 嵌套撤回（3）
 
 case("V13 kernels 嵌在候选体里", "E-Kernels-Nested",
-     tu="spec a(const Vec<u64>& x) -> u64 { effects {}; "
-        "choose L(const Vec<u64>& x) -> u64 { over {k}; objective time; } }",
-     ai="""func a(const Vec<u64>& x) -> u64 {
+     tu="spec a(const vector<u64>& x) -> u64 { effects {}; "
+        "choose L(const vector<u64>& x) -> u64 { over {k}; objective time; } }",
+     ai="""func a(const vector<u64>& x) -> u64 {
     return ?!L(x);
-} kernels L(const Vec<u64>& x) -> u64 {
+} kernels L(const vector<u64>& x) -> u64 {
     k {
         return 1;
-    } kernels M(const Vec<u64>& x) -> u64 {
+    } kernels M(const vector<u64>& x) -> u64 {
         m { return 1; }
     }
 }""")
@@ -168,16 +168,16 @@ _T13_TU = """spec pred(u64 lo, u64 hi) -> bool {
     repeats log(hi - lo);
 }
 spec pred2(u64 lo, u64 hi) -> bool { effects {}; }
-spec a(const Vec<u64>& xs) -> u64 { effects {}; }"""
+spec a(const vector<u64>& xs) -> u64 { effects {}; }"""
 
 # 2026-11-03 更正：`while (i < 10)` 的上界**推得出来**（常量），
 # 原来期望它报警是**假警报**。这条改成"不该报警"的守卫。
 # "推不出"那一支由 V15（谓词没写 repeats）继续覆盖。
 case("V14 常量边界 → 推得出，不该报警", tu=_T13_TU, expect_none=True,
-     ai="func a(const Vec<u64>& xs) -> u64 { u64 i = 0; while (i < 10) { i = i + 1; } return i; }")
+     ai="func a(const vector<u64>& xs) -> u64 { u64 i = 0; while (i < 10) { i = i + 1; } return i; }")
 
 case("V15 谓词没写 repeats → 宽松 warn", "E-While-NoBound", tu=_T13_TU,
-     ai="func a(const Vec<u64>& xs) -> u64 { u64 i = 0; "
+     ai="func a(const vector<u64>& xs) -> u64 { u64 i = 0; "
         "while (pred2(i, xs.length())) { i = i + 1; } return i; }")
 
 case("V16 枚举成员用 `.`", "E-Member-WrongSep",
@@ -185,10 +185,10 @@ case("V16 枚举成员用 `.`", "E-Member-WrongSep",
      ai="func a(u64 x) -> u64 { const Token t = Token.Plus; return 1; }")
 
 case("V17 scale 旧写法 n(xs) =", "E-Bench-OldScale",
-     tu="spec f(const Vec<u64>& xs) -> u64 {\n  effects {};\n  benchmodel {\n"
+     tu="spec f(const vector<u64>& xs) -> u64 {\n  effects {};\n  benchmodel {\n"
         "    data { xs = sorted_u64s(); }\n    scale { n(xs) = range(1, 64, *2); }\n"
         "    seed = 1;\n  }\n}\n",
-     ai="func f(const Vec<u64>& xs) -> u64 { return 0; }")
+     ai="func f(const vector<u64>& xs) -> u64 { return 0; }")
 
 # ================================================================ C. 语义检查（38）
 
@@ -208,18 +208,18 @@ case("C09 .ai 里写 choose", "E-Choose-NotInSpec", tu=OK_TU,
 case("C10 顶层 kernel 声明（已下线）", "E-Kernel-KeywordRemoved", tu=OK_TU,
      ai=OK_AI + "\nkernel k(x: u64) -> u64 { return 1; } kernel")
 
-CHOOSE_TU = """spec a(const Vec<u64>& x) -> u64 {
+CHOOSE_TU = """spec a(const vector<u64>& x) -> u64 {
     effects {};
-    choose L(const Vec<u64>& x) -> u64 {
+    choose L(const vector<u64>& x) -> u64 {
         over {%s};
         objective time;
     };
 }"""
-CHOOSE_AI = """func a(const Vec<u64>& x) -> u64 {
+CHOOSE_AI = """func a(const vector<u64>& x) -> u64 {
     const u64 n = x.length();
     if (n == 0) { return 0; }
     return ?!L(x);
-} kernels L(const Vec<u64>& x) -> u64 {
+} kernels L(const vector<u64>& x) -> u64 {
     k { return 1; }
 }"""
 
@@ -261,14 +261,14 @@ case("C20 ?! 构成整个函数体", "E-Choose-WholeBody",
 } end fn""")
 case("C21 kernels 嵌套（v0.68 已撤回）", "E-Kernels-Nested",
      tu=CHOOSE_TU % "k",
-     ai="""func a(const Vec<u64>& x) -> u64 {
+     ai="""func a(const vector<u64>& x) -> u64 {
     const u64 n = x.length();
     if (n == 0) { return 0; }
     return ?!L(x);
-} kernels L(const Vec<u64>& x) -> u64 {
+} kernels L(const vector<u64>& x) -> u64 {
     k {
         return ?!M(x);
-    } kernels M(const Vec<u64>& x) -> u64 {
+    } kernels M(const vector<u64>& x) -> u64 {
         m1 { return 1; }
     }
 }""")
@@ -286,11 +286,11 @@ case("C25 L4 表达式元组", "L4-TupleTooLong", strict=True, tu=OK_TU,
 # 其余语义/结构
 case("C26 spec 重复定义", "E-", code=OK_TU + "\n" + OK_TU)
 case("C27 func 重复实现", "E-", tu=OK_TU, ai=OK_AI + "\n" + OK_AI)
-case("C28 choose 重复", "E-Duplicate-Choose", tu=(CHOOSE_TU % "k").replace("        objective time;\n    }", "        objective time;\n    }\n    choose L(const Vec<u64>& x) -> u64 { over {k}; objective time; }", 1), ai=CHOOSE_AI)
+case("C28 choose 重复", "E-Duplicate-Choose", tu=(CHOOSE_TU % "k").replace("        objective time;\n    }", "        objective time;\n    }\n    choose L(const vector<u64>& x) -> u64 { over {k}; objective time; }", 1), ai=CHOOSE_AI)
 case("C29 未知子句名", "E-", code="spec a() -> u64 { effects {}; unknownclause 1; }")
 case("C30 target 槽位写错", "E-", code="spec a() -> u64 { effects {}; target { time: { minimum: O(1) }, }; }")
 case("C31 target 缺冒号", "E-Parse", code="spec a() -> u64 { effects {}; target { time { max: O(1) }, }; }")
-case("C32 benchmodel 缺 scale 段", "E-Bench-MissingScale", code="spec a(const Vec<u64>& x) -> u64 { effects {}; benchmodel { data { x = gen(); } } }")
+case("C32 benchmodel 缺 scale 段", "E-Bench-MissingScale", code="spec a(const vector<u64>& x) -> u64 { effects {}; benchmodel { data { x = gen(); } } }")
 case("C33 requires 缺表达式", "E-Clause-EmptyExpr", code="spec a() -> u64 { effects {}; requires; }")
 case("C34 objective 未知", "E-",
      tu=(CHOOSE_TU % "k").replace("objective time", "objective maximize_fun"), ai=CHOOSE_AI)
@@ -324,7 +324,7 @@ CASES.append({"name": "超长单行", "expect": "L5-LineTooLong", "strict": True
 
 def _top_up():
     """用 种类错配与缺分号两种变异补足到 100 条。"""
-    kinds = ["fn", "spec", "kernel", "choose", "struct", "enum", "trait", "impl",
+    kinds = ["fn", "spec", "kernel", "choose", "struct", "enum",
              "if", "while", "for", "match"]
     i = 0
     while len(CASES) < 100:

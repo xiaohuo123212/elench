@@ -16,7 +16,7 @@ func in_range(u64 lo, u64 hi) -> bool {
 }
 
 pub func binary_search(
-                       const Vec<u64>& xs, u64 key) -> u64! {
+                       const vector<u64>& xs, u64 key) -> u64! {
     const u64 n = xs.length();
     if (n == 0) {
         return Err(SearchError::NotFound);
@@ -24,7 +24,7 @@ pub func binary_search(
     const u64 idx = (?!search_impl(xs, key))?;
     return idx;
 } kernels search_impl(
-                      const Vec<u64>& xs, u64 key) -> u64! {
+                      const vector<u64>& xs, u64 key) -> u64! {
     search_linear {
         u64 i = 0;
         while (i < n) {

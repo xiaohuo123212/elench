@@ -19,7 +19,7 @@ from cost_interp import CostInterp       # noqa: E402
 from bound import _descendants           # noqa: E402
 import cost_explain as CE                # noqa: E402
 
-DIRS = ("文档/设计/目前设计/样例", "文档/入门/例子", "demo/repair/v1", "demo/repair/v2")
+DIRS = ("文档/样例", "文档/入门/例子", "demo/repair/v1", "demo/repair/v2")
 
 
 def _texts(node):

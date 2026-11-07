@@ -58,7 +58,7 @@ def check(cond, name, detail=""):
 
 
 #: 一个**不含** `?!`、且有 benchmodel 的模块——isolated 测量的合法目标
-TU_OK = """spec total_up(const Vec<u64>& xs) -> u64 {
+TU_OK = """spec total_up(const vector<u64>& xs) -> u64 {
     effects   { };
     benchmodel {
         data  { xs = sorted_u64s(); }
@@ -71,7 +71,7 @@ TU_OK = """spec total_up(const Vec<u64>& xs) -> u64 {
 }
 """
 
-CH_OK = """func total_up(const Vec<u64>& xs) -> u64 {
+CH_OK = """func total_up(const vector<u64>& xs) -> u64 {
     u64 s = 0;
     u64 i = 0;
     const u64 n = xs.length();
@@ -84,25 +84,25 @@ CH_OK = """func total_up(const Vec<u64>& xs) -> u64 {
 """
 
 #: 含 `?!` 的模块——必须被拒
-TU_DISPATCH = """spec pick(const Vec<u64>& xs) -> u64 {
+TU_DISPATCH = """spec pick(const vector<u64>& xs) -> u64 {
     effects   { };
     benchmodel {
         data  { xs = sorted_u64s(); }
         scale { xs in range(1, 64, *2); }
         seed  = 1;
     };
-    choose k(const Vec<u64>& xs) -> u64 {
+    choose k(const vector<u64>& xs) -> u64 {
         over {a, b};
         objective time;
     };
 }
 """
 
-CH_DISPATCH = """func pick(const Vec<u64>& xs) -> u64 {
+CH_DISPATCH = """func pick(const vector<u64>& xs) -> u64 {
     return ?!k(xs);
 }
-func a(const Vec<u64>& xs) -> u64 { return 0; }
-func b(const Vec<u64>& xs) -> u64 { return 1; }
+func a(const vector<u64>& xs) -> u64 { return 0; }
+func b(const vector<u64>& xs) -> u64 { return 1; }
 """
 
 
@@ -186,7 +186,7 @@ def test_b21():
     print("[4] B-21：自底向上——先列被调用者")
     tu = TU_OK.replace("total_up", "outer_fn")
     ch = """func inner_fn(u64 x) -> u64 { return x + 1; }
-func outer_fn(const Vec<u64>& xs) -> u64 {
+func outer_fn(const vector<u64>& xs) -> u64 {
     const u64 n = xs.length();
     return inner_fn(n);
 }

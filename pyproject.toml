@@ -30,7 +30,6 @@ Homepage = "https://github.com/xiaohuo123212/ai-lang-design"
 # ImportError，而 `pip install` 本身不报错。
 [tool.setuptools]
 py-modules = [
-    "archive_specs",
     "ast_util",
     "bench",
     "borrow",
@@ -63,7 +62,6 @@ py-modules = [
     "kinds",
     "lexer",
     "migrate_docs",
-    "migrate_tests",
     "otel",
     "otel_dashboard",
     "otel_local_sink",

@@ -166,8 +166,16 @@ def classify(old_vals: List[float], new_vals: List[float]) -> str:
         return "不变"
     lo, hi = min(ratios), max(ratios)
     # 比值随规模漂移 ⇒ 增长阶不同；否则只是整体乘了一个常数
-    return "不变" if abs(hi - lo) < 1e-6 and abs(hi - 1) < 1e-9 else (
-        "L3" if abs(hi - lo) < 1e-3 else "L1")
+    if abs(hi - lo) < 1e-6 and abs(hi - 1) < 1e-9:
+        return "不变"
+    if abs(hi - lo) < 1e-3:
+        return "L3"                     # 比值恒定：整体乘了一个常数
+    # **L2（L-09，2026-11-06）**：比值**不是完全恒定**但漂移很小（≤5%），
+    # 例如 2n+3 改成 2n+5、或 n 改成 1.02n。以前这类直接落进 L1（"阶变了"）——
+    # **那是误报**：把"系数动了"说成"复杂度变了"。
+    if lo > 1e-9 and (hi / lo) <= 1.05:
+        return "L2"
+    return "L1"
 
 
 def _verdict(ci, fn: str) -> str:
@@ -204,8 +212,178 @@ def diff_tables(old: Dict[str, Any], new: Dict[str, Any]) -> List[Dict[str, str]
     return out
 
 
+# ---------------------------------------------------------------- 契约 diff
+#
+# `cost --diff` 只比 **κ**（承诺的松紧）。但"这次改动有没有把契约削弱"
+# 是另一件事，而且**完全可判定**（就是结构比较）：
+#   删掉一条 `guarantees is_sorted(ret)` → 可观察行为变了，κ 一点不动；
+#   `effects` 从 pure 变成 io        → κ 不动（外部调用只数次数，不估价）；
+#   `scale` 从 8..65536 缩到 8..4096 → 承诺的**适用范围**变小了。
+# 这三样现在都看不见。所以单独比一遍契约本身。
+
+_CLAUSE_KEYS = ("effects", "guarantees", "assume", "repeats", "recursion")
+
+
+def _txt(n, depth: int = 0) -> str:
+    """把一段 AST **稳定地**渲染成文本（两端同一套规则，才能比）。"""
+    if n is None:
+        return ""
+    if depth > 6:
+        return "…"
+    kids = getattr(n, "children", None) or []
+    if kids:
+        return " ".join(x for x in (_txt(c, depth + 1) for c in kids) if x)
+    v = getattr(n, "value", None)
+    if isinstance(v, dict):
+        return "{" + ", ".join(f"{k}={v[k]}" for k in sorted(v) if v[k]) + "}"
+    if v is not None:
+        return str(v)
+    return getattr(n, "name", None) or ""
+
+
+def _scale_text(node) -> str:
+    """`bench-scale` → `xs: 1..4096（×2）`。直接 `_txt` 会得到 `range 1 4096 2`。"""
+    name = getattr(node, "name", "") or ""
+    nums = []
+
+    def walk(n, depth=0):
+        if n is None or depth > 4:
+            return
+        v = getattr(n, "value", None)
+        if isinstance(v, bool):
+            pass
+        elif isinstance(v, int):
+            nums.append(v)
+        elif isinstance(v, str) and v.strip().isdigit():
+            nums.append(int(v.strip()))
+        for c in (getattr(n, "children", None) or []):
+            walk(c, depth + 1)
+
+    walk(node)
+    body = _txt(node)
+    if len(nums) >= 2:
+        step = f"（×{nums[2]}）" if len(nums) >= 3 else ""
+        return f"{name + ': ' if name else ''}{nums[0]}..{nums[1]}{step}"
+    return body
+
+
+def _specs_of(tu_mod) -> Dict[str, Any]:
+    out = {}
+    for it in (getattr(tu_mod, "children", None) or []):
+        if getattr(it, "kind", "") == "spec":
+            out[it.name or ""] = it
+    return out
+
+
+def contract_snapshot(ci, tu_mod) -> Dict[str, Dict[str, str]]:
+    """每个函数的**契约事实**（键 → 文本）。只收可比较、可在报告里说清的。"""
+    from symbolic import Cost as _C
+
+    snap: Dict[str, Dict[str, str]] = {}
+    for fn, spec in _specs_of(tu_mod).items():
+        facts: Dict[str, str] = {}
+        body = next((c for c in (spec.children or []) if c.kind == "spec-body"), None)
+        for cl in (body.children if body else []):
+            k = getattr(cl, "kind", "")
+            nm = getattr(cl, "name", "") or ""
+            if k == "clause" and nm in _CLAUSE_KEYS:
+                if nm == "effects":
+                    v = getattr(cl, "value", None)
+                    if isinstance(v, list):
+                        facts[nm] = "、".join(v) if v else "pure"
+                    else:
+                        facts[nm] = str(v or "pure")
+                else:
+                    facts[nm] = _txt(cl)
+            elif k == "clause" and nm == "target":
+                for d in (cl.children or []):
+                    if getattr(d, "kind", "") == "dim":
+                        dn = d.name or ""
+                        try:
+                            cost = ci.target_cost(fn, dn)
+                        except Exception:                  # noqa: BLE001
+                            cost = None
+                        facts[f"target.{dn}"] = cost.render() if cost is not None else _txt(d)
+            elif k == "benchmodel":
+                for sub in (cl.children or []):
+                    if getattr(sub, "kind", "") == "bench-scale":
+                        # `scale { xs in range(1, 4096, *2); }` → `xs: 1..4096 ×2`
+                        facts["scale"] = _scale_text(sub)
+            elif k == "choose":
+                for cc in (cl.children or []):
+                    if getattr(cc, "kind", "") != "choose-clause":
+                        continue
+                    if (cc.name or "") == "over":
+                        facts[f"{nm}.over"] = "、".join((cc.value or {}).get("names", []))
+                    elif (cc.name or "") == "objective":
+                        facts[f"{nm}.objective"] = str(cc.value)
+        snap[fn] = facts
+    return snap
+
+
+def _looseness(ci_old, ci_new, fn: str, dim: str) -> str:
+    """target 变化是**放松**还是**收紧**——用数值判，不猜。
+
+    放松是最危险的方向：承诺变宽了，κ 不报警，可观察行为却少保证了一层。
+    """
+    from cost_check import evaluate
+    try:
+        ko, kn = ci_old.target_cost(fn, dim), ci_new.target_cost(fn, dim)
+        if ko is None or kn is None:
+            return "变化"
+        bigger = smaller = False
+        for n in SIZES:
+            env = {v: n for v in set(ko.variables()) | set(kn.variables())}
+            vo, vn = evaluate(ko, env), evaluate(kn, env)
+            if vn > vo:
+                bigger = True
+            elif vn < vo:
+                smaller = True
+        if bigger and not smaller:
+            return "放松"
+        if smaller and not bigger:
+            return "收紧"
+        return "变化"
+    except Exception:                                  # noqa: BLE001
+        return "变化"
+
+
+def diff_contracts(old: Dict[str, Dict[str, str]],
+                   new: Dict[str, Dict[str, str]],
+                   ci_old=None, ci_new=None) -> List[Dict[str, str]]:
+    """比契约**本身**。`kind` 取值：削弱 / 增强 / 变化 / 扩大 / 缩小。"""
+    out: List[Dict[str, str]] = []
+    for fn in sorted(set(old) | set(new)):
+        o, n = old.get(fn), new.get(fn)
+        if o is None or n is None:
+            out.append({"function": fn, "fact": "（函数）",
+                        "old": "有" if o else "无", "new": "有" if n else "无",
+                        "kind": "新增函数" if o is None else "删除函数"})
+            continue
+        for key in sorted(set(o) | set(n)):
+            ov, nv = o.get(key), n.get(key)
+            if ov == nv:
+                continue
+            if ov is None:
+                kind = "增强"
+            elif nv is None:
+                # 承诺/副作用**消失**是最容易滑过去的一类：κ 完全不动
+                kind = "削弱" if key.startswith(("guarantees", "assume")) else "变化"
+            elif key.startswith("target."):
+                kind = (_looseness(ci_old, ci_new, fn, key.split(".", 1)[1])
+                        if (ci_old is not None and ci_new is not None) else "变化")
+            else:
+                kind = "变化"
+            out.append({"function": fn, "fact": key,
+                        "old": ov if ov is not None else "（无）",
+                        "new": nv if nv is not None else "（删除）",
+                        "kind": kind})
+    return out
+
+
 def diff(tu_p: str, ch_p: str, ref: str, root: str) -> Tuple[
-        List[Dict[str, Any]], List[Dict[str, str]], Dict[str, Any], Optional[str]]:
+        List[Dict[str, Any]], List[Dict[str, str]], Dict[str, Any],
+        Optional[str], List[Dict[str, str]]]:
     """返回 `(每个函数的行, 分档表的变化, 上下文, 错误)`。
 
     上下文里的 `comparable` 说明**两端是否同一口径**：两端表的有无不一致时
@@ -216,7 +394,7 @@ def diff(tu_p: str, ch_p: str, ref: str, root: str) -> Tuple[
 
     old_ci, old_tbl, err = load_at_ref(tu_p, ch_p, ref, root)
     if err:
-        return [], [], {}, err
+        return [], [], {}, err, []
 
     from cost_interp import CostInterp
     from parser import parse_source
@@ -232,6 +410,11 @@ def diff(tu_p: str, ch_p: str, ref: str, root: str) -> Tuple[
 
     ctx = {"old_has_table": bool(old_tbl), "new_has_table": bool(new_tbl)}
     ctx["comparable"] = (ctx["old_has_table"] == ctx["new_has_table"])
+
+    # 契约本身也要比：κ 不动但承诺被削弱的情形，现在只有这里能看见
+    contract = diff_contracts(contract_snapshot(old_ci, old_ci.decl),
+                              contract_snapshot(new_ci, tu),
+                              ci_old=old_ci, ci_new=new_ci)
 
     rows: List[Dict[str, Any]] = []
     names = sorted(set(old_ci.fns) | set(new_ci.fns))
@@ -274,12 +457,13 @@ def diff(tu_p: str, ch_p: str, ref: str, root: str) -> Tuple[
                      "verdict_old": _verdict(old_ci, fn),
                      "verdict_new": _verdict(new_ci, fn),
                      "comparable": ctx["comparable"]})
-    return rows, diff_tables(old_tbl, new_tbl), ctx, None
+    return rows, diff_tables(old_tbl, new_tbl), ctx, None, contract
 
 
 def render(rows: List[Dict[str, Any]], ref: str,
            table_changes: Optional[List[Dict[str, str]]] = None,
-           ctx: Optional[Dict[str, Any]] = None) -> str:
+           ctx: Optional[Dict[str, Any]] = None,
+           contract_changes: Optional[List[Dict[str, str]]] = None) -> str:
     ctx = ctx or {}
     comparable = ctx.get("comparable", True)
     old_has, new_has = ctx.get("old_has_table"), ctx.get("new_has_table")
@@ -307,6 +491,20 @@ def render(rows: List[Dict[str, Any]], ref: str,
         vo, vn = r.get("verdict_old"), r.get("verdict_new")
         judge = f"{vo} → {vn}" if vo and vn else "—"
         out.append(f"{r['function']:<20}{r['kind']:<8}{o:>14}{n:>14}{ratio:>9}   {judge}")
+
+    # ②b **契约变化**：κ 完全不动，但承诺本身变了——这是最容易滑过去的一类
+    if contract_changes:
+        out += ["", "⚠ 契约变了（target / guarantees / effects / scale；"
+                    "**κ 可能一点不动**）："]
+        for c in contract_changes:
+            mark = "削弱" if c["kind"] == "削弱" else c["kind"]
+            out.append(f"  {c['function']:<18}{c['fact']:<22}"
+                       f"{str(c['old'])[:34]:<36}→ {str(c['new'])[:34]}   [{mark}]")
+        weak = [c for c in contract_changes if c["kind"] in ("削弱", "放松")]
+        if weak:
+            out.append("  ⚠ 有承诺被**削弱或放松**（" + "、".join(
+                f"{c['function']}.{c['fact']}" for c in weak[:5]) +
+                "）：**κ 不会报警**，但你的保证变少了——请确认是有意为之。")
 
     # ③ 表变化：κ 在采样点上可能一动不动，但承诺形状已经变了
     if table_changes:

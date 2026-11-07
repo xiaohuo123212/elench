@@ -300,6 +300,16 @@ class Parser:
         raise ParseError("E-Parse-UnexpectedTop",
                          f"这里不该出现 {k.value!r}", t)
 
+    def _effect_name(self) -> str:
+        """效果名：普通标识符，或本身是关键字的那种（目前只有 `unsafe`）。
+    
+        `unsafe` 在词法层是关键字（`Kind.UNSAFE`），所以 `effects { unsafe }`
+        以前直接报「期望效果名」——效果写了却没法被声明，等于不可用。
+        """
+        if self.at(Kind.UNSAFE):
+            return self.advance().text
+        return self.expect_ident("效果名").text
+    
     def parse_external_block(self) -> Node:
         """`external { read_file: O(1); … }` —— **给外部项登记成本**（v0.71）。
 
@@ -342,14 +352,25 @@ class Parser:
         return Node("use", t.line, t.col, name=path)
 
     def parse_error_decl(self) -> Node:
-        """v0.68：模块级错误类型声明 `error CalcError;`
+        """模块级错误类型声明。
 
-        一个模块最多一个；`T!` 函数的错误类型由它决定。
+        `error CalcError;` —— **开放**：任何变体都接受（老行为）。
+        `error CalcError { BadToken, Empty };` —— **封闭**：变体可校验。
+
+        **E3（2026-11-05）**：EBNF 里一直写着变体列表，但解析器只吃 `error X;`，
+        文档与实现不一致，于是变体从不被校验。现在两种都收。
         """
         t = self.expect(Kind.ERROR_DECL, "'error'")
         name = self.expect_ident("错误类型名").text
+        node = Node("error-decl", t.line, t.col, name=name)
+        if self.accept(Kind.LBRACE):
+            while not self.at(Kind.RBRACE) and not self.at(Kind.EOF):
+                node.add(self.parse_variant())
+                if not self.accept(Kind.COMMA):
+                    break
+            self.expect(Kind.RBRACE, "'}'")
         self.expect(Kind.SEMI, "';'")
-        return Node("error-decl", t.line, t.col, name=name)
+        return node
 
     def parse_const(self) -> Node:
         """模块级常量。
@@ -396,7 +417,7 @@ class Parser:
             self.expect(Kind.LBRACE, "'{'")
             while not self.at(Kind.RBRACE) and not self.at(Kind.EOF):
                 eff.add(Node("effect-name", t.line, t.col,
-                             name=self.expect_ident("效果名").text))
+                             name=self._effect_name()))
                 if not self.accept(Kind.COMMA):
                     break
             self.expect(Kind.RBRACE, "'}'")
@@ -496,45 +517,32 @@ class Parser:
         return node
 
     def parse_trait(self) -> Node:
-        t = self.expect(Kind.TRAIT, "'trait'")
-        name = self.expect_ident("trait 名").text
-        node = Node("trait", t.line, t.col, name=name)
-        self.expect(Kind.LBRACE, "'{'")
-        while not self.at(Kind.RBRACE) and not self.at(Kind.EOF):
-            node.add(self.parse_trait_method())
-        self.expect(Kind.RBRACE, "'}'")
-        self.expect_end("trait")
-        return node
+        """`trait` 已下线（E11，2026-11-05）。
 
-    def parse_trait_method(self) -> Node:
-        self.accept(Kind.PUB)
-        t = self.expect(Kind.FN, "'fn'")
-        name = self.expect_ident("方法名").text
-        node = Node("trait-method", t.line, t.col, name=name)
-        self.expect(Kind.LPAREN, "'('")
-        node.add(self.parse_params_until(Kind.RPAREN))
-        self.expect(Kind.RPAREN, "')'")
-        if self.accept(Kind.ARROW):
-            node.add(self.parse_type())
-        if self.at(Kind.LBRACE):
-            node.add(self.parse_spec_body())
-        else:
-            self.expect(Kind.SEMI, "';'")
-        return node
+        核对后发现它不是「约束没实现」，而是**三重不可用**：
+          ① 参数里不许写 `self`；
+          ② 解析器不认 `impl Show for P`（EBNF 写着 `impl path ["for" path]`，
+             实现只有 `impl Path {`）；
+          ③ trait 里的方法签名要求已下线的 `fn` 关键字。
+        而且样例与文档里 0 处使用。**一个看起来有用、实则不存在的机制，比没有更糟。**
+        """
+        t = self.expect(Kind.TRAIT, "'trait'")
+        raise ParseError("E-Trait-Removed",
+                         '`trait` 已下线：它从来没有被校验过，而且写法本身也走不通。\n改法：① 用普通 `func` 表达同样的行为；\n      ② 需要静态分发就写具体类型；\n      ③ 需要「这组函数都满足某条件」时，在 spec 的 `effects` 里写清。', t)
 
     def parse_impl(self) -> Node:
+        """`impl` 已下线（E11，2026-11-05）。
+
+        核对后发现它不是「约束没实现」，而是**三重不可用**：
+          ① 参数里不许写 `self`；
+          ② 解析器不认 `impl Show for P`（EBNF 写着 `impl path ["for" path]`，
+             实现只有 `impl Path {`）；
+          ③ trait 里的方法签名要求已下线的 `fn` 关键字。
+        而且样例与文档里 0 处使用。**一个看起来有用、实则不存在的机制，比没有更糟。**
+        """
         t = self.expect(Kind.IMPL, "'impl'")
-        head = self.parse_path("impl 目标")
-        node = Node("impl", t.line, t.col, name=head)
-        if self.accept(Kind.LPAREN):          # impl Trait for T —— 宽松接受
-            node.add(self.parse_params_until(Kind.RPAREN))
-            self.expect(Kind.RPAREN, "')'")
-        self.expect(Kind.LBRACE, "'{'")
-        while not self.at(Kind.RBRACE) and not self.at(Kind.EOF):
-            node.add(self.parse_trait_method())
-        self.expect(Kind.RBRACE, "'}'")
-        self.expect_end("impl")
-        return node
+        raise ParseError("E-Impl-Removed",
+                         '`impl` 已下线：和 `trait` 一起下线（没有约束就没有实现检查）。\n改法：直接用普通 `func` 写；要分组就用命名前缀或独立模块。', t)
 
     # ---------------------------------------------------------- spec
 
@@ -542,6 +550,18 @@ class Parser:
         t = self.expect(Kind.SPEC, "'spec'")
         name = self.expect_ident("函数名").text
         node = Node("spec", t.line, t.col, name=name)
+
+        # **类型参数**（`spec pick<T>(T a, T b) -> T`）：与 `func f<T>` 同一形状。
+        # 以前这里直接 expect('(')，所以 `.tu` 写不了 `<T>` —— 声明与实现配不上对。
+        if self.at(Kind.LT):
+            _tp = Node("type-params", t.line, t.col)
+            self.advance()
+            while not self.at(Kind.GT) and not self.at(Kind.EOF):
+                _tp.add(Node("type-param", t.line, t.col, name=self.expect_ident("类型参数").text))
+                if not self.accept(Kind.COMMA):
+                    break
+            self.expect(Kind.GT, "'>'")
+            node.add(_tp)
 
         self.expect(Kind.LPAREN, "'('")
         node.add(self.parse_params_until(Kind.RPAREN))
@@ -647,7 +667,7 @@ class Parser:
         self.expect(Kind.LBRACE, "'{'")
         names = []
         while not self.at(Kind.RBRACE) and not self.at(Kind.EOF):
-            names.append(self.expect_ident("效果名").text)
+            names.append(self._effect_name())
             if not self.accept(Kind.COMMA):
                 break
         self.expect(Kind.RBRACE, "'}'")
@@ -1313,11 +1333,26 @@ class Parser:
             self.expect(Kind.SEMI, "';'")
             return node
         if k == Kind.SCOPE:
-            self.advance()
-            return self.parse_block()
+            raise ParseError("E-Scope-Removed",
+                             "`scope` 已下线：它存在的唯一意义是给 `spawn` 提供词法边界，"
+                             "而 `spawn` 也一并下线了。改用 `parallel { … }` 表达\"这几块可以并行\"。", t)
+        if k == Kind.SPAWN:
+            raise ParseError("E-Spawn-Removed",
+                             "`spawn` 已下线：并发下的时间不是一个确定的上界（取决于核数与调度），"
+                             "κ 会因此不再确定，而那正是本语言要保证的东西。\n"
+                             "改法：① 需要\"可并行\"的标注就用 `parallel { … }`（顺序语义，成本保守）；\n"                             "      ② 任务级并发不在语言范围内（记为有意非目标）。", t)
+        if k == Kind.ASM:
+            raise ParseError("E-Asm-Removed",
+                             "`asm` 已下线：内联汇编里的操作数不可数（`rep movsb` 是几条操作取决于长度），"
+                             "κ 就会从\"可验证\"降级成\"可估算\"。\n"
+                             "改法：① 需要底层操作就用已声明的外部函数（`external`/`extern`）；\n"                             "      ② 内联汇编记为有意非目标。", t)
         if k == Kind.UNSAFE:
             self.advance()
-            return self.parse_block()
+            blk = self.parse_block()
+            # **不新开 Node kind**：仍然是个 block，只打一个标记。
+            # 这样 interp / cost_interp 一行都不用改，只有检查器看得见它。
+            blk.value = "unsafe"
+            return blk
 
         # 赋值或表达式语句
         expr = self.parse_expr()
@@ -1468,6 +1503,11 @@ class Parser:
             self.advance()
             v = self.expect_ident("循环变量").text
             node.name = v
+            # **带下标**：`for (i, x in xs)` —— 第一个名字是下标（u64），
+            # 第二个是元素。下标由语言维护，作者碰不到边界条件（T13 天然满足）。
+            if self.accept(Kind.COMMA):
+                node.value = v
+                node.name = self.expect_ident("元素变量").text
             self.expect(Kind.IN, "'in'")
             node.add(self.parse_expr())
             self.expect(Kind.RPAREN, "')'")

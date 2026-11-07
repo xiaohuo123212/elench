@@ -1,3 +1,29 @@
+## 0.6.45 —— 2026-11-05
+
+- 高阶函数成本按调用点算（G1）：`k(f)` 判 unknown，不再给假 ✓；
+  被调 target 建立在 `k(f)` 上时调用方退回内联，形参绑到实参的具名函数。
+
+## 0.6.44 —— 2026-11-05
+
+- `spawn` / `asm` / `scope` 下线（写了报 `E-*-Removed`）。
+- `unsafe` 有真规则了：块与 effects 必须互相印证。
+
+## 0.6.43 —— 2026-11-05
+
+- `error X { A, B };` 可以写了，变体真的会被校验（E3）。
+- `trait` / `impl` 下线，写了报 `E-Trait-Removed` / `E-Impl-Removed`（E11）。
+
+## 0.6.42 —— 2026-11-05
+
+- `measure <模块> <choose名>` / `dispatch <模块> <choose名>`：增量重测单个 `?!`。
+- 分档表支持一份装多个 label（修多 label 静默覆盖）。
+
+## 0.6.41 —— 2026-11-04
+
+- **删除 `tightness` 子命令**：测量收拢到 `export --full`。
+- `export --full --out=x.md` / `.csv` 现在写数据表（以前会把 SVG 内容写进 md 文件）。
+- 测量入口收敛成 `_measure_curve()`，两个命令不再各写一遍循环。
+
 ## 0.6.40 —— 2026-11-04
 
 - **E4：循环次数由分支决定时，上界现在算得出来。**
@@ -170,7 +196,7 @@
   现已移到 `src/kappa_vs_measured.py`（它只依赖 `src/` 的模块），
   `tools/` 留一个 runpy 兼容入口，文档里的 `python tools/kappa_vs_measured.py` 仍可用。
 - `SAMPLES` 改为多路查找：`ELENCH_SAMPLES` → 内部样例 → **公开例子** → 包内 `示例/`。
-  原先只认 `文档/设计/目前设计/样例`（gitignore 的内部目录），公开仓库和安装包里都没有。
+  原先只认 `文档/样例`（gitignore 的内部目录），公开仓库和安装包里都没有。
 
 ## 0.6.22 —— 2026-11-03
 

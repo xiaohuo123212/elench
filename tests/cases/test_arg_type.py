@@ -42,7 +42,7 @@ TU = """spec g(u64 n) -> u64 {
     target { time: { max: O(1) }, allocation: { max: 0 }, };
 }
 
-spec f(const Vec<u64>& xs) -> u64 {
+spec f(const vector<u64>& xs) -> u64 {
     effects {};
     target { time: { max: O(xs.length()) }, allocation: { max: 0 }, };
 }
@@ -50,7 +50,7 @@ spec f(const Vec<u64>& xs) -> u64 {
 
 BAD = """func g(u64 n) -> u64 { return n + 1; }
 
-func f(const Vec<u64>& xs) -> u64 {
+func f(const vector<u64>& xs) -> u64 {
     u64 a = g("abc");
     return a + xs.length();
 }
@@ -58,7 +58,7 @@ func f(const Vec<u64>& xs) -> u64 {
 
 GOOD = """func g(u64 n) -> u64 { return n + 1; }
 
-func f(const Vec<u64>& xs) -> u64 {
+func f(const vector<u64>& xs) -> u64 {
     return g(xs.length());
 }
 """

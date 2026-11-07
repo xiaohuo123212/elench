@@ -42,7 +42,7 @@ _failed = []
 NAMES = ["sum_of", "count_of", "contains", "index_of", "is_sorted",
          "reverse", "fill", "fill_range", "rotate", "copy"]
 
-TU = "spec f(const Vec<u64>& xs) -> u64 { effects {}; }\n"
+TU = "spec f(const vector<u64>& xs) -> u64 { effects {}; }\n"
 
 
 def check(ok, label, detail=""):
@@ -57,7 +57,7 @@ def check(ok, label, detail=""):
 
 def run(eln, xs=(1, 2, 3)):
     tu_m = parse_source(TU, "t.tu").module
-    el_m = parse_source("func f(const Vec<u64>& xs) -> u64 {\n" + eln + "\n}\n",
+    el_m = parse_source("func f(const vector<u64>& xs) -> u64 {\n" + eln + "\n}\n",
                         "t.eln").module
     return Interp(el_m, tu_m).call("f", [list(xs)])
 
@@ -93,7 +93,7 @@ def test_warns():
     el_p = _os.path.join(tmp, "m.eln")
     open(tu_p, "w", encoding="utf-8").write(TU)
     open(el_p, "w", encoding="utf-8").write(
-        "func f(const Vec<u64>& xs) -> u64 { return sum_of(xs); }\n")
+        "func f(const vector<u64>& xs) -> u64 { return sum_of(xs); }\n")
     r = subprocess.run([sys.executable, _os.path.join(SRC, "elench.py"),
                         "check", tu_p, el_p],
                        capture_output=True, encoding="utf-8", errors="replace", env=env)

@@ -102,6 +102,13 @@ OUT += """## 没有内建、必须自己写的东西
 """
 
 path = os.path.join(ROOT,
-                    "文档", "设计", "目前设计", "内建函数.md")
+                    "文档", "内建函数.md")
+if "--check" in sys.argv:
+    cur = io.open(path, encoding="utf-8").read() if os.path.exists(path) else ""
+    if cur == OUT:
+        print("  一致：", path)
+        raise SystemExit(0)
+    print("  ✗ 与生成结果不一致：", path)
+    raise SystemExit(1)
 io.open(path, "w", encoding="utf-8", newline="\n").write(OUT)
 print("  已生成 内建函数.md：", sum(len(v) for v in groups.values()), "条")

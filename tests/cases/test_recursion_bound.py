@@ -67,14 +67,14 @@ def check(ok, label, detail=""):
 # ---------------------------------------------------------------- 源码样本
 
 DIRECT_ELN = """
-func down(const Vec<u64>& xs, u64 i) -> u64 {
+func down(const vector<u64>& xs, u64 i) -> u64 {
     if (i == 0) { return xs.length(); }
     return 1 + down(xs, i - 1);
 }
 """
 
 DIRECT_TU = """
-spec down(const Vec<u64>& xs, u64 i) -> u64 {
+spec down(const vector<u64>& xs, u64 i) -> u64 {
     effects {};
 %s
     target { time: { max: O(xs.length()) }, allocation: { max: 0 }, };
@@ -82,23 +82,23 @@ spec down(const Vec<u64>& xs, u64 i) -> u64 {
 """
 
 MUTUAL_ELN = """
-func ping(const Vec<u64>& xs, u64 i) -> u64 {
+func ping(const vector<u64>& xs, u64 i) -> u64 {
     if (i == 0) { return xs.length(); }
     return pong(xs, i - 1);
 }
-func pong(const Vec<u64>& xs, u64 i) -> u64 {
+func pong(const vector<u64>& xs, u64 i) -> u64 {
     if (i == 0) { return xs.length(); }
     return ping(xs, i - 1);
 }
 """
 
 MUTUAL_TU = """
-spec ping(const Vec<u64>& xs, u64 i) -> u64 {
+spec ping(const vector<u64>& xs, u64 i) -> u64 {
     effects {};
 %s
     target { time: { max: O(xs.length()) }, allocation: { max: 0 }, };
 }
-spec pong(const Vec<u64>& xs, u64 i) -> u64 {
+spec pong(const vector<u64>& xs, u64 i) -> u64 {
     effects {};
 %s
     target { time: { max: O(xs.length()) }, allocation: { max: 0 }, };
@@ -152,25 +152,25 @@ def test_mutual():
 def test_no_false_positive():
     print("[3] 不误报")
     chain = """
-func a(const Vec<u64>& xs) -> u64 { return b(xs); }
-func b(const Vec<u64>& xs) -> u64 { return xs.length(); }
+func a(const vector<u64>& xs) -> u64 { return b(xs); }
+func b(const vector<u64>& xs) -> u64 { return xs.length(); }
 """
     tu = """
-spec a(const Vec<u64>& xs) -> u64 { effects {}; }
-spec b(const Vec<u64>& xs) -> u64 { effects {}; }
+spec a(const vector<u64>& xs) -> u64 { effects {}; }
+spec b(const vector<u64>& xs) -> u64 { effects {}; }
 """
     check(diags_of(tu, chain) == [], "无环的调用链 a→b → 无诊断")
 
     disp = """
-func host(const Vec<u64>& xs) -> u64 { return ?!pick(xs); }
-func by_scan(const Vec<u64>& xs) -> u64 { return xs.length(); }
-func by_rev(const Vec<u64>& xs) -> u64 { return xs.length(); }
+func host(const vector<u64>& xs) -> u64 { return ?!pick(xs); }
+func by_scan(const vector<u64>& xs) -> u64 { return xs.length(); }
+func by_rev(const vector<u64>& xs) -> u64 { return xs.length(); }
 """
     tu = """
 choose pick over { by_scan, by_rev };
-spec host(const Vec<u64>& xs) -> u64 { effects {}; benchmodel { n = xs.length() }; }
-spec by_scan(const Vec<u64>& xs) -> u64 { effects {}; }
-spec by_rev(const Vec<u64>& xs) -> u64 { effects {}; }
+spec host(const vector<u64>& xs) -> u64 { effects {}; benchmodel { n = xs.length() }; }
+spec by_scan(const vector<u64>& xs) -> u64 { effects {}; }
+spec by_rev(const vector<u64>& xs) -> u64 { effects {}; }
 """
     check(diags_of(tu, disp) == [],
           "`?!` 到候选的边不算递归（宿主与候选之间没有环）")
@@ -181,18 +181,18 @@ spec by_rev(const Vec<u64>& xs) -> u64 { effects {}; }
 
     # 非递归函数写了 depth：无害
     tu = """
-spec down(const Vec<u64>& xs, u64 i) -> u64 {
+spec down(const vector<u64>& xs, u64 i) -> u64 {
     effects {};
     recursion depth <= 8;
     target { time: { max: O(xs.length()) }, allocation: { max: 0 }, };
 }
-spec plain(const Vec<u64>& xs) -> u64 {
+spec plain(const vector<u64>& xs) -> u64 {
     effects {};
     recursion depth <= 4;
 }
 """
     check(diags_of(tu, DIRECT_ELN + """
-func plain(const Vec<u64>& xs) -> u64 { return xs.length(); }
+func plain(const vector<u64>& xs) -> u64 { return xs.length(); }
 """) == [], "非递归函数写了 depth → 无害（不报错）")
 
 

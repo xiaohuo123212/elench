@@ -18,8 +18,8 @@
 
 // #region fn
 pub func lcs(
-             const Vec<u8>& a,
-                 const Vec<u8>& b) -> u64! {
+             const vector<u8>& a,
+                 const vector<u8>& b) -> u64! {
     const u64 width = b.length() + 1;
     const u64 total = (a.length() + 1) * width;
 
@@ -32,8 +32,8 @@ pub func lcs(
     // `filled(0)` 一次给足 LCS_CAP 个零——**表是建好才用的**，
     // 不需要 push 循环（那是让作者替语言补实现）。
     // 定长表的容量上界仍是 LCS_CAP，超过就在上面被 Err 挡住。
-    FixedVec<u64,
-    LCS_CAP> dp = FixedVec<u64,
+    array<u64,
+    LCS_CAP> dp = array<u64,
     LCS_CAP>::filled(0);
 
     // ---- 第二步：两层 DP（原地写 dp[(i+1)*width + (j+1)]）

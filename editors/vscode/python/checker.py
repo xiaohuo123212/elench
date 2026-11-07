@@ -27,8 +27,10 @@ M0 **不**能查的（需要成本分析，属 M2）：
 
 from __future__ import annotations
 
+from typenames import canon, display
 import os
 from dataclasses import dataclass, field
+import re
 from typing import Dict, List, Optional, Set, Tuple
 
 import stdlib
@@ -461,7 +463,7 @@ def _collect_param_sizes(fn: Node) -> set:
             base = ty.children[0] if (ty.kind == "type-ref" and ty.children) else ty
             if base.kind == "type-name":
                 nm = base.name or ""
-                if nm in ("Vec", "FixedVec") or nm in INT_PARAM_TYPES:
+                if canon(nm) in ("vector", "array") or nm in INT_PARAM_TYPES:
                     names.add(pm.name)
     return names
 
@@ -975,6 +977,20 @@ def _type_compatible(spec_t: str, impl_t: str, tparams: set) -> bool:
     return shape(a) == shape(b) or "?" in b
 
 
+def _canon_type_str(s: str) -> str:
+    """把类型字符串里的容器名换成规范名（`Vec` / `vector` 视为同一个）。
+
+    改名期两套名字都要能用：`.tu` 写 `Vec<u8>&`、`.eln` 写 `vector<u8>&`
+    必须判为**同一个签名**——否则一半改一半不改就报 E-Spec-SigMismatch。
+    """
+    if not s:
+        return s
+    for _old, _new in (("FixedVec", "array"), ("Vec", "vector"), ("Map", "map"),
+                       ("Set", "set"), ("Deque", "deque"), ("Option", "optional")):
+        s = re.sub(r"\b" + _old + r"\b", _new, s)
+    return s
+
+
 def _params_compatible(a, b, tparams: set) -> bool:
     if len(a) != len(b):
         return False
@@ -1110,7 +1126,8 @@ def _check_generic_calls(impl_mod, specs) -> List[Diag]:
 #: `_call_inner` 里有专门分支的内建——不算"未声明调用"
 _CALL_BUILTIN = {"min", "max", "Ok", "Err", "Some", "None", "panic", "unwrap",
                  "expect", "assert", "print", "println", "dbg",
-                 "for_each", "map", "filter", "fold", "count_if", "sort", "sort_by"}
+                 "for_each", "map", "filter", "fold", "count_if", "sort", "sort_by", "swap",
+                "push_heap", "pop_heap"}
 
 
 def unknown_calls(tu_mod, ch_mod) -> list:
@@ -1236,7 +1253,7 @@ def check_module(tu_src: str, ai_src: Optional[str], module: str = "<module>",
             res.diagnostics.extend(strict_lints(ai_src, ai, ".eln"))
 
     # ---- F-4 / F-8：.ai 不得有声明与 use
-    ILLEGAL_IN_AI = {"const", "enum", "struct", "trait", "impl", "spec", "choose",
+    ILLEGAL_IN_AI = {"const", "enum", "struct", "spec", "choose",
                      "use", "error-decl"}
     for it in ai_items:
         if it.kind in ILLEGAL_IN_AI:
@@ -1335,6 +1352,16 @@ def check_module(tu_src: str, ai_src: Optional[str], module: str = "<module>",
                         lambda s: "// " + s.strip() + "   // ← 未知子句，已注释",
                         "把这一行注释掉（保留痕迹，不直接删）"))))
             if c.kind == "clause" and c.name == "target":
+                # **未知成本维度**：`target { peak: … }` 以前会被**静默接受**——
+                # 写了维度却什么都不检查，等于一个看不见的空承诺（G8 的教训）。
+                _KNOWN_DIMS = {"time", "allocation"}
+                for dim in c.children:
+                    if dim.kind == "dim" and (dim.name or "") not in _KNOWN_DIMS:
+                        res.diagnostics.append(Diag(
+                            "E-Target-Dim-Unknown",
+                            "成本维度 %s 还没实现（现有：time / allocation）。" % dim.name
+                            + "峰值与栈占用是有意不做，理由见 文档/设计/未来设计/挂起-G8峰值与栈.md",
+                            dim.line, dim.col))
                 for dim in c.children:
                     for slot in dim.children:
                         if slot.kind == "slot" and slot.name not in ("min", "max", "exact"):
@@ -1367,6 +1394,8 @@ def check_module(tu_src: str, ai_src: Optional[str], module: str = "<module>",
         # **泛型函数的签名允许用类型参数**（`func id<T>(const Vec<T>&)` 实现 `Vec<u64>` 的 spec）。
         # 第一批只做"类型参数是通配符"：`Vec<T>` 可与任意 `Vec<X>` 相容。
         _tparams = _fn_type_params_of(fn)
+        a = [(n, _canon_type_str(ty)) for n, ty in a]
+        b = [(n, _canon_type_str(ty)) for n, ty in b]
         if not _params_compatible(a, b, _tparams):
             res.diagnostics.append(Diag(
                 "E-Spec-SigMismatch",
@@ -1375,6 +1404,7 @@ def check_module(tu_src: str, ai_src: Optional[str], module: str = "<module>",
                 fn.line, fn.col))
             continue
         ra, rb = type_str(_return_of(spec)), type_str(_return_of(fn))
+        ra, rb = _canon_type_str(ra), _canon_type_str(rb)
         if ra != rb and not _type_compatible(ra, rb, _tparams):
             res.diagnostics.append(Diag(
                 "E-Spec-SigMismatch",
@@ -1827,7 +1857,10 @@ def _check_immutability(body: Node) -> List[Diag]:
 
 
 
-EFFECT_VOCAB = {"io", "fs", "env", "nondet", "alloc"}
+#: 可声明的效果名。**`panic` 必须在这里**（L-05，2026-11-06）：
+#: 它是能让程序中止的效果；不在词表里，写了会被 E-Effect-Unknown 拒，
+#: 那就等于"宁可让人不敢声明"，与"诚实优先"相反。
+EFFECT_VOCAB = {"io", "fs", "env", "nondet", "alloc", "unsafe", "panic"}
 
 
 def _spec_clauses(spec) -> Dict[str, List]:
@@ -1998,7 +2031,9 @@ def _check_format_calls(impl_mod) -> List[Diag]:
                 ty = ""
                 if getattr(arg, "kind", "") == "path":
                     ty = env.get(arg.name or "", "")
-                if ty.startswith("Vec") or ty == "Vec":
+                # 名字后面可能跟着 `<…>`（`Vec<u8>`），先取头部再规范化。
+                _head = (ty or "").split("<")[0].split("&")[0].strip()
+                if canon(_head) in ("vector", "array"):
                     diags.append(Diag(
                         "E-Format-ArgType",
                         f"`{{:x}}`（十六进制）要数字，但 `{arg.name}` 是 `{ty}`",
@@ -2146,6 +2181,42 @@ def _check_effects(tu_mod, ch_mod) -> List[Diag]:
         if spec is None:
             continue
         declared, bad = _declared_effects(spec)
+        # **① FFI 必须写在 `unsafe { }` 里**（E-Unsafe-Required）。
+        # extern 是 `.eln` 的**模块级节点**：`extern f(...) -> T from "lib" effects { … };`
+        _ffi = {c.name for c in (ch_mod.children or [])
+                if c.kind == "extern" and getattr(c, "name", None)}
+        if _ffi:
+            _bad = []
+            def _scan(node, in_unsafe):
+                if (getattr(node, "kind", "") == "block"
+                        and getattr(node, "value", None) == "unsafe"):
+                    in_unsafe = True
+                if (getattr(node, "kind", "") == "call" and not in_unsafe
+                        and (node.name or "").rsplit(".", 1)[-1] in _ffi):
+                    _bad.append(node)
+                for _c in (getattr(node, "children", None) or []):
+                    _scan(_c, in_unsafe)
+            _scan(fn, False)
+            for _nd in _bad:
+                diags.append(Diag("E-Unsafe-Required",
+                                  "调用了外部函数 %s，但它不在 `unsafe { }` 块里。" % _nd.name
+                                  + "外部调用是语言管不了的边界。改法：把它包进 unsafe 块，"
+                                  + "并让 spec 的 effects 声明 unsafe。",
+                                  _nd.line, _nd.col))
+        # **unsafe 的两条规则**（2026-11-05）：让它从装饰变成约束。
+        # 前置已解决：`EFFECT_VOCAB` 里有 unsafe，`effects { unsafe }` 也能解析了。
+        _ublk = next((n for n in _all_nodes(fn)
+                          if getattr(n, "kind", "") == "block" and getattr(n, "value", None) == "unsafe"), None)
+        if _ublk is not None and "unsafe" not in declared:
+            diags.append(Diag("E-Unsafe-Undeclared",
+                              "这里有 `unsafe { }` 块，但 effects 没声明 `unsafe`。"
+                              "改法：在 spec 的 effects 里加上 unsafe，或把不安全操作移出该块。",
+                              _ublk.line, _ublk.col))
+        if _ublk is None and "unsafe" in declared:
+            diags.append(Diag("E-Unsafe-Overdeclared",
+                              "effects 声明了 `unsafe`，但函数体内没有 `unsafe { }` 块——虚报。"
+                              "改法：去掉 effects 里的 unsafe，或把危险操作放进 unsafe 块。",
+                              getattr(fn, "line", 0), getattr(fn, "col", 0)))
         for b in bad:
             raw = b.value if isinstance(getattr(b, "value", None), list) else []
             unknown = [x for x in raw if x and x != "pure" and x not in EFFECT_VOCAB]

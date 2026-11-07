@@ -1,32 +1,146 @@
 {
+  "calculator": [
+    {
+      "n": 16,
+      "function": "evaluate",
+      "ops_worst_obs": 67,
+      "recipe": "shape=random",
+      "converged": true
+    },
+    {
+      "n": 64,
+      "function": "evaluate",
+      "ops_worst_obs": 67,
+      "recipe": "shape=decreasing",
+      "converged": true
+    }
+  ],
+  "const_loop": [
+    {
+      "n": 16,
+      "function": "f",
+      "ops_worst_obs": 3082,
+      "recipe": "shape=increasing",
+      "converged": true
+    },
+    {
+      "n": 64,
+      "function": "f",
+      "ops_worst_obs": 3082,
+      "recipe": "shape=increasing",
+      "converged": true
+    }
+  ],
+  "count": [
+    {
+      "n": 16,
+      "function": "count",
+      "ops_worst_obs": 3936,
+      "recipe": "shape=increasing",
+      "converged": true
+    },
+    {
+      "n": 64,
+      "function": "count",
+      "ops_worst_obs": 4896,
+      "recipe": "shape=increasing",
+      "converged": true
+    }
+  ],
+  "paren": [
+    {
+      "n": 16,
+      "function": "paren",
+      "ops_worst_obs": 341,
+      "recipe": "shape=increasing",
+      "converged": true
+    },
+    {
+      "n": 64,
+      "function": "paren",
+      "ops_worst_obs": 1314,
+      "recipe": "shape=increasing",
+      "converged": true
+    }
+  ],
   "scan_until": [
     {
       "n": 16,
       "function": "scan_until",
       "ops_worst_obs": 250,
       "recipe": "shape=alternating",
-      "converged": false
+      "converged": true
     },
     {
       "n": 64,
       "function": "scan_until",
       "ops_worst_obs": 970,
       "recipe": "shape=alternating",
-      "converged": false
+      "converged": true
+    }
+  ],
+  "search": [
+    {
+      "n": 16,
+      "function": "binary_search",
+      "ops_worst_obs": 248,
+      "recipe": "shape=increasing",
+      "converged": true
     },
     {
-      "n": 256,
-      "function": "scan_until",
-      "ops_worst_obs": 3850,
-      "recipe": "shape=alternating",
-      "converged": false
+      "n": 64,
+      "function": "binary_search",
+      "ops_worst_obs": 920,
+      "recipe": "shape=increasing",
+      "converged": true
+    }
+  ],
+  "stats": [
+    {
+      "n": 16,
+      "function": "summarize",
+      "ops_worst_obs": 827,
+      "recipe": "shape=increasing",
+      "converged": true
     },
     {
-      "n": 1024,
-      "function": "scan_until",
-      "ops_worst_obs": 15370,
-      "recipe": "shape=alternating",
-      "converged": false
+      "n": 64,
+      "function": "summarize",
+      "ops_worst_obs": 3131,
+      "recipe": "shape=increasing",
+      "converged": true
+    }
+  ],
+  "sum": [
+    {
+      "n": 16,
+      "function": "average",
+      "ops_worst_obs": 250,
+      "recipe": "shape=increasing",
+      "converged": true
+    },
+    {
+      "n": 64,
+      "function": "average",
+      "ops_worst_obs": 922,
+      "recipe": "shape=increasing",
+      "converged": true
+    }
+  ],
+  "topk": [
+    {
+      "n": 16,
+      "function": "topk",
+      "ops_worst_obs": 3536,
+      "recipe": "shape=increasing",
+      "converged": true
+    },
+    {
+      "n": 64,
+      "function": "topk",
+      "ops_worst_obs": 15158,
+      "recipe": "shape=decreasing",
+      "converged": true
     }
   ]
 }

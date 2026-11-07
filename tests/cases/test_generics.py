@@ -5,14 +5,14 @@
 
 ## 这一批**只做三件事**
 
-1. **解析** `func id<T>(const Vec<T>& xs) -> Vec<T>`（类型参数列表）；
-2. **签名相容**：`Vec<T>` 能实现 `Vec<u64>` 的 spec（**类型参数当通配符**）；
+1. **解析** `func id<T>(const vector<T>& xs) -> vector<T>`（类型参数列表）；
+2. **签名相容**：`vector<T>` 能实现 `vector<u64>` 的 spec（**类型参数当通配符**）；
 3. **`copy(xs)`** 内建（分配 1 次，E36 记得到）。
 
 ## 明确**没做**的（写在文档里，别当成有）
 
 - **没有单态化**：`T` 不会在编译期被替换成具体类型（解释器本来就是动态的）；
-- **没有泛型容器**：`HashMap<K,V>`、`Set`、`Deque` 都还没有；
+- **没有泛型容器**：`HashMap<K,V>`、`set`、`deque` 都还没有；
 - **`T` 上的元素运算不允许**：只能 `xs.length()`、传参、返回——
   因为"`T` 能不能比较/相加"需要 trait，而 trait 还没做。
 """
@@ -53,22 +53,22 @@ def check(name, cond, detail=""):
 
 def main() -> int:
     print("=== 解析 ===")
-    m = parse_source("func id<T>(const Vec<T>& xs) -> Vec<T> { return xs; }\n", "m.eln")
+    m = parse_source("func id<T>(const vector<T>& xs) -> vector<T> { return xs; }\n", "m.eln")
     fn = next((c for c in m.module.children if c.kind == "fn"), None)
     tp = next((c for c in fn.children if c.kind == "type-params"), None) if fn else None
     check("函数签名里有 type-params", tp is not None)
     check("类型参数名是 T", tp is not None and tp.children[0].name == "T", "")
 
-    print("=== 签名相容：Vec<T> 实现 Vec<u64> ===")
-    tu = f"""spec id(const Vec<u64>& xs) -> Vec<u64> {{ effects {{}}; {T} }}
-spec consume(const Vec<u64>& xs) -> u64 {{ effects {{}}; {T} }}
+    print("=== 签名相容：vector<T> 实现 vector<u64> ===")
+    tu = f"""spec id(const vector<u64>& xs) -> vector<u64> {{ effects {{}}; {T} }}
+spec consume(const vector<u64>& xs) -> u64 {{ effects {{}}; {T} }}
 """
-    ch = """func id<T>(const Vec<T>& xs) -> Vec<T> {
+    ch = """func id<T>(const vector<T>& xs) -> vector<T> {
     return xs;
 }
-func consume(const Vec<u64>& xs) -> u64 {
-    const Vec<u64> ys = copy(xs);
-    const Vec<u64> zs = id(ys);
+func consume(const vector<u64>& xs) -> u64 {
+    const vector<u64> ys = copy(xs);
+    const vector<u64> zs = id(ys);
     return zs.length();
 }
 """
@@ -82,20 +82,20 @@ func consume(const Vec<u64>& xs) -> u64 {
     check("泛型函数跑得通（返回长度 3）", got == 3, str(got))
 
     print("=== 类型参数推断 ===")
-    tu2 = f"""spec onlyret(const Vec<u64>& xs) -> u64 {{ effects {{}}; {T} }}
-spec id(const Vec<u64>& xs) -> Vec<u64> {{ effects {{}}; {T} }}
+    tu2 = f"""spec onlyret(const vector<u64>& xs) -> u64 {{ effects {{}}; {T} }}
+spec id(const vector<u64>& xs) -> vector<u64> {{ effects {{}}; {T} }}
 """
-    ch_ok = """func id<T>(const Vec<T>& xs) -> Vec<T> { return xs; }
-func onlyret(const Vec<u64>& xs) -> u64 {
-    const Vec<u64> ys = id(xs);
+    ch_ok = """func id<T>(const vector<T>& xs) -> vector<T> { return xs; }
+func onlyret(const vector<u64>& xs) -> u64 {
+    const vector<u64> ys = id(xs);
     return ys.length();
 }
 """
     check("能从实参推出 T（无诊断）",
           [d.code for d in check_module(tu2, ch_ok, "m").diagnostics] == [])
 
-    ch_bad = """func id<T>(const Vec<T>& xs) -> Vec<T> { return xs; }
-func onlyret(const Vec<u64>& xs) -> u64 {
+    ch_bad = """func id<T>(const vector<T>& xs) -> vector<T> { return xs; }
+func onlyret(const vector<u64>& xs) -> u64 {
     const u64 n = id(1);
     return n;
 }
@@ -104,10 +104,10 @@ func onlyret(const Vec<u64>& xs) -> u64 {
           "E-Type-InferFailed" in [d.code for d in check_module(tu2, ch_bad, "m").diagnostics])
 
     print("=== HashMap<K,V>（有界探测） ===")
-    tu3 = f"""spec m(const Vec<u64>& xs) -> u64 {{ effects {{}}; {T} }}
+    tu3 = f"""spec m(const vector<u64>& xs) -> u64 {{ effects {{}}; {T} }}
 """
-    ch3 = """func m(const Vec<u64>& xs) -> u64 {
-    HashMap<Vec<u8>, u64> h = map_new();
+    ch3 = """func m(const vector<u64>& xs) -> u64 {
+    HashMap<vector<u8>, u64> h = map_new();
     map_put(h, "a", 1);
     map_put(h, "b", 2);
     print(map_len(h), map_get(h, "a"), map_has(h, "b"), map_has(h, "zzz"));
@@ -119,14 +119,14 @@ func onlyret(const Vec<u64>& xs) -> u64 {
     check("HashMap 能存能取（长度 2）", Interp(ch3m, tu3m).call("m", [[1]]) == 2)
 
     print("=== 非泛型函数仍然严格 ===")
-    bad = """func id(const Vec<u64>& xs) -> Vec<u64> {
+    bad = """func id(const vector<u64>& xs) -> vector<u64> {
     return xs;
 }
 """
-    bad_tu = f"""spec id(const Vec<u8>& xs) -> Vec<u8> {{ effects {{}}; {T} }}
+    bad_tu = f"""spec id(const vector<u8>& xs) -> vector<u8> {{ effects {{}}; {T} }}
 """
     codes = [d.code for d in check_module(bad_tu, bad, "m").diagnostics]
-    check("Vec<u64> 实现 Vec<u8> 的 spec → 报错",
+    check("vector<u64> 实现 vector<u8> 的 spec → 报错",
           "E-Spec-SigMismatch" in codes, str(codes))
 
     print()

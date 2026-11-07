@@ -5,12 +5,12 @@
 
 | 内建 | 作用 | 关键点 |
 |---|---|---|
-| `vec_push` / `vec_pop` | 可增长/弹出 | 分配按**摊还 1 次**；空弹 → `Option::None` |
-| `option_unwrap_or` | `Some(v)→v`，`None→默认` | **`?` 只对 `Result` 生效**，Option 要显式解包 |
+| `vec_push` / `vec_pop` | 可增长/弹出 | 分配按**摊还 1 次**；空弹 → `optional::None` |
+| `option_unwrap_or` | `Some(v)→v`，`None→默认` | **`?` 只对 `Result` 生效**，optional 要显式解包 |
 | `json_array` / `json_object` | 结构化输出 | 成员是**已序列化**的字节；对象是**键值交替** |
 | `env_set` | 设环境变量 | `env` 效果 |
 | `fs_rename` / `fs_remove` | 改名/删除 | `fs` 效果；失败 → `Err(Io::*)` |
-| `utf8_chars_vec` | 整串 → 码点数组 | 用现有 `vec-u64`，**不必等 `Vec<u32>`** |
+| `utf8_chars_vec` | 整串 → 码点数组 | 用现有 `vec-u64`，**不必等 `vector<u32>`** |
 """
 import os as _os
 import sys as _sys
@@ -36,7 +36,7 @@ from interp import Interp             # noqa: E402
 from parser import parse_source       # noqa: E402
 
 FAILED = []
-TU = "spec f(const Vec<u64>& xs) -> u64 { effects { env, fs }; }\n"
+TU = "spec f(const vector<u64>& xs) -> u64 { effects { env, fs }; }\n"
 
 
 def check(name, cond, detail=""):
@@ -49,34 +49,34 @@ def check(name, cond, detail=""):
 
 def run(body, xs=(1, 2, 3)):
     tu = parse_source(TU, "m.tu").module
-    ch = parse_source("func f(const Vec<u64>& xs) -> u64 {\n" + body + "\n}\n", "m.eln").module
+    ch = parse_source("func f(const vector<u64>& xs) -> u64 {\n" + body + "\n}\n", "m.eln").module
     return Interp(ch, tu).call("f", [list(xs)])
 
 
 def main() -> int:
     print("=== vec_push / vec_pop ===")
     check("push 两次、pop 一次 → 4",
-          run("""    Vec<u64> ys = copy(xs);
+          run("""    vector<u64> ys = copy(xs);
     vec_push(ys, 9);
     vec_push(ys, 10);
     vec_pop(ys);
     return ys.length();""") == 4)
     check("pop 弹出的是最后压入的（10）",
-          run("""    Vec<u64> ys = copy(xs);
+          run("""    vector<u64> ys = copy(xs);
     vec_push(ys, 10);
     return option_unwrap_or(vec_pop(ys), 0);""") == 10)
-    check("空 Vec pop → None → 默认值 0",
-          run("""    Vec<u64> ys = copy(xs);
+    check("空 vector pop → None → 默认值 0",
+          run("""    vector<u64> ys = copy(xs);
     u64 i = 0;
     while (i < 3) { vec_pop(ys); i = i + 1; }
     return option_unwrap_or(vec_pop(ys), 0);""") == 0)
 
     print("=== JSON 输出 ===")
     check("json_array(已序列化) → [1,2]",
-          run("""    Vec<Vec<u8>> it = text_split_vec("1,2", ",");
+          run("""    vector<vector<u8>> it = text_split_vec("1,2", ",");
     return json_array(it).length();""") == 5)
     check("json_object 键值交替（键未加引号 → {1:2}，5 字节）",
-          run("""    Vec<Vec<u8>> kv = text_split_vec("1,2", ",");
+          run("""    vector<vector<u8>> kv = text_split_vec("1,2", ",");
     return json_object(kv).length();""") == 5)
 
     print("=== env_set ===")

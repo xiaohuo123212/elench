@@ -9,8 +9,8 @@
 
 ```bash
 git clone <repo> && cd elench
-python src/dsh.py check 文档/设计/目前设计/样例/sum.tu 文档/设计/目前设计/样例/sum.eln
-python src/dsh.py cost  文档/设计/目前设计/样例/sum.tu 文档/设计/目前设计/样例/sum.eln
+python src/dsh.py check 文档/样例/sum.tu 文档/样例/sum.eln
+python src/dsh.py cost  文档/样例/sum.tu 文档/样例/sum.eln
 ```
 
 **零依赖**：`pyproject.toml` 里 `dependencies = []`。不需要装任何东西。
@@ -22,7 +22,7 @@ python src/dsh.py cost  文档/设计/目前设计/样例/sum.tu 文档/设计/�
 | # | 门 | 命令 | 判据 |
 |---|---|---|---|
 | **1** | 20 套测试 | `cd src && for f in test_*.py; do python $f; done` | 全绿 |
-| **2** | κ 对拍 | `python tools/diff_check.py` | **137 / 137 全等** |
+| **2** | κ 回归 | `python tools/golden_check.py` | **golden 21 / 21 全等** |
 | **3** | κ 冻结基准 | `python tools/golden_check.py` | **21 / 21 全等** |
 | **4** | 文档一致性 | `python src/check_docs.py && python src/sync_docs.py --check` | 两项都 ✓ |
 
@@ -43,7 +43,9 @@ python tools/kappa_vs_measured.py --strict
 
 1. 逐个裁决：**每一处变化都必须是"变大"**（补上漏算），**不许有变小**；
 2. 重新冻结基准：`python tools/golden_check.py --freeze`；
-3. 更新 `src/_baseline/`：`cp src/cost_interp.py src/_baseline/cost_interp_old.py`；
+3. 迁移期的"新旧逐位对拍"（`src/_baseline/` + `tools/diff_check.py`）**已退役**（2026-11-07）：
+   基线副本会和真实现一起漂移，而 golden 是一份**冻结的期望值**（`tests/golden/kappa.json`），
+   改 κ 必须 `--freeze` 并在提交信息里写理由——这比"和一个会变的副本比"更可靠。
 4. **在提交信息里写清为什么每一处变化是对的**。
 
 **为什么这么严**：κ 是上界。**一次"变小"就可能让一个真实超支的代码通过门禁。**
@@ -81,7 +83,7 @@ python tools/kappa_vs_measured.py --strict
 
 ## 6. 加一个样例程序
 
-1. 在 `文档/设计/目前设计/样例/` 放一对文件：`foo.tu`（声明 + `target`）与 `foo.eln`（实现）；
+1. 在 `文档/样例/` 放一对文件：`foo.tu`（声明 + `target`）与 `foo.eln`（实现）；
 2. 在 `tools/kappa_vs_measured.py` 的 `PROGRAMS` 里加 `"foo"`；
 3. 跑 `--strict`，确认 **κ ≥ 最坏实测**；
 4. 跑 `python tools/golden_check.py --freeze` 把新函数的 κ 冻进基准。

@@ -1,0 +1,39 @@
+{
+  "name": "elench-lang",
+  "version": "0.1.0",
+  "description": "Elenchus — cost contracts as machine-checkable code. CLI command: elench.",
+  "keywords": [
+    "cost",
+    "complexity",
+    "contracts",
+    "static-analysis",
+    "big-o",
+    "elench"
+  ],
+  "license": "Apache-2.0",
+  "bin": {
+    "elench": "bin/elench.js"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "scripts/",
+    "README.md",
+    "NOTICE",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=16"
+  },
+  "scripts": {
+    "prepack": "node scripts/clean-pycache.js",
+    "test": "node bin/elench.js --help"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/elench-lang/elench.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

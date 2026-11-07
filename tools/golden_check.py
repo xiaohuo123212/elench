@@ -27,7 +27,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
 SRC = os.path.join(ROOT, "src")
-SAMPLE = os.path.join(ROOT, "文档", "设计", "目前设计", "样例")
+SAMPLE = os.path.join(ROOT, "文档", "样例")
 GOLDEN = os.path.join(ROOT, "tests", "golden", "kappa.json")
 
 sys.path.insert(0, SRC)
@@ -49,9 +49,10 @@ def collect():
             continue
         tu = parse_source(io.open(tu_p, encoding="utf-8").read(), b + ".tu").module
         ch = parse_source(io.open(ch_p, encoding="utf-8").read(), b + ".eln").module
-        _tbl = os.path.join(os.path.dirname(os.path.abspath(tu_p)),
-                            os.path.basename(tu_p).rsplit(".", 1)[0] + ".dispatch.yaml")
-        ci = CostInterp(ch, tu, table_path=(_tbl if os.path.exists(_tbl) else None))
+        # **不读 `.dispatch.yaml`**（2026-11-07）：那份表是测量产物、gitignore，
+        # 换台机器就没有或不一样 —— golden 若依赖它，就等于"只有这台机器能复现"。
+        # 这里固定 **max 口径**；分段口径由 `test_dispatch_*` 单独覆盖。
+        ci = CostInterp(ch, tu, table_path=None)
         out[b] = {fn: ci.cost_of(fn).render() for fn in sorted(ci.fns)}
     return out
 

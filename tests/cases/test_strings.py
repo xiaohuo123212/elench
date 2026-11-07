@@ -4,7 +4,7 @@
 """test_strings.py —— 字符串字面量 + 变参 `print`（v0.71）
 
 设计见 `文档/设计/目前设计/临时计划-字符串与print.md`：字面量是**编译期常量**
-（类型不可变 `Vec<u8>`、零分配、成本 1 个操作），`print` 变参、**不引入格式串**。
+（类型不可变 `vector<u8>`、零分配、成本 1 个操作），`print` 变参、**不引入格式串**。
 """
 import os as _os
 import sys as _sys
@@ -34,7 +34,7 @@ from parser import parse_source                       # noqa: E402
 
 FAILED = []
 
-TU = """spec f(const Vec<u64>& xs) -> u64 {
+TU = """spec f(const vector<u64>& xs) -> u64 {
     effects {};
     target { time: { max: O(xs.length()) }, allocation: { max: 0 }, };
 }
@@ -65,17 +65,17 @@ def main() -> int:
     check("\\xNN 转义", bytes(toks[2].value) == b"BA", repr(toks[2].value))
     check("UTF-8 字面量", bytes(lex('"中"').tokens[0].value) == "中".encode(), "UTF-8")
 
-    print("=== 语义：字面量是 Vec<u8> 常量 ===")
-    v = run("""func f(const Vec<u64>& xs) -> u64 {
-    const Vec<u8> t = "abc";
+    print("=== 语义：字面量是 vector<u8> 常量 ===")
+    v = run("""func f(const vector<u64>& xs) -> u64 {
+    const vector<u8> t = "abc";
     return t[0];
 }""")
     check("可以用下标读字节（a = 97）", v == 97, str(v))
 
     print("=== 成本：字面量 1 个操作、零分配 ===")
     tu = parse_source(TU, "m.tu").module
-    ch = parse_source("""func f(const Vec<u64>& xs) -> u64 {
-    const Vec<u8> t = "hello";
+    ch = parse_source("""func f(const vector<u64>& xs) -> u64 {
+    const vector<u8> t = "hello";
     return 0;
 }""", "m.eln").module
     k = CostInterp(ch, tu).cost_of("f")

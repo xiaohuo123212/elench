@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Elench contributors
-"""test_nested.py —— 一层嵌套泛型 `Vec<Vec<u8>>`（v0.71）
+"""test_nested.py —— 一层嵌套泛型 `vector<vector<u8>>`（v0.71）
 
 ## 只做一层
 
 | 允许 | 不做 |
 |---|---|
-| `Vec<Vec<u8>>` | `Vec<Vec<Vec<u8>>>` |
+| `vector<vector<u8>>` | `vector<vector<vector<u8>>>` |
 
 **记账口径**（`三个前置-做什么用.md` §2）：
 
@@ -39,7 +39,7 @@ from interp import Interp                # noqa: E402
 from parser import parse_source          # noqa: E402
 
 FAILED = []
-TU = ("spec f(const Vec<u8>& t) -> u64 { effects {}; "
+TU = ("spec f(const vector<u8>& t) -> u64 { effects {}; "
       "target { time: { max: O(t.length()) }, allocation: { max: O(t.length()) }, }; }\n")
 
 
@@ -53,25 +53,25 @@ def check(name, cond, detail=""):
 
 def run(body, data: bytes):
     tu = parse_source(TU, "m.tu").module
-    ch = parse_source("func f(const Vec<u8>& t) -> u64 {\n" + body + "\n}\n", "m.eln").module
+    ch = parse_source("func f(const vector<u8>& t) -> u64 {\n" + body + "\n}\n", "m.eln").module
     return Interp(ch, tu).call("f", [list(data)])
 
 
 def main() -> int:
     print("=== 能下标、能取长度 ===")
-    check("切出 3 段", run("""    Vec<Vec<u8>> rows = text_split_vec(t, ",");
+    check("切出 3 段", run("""    vector<vector<u8>> rows = text_split_vec(t, ",");
     return rows.length();""", b"a,b,cd") == 3)
-    check("取第 0 段（长度 1）", run("""    Vec<Vec<u8>> rows = text_split_vec(t, ",");
+    check("取第 0 段（长度 1）", run("""    vector<vector<u8>> rows = text_split_vec(t, ",");
     return rows[0].length();""", b"a,b,cd") == 1)
-    check("取第 2 段（长度 2）", run("""    Vec<Vec<u8>> rows = text_split_vec(t, ",");
+    check("取第 2 段（长度 2）", run("""    vector<vector<u8>> rows = text_split_vec(t, ",");
     return rows[2].length();""", b"a,b,cd") == 2)
 
     print("=== 能拼回去 ===")
-    check("join 回原长 6", run("""    Vec<Vec<u8>> rows = text_split_vec(t, ",");
+    check("join 回原长 6", run("""    vector<vector<u8>> rows = text_split_vec(t, ",");
     return text_join_vec(rows, ",").length();""", b"a,b,cd") == 6)
 
     print("=== 逐行求和（Σ 记账） ===")
-    total = run("""    Vec<Vec<u8>> rows = text_split_vec(t, ",");
+    total = run("""    vector<vector<u8>> rows = text_split_vec(t, ",");
     u64 i = 0;
     u64 s = 0;
     while (i < rows.length()) {
@@ -82,8 +82,8 @@ def main() -> int:
     check("Σ 行长 = 4（a + b + cd）", total == 4, str(total))
 
     print("=== 分配 = 1 + n(外层) ===")
-    ch = """func f(const Vec<u8>& t) -> u64 {
-    Vec<Vec<u8>> rows = text_split_vec(t, ",");
+    ch = """func f(const vector<u8>& t) -> u64 {
+    vector<vector<u8>> rows = text_split_vec(t, ",");
     return rows.length();
 }
 """

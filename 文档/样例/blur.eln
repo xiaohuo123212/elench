@@ -1,0 +1,14 @@
+﻿// blur.eln —— 3×3 均值模糊的「校验和」版本（不做真图像，只看成本形态）
+pub func blur(u64 w, u64 h) -> u64 {
+    u64 acc = 0;
+    u64 y = 0;
+    while (y < h) {
+        u64 x = 0;
+        while (x < w) {
+            acc = acc + x + y;
+            x = x + 1;
+        }
+        y = y + 1;
+    }
+    return acc;
+}

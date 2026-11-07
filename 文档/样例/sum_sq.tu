@@ -1,7 +1,7 @@
 // sum_sq.tu —— 算法样例（κ vs ops 对拍用，2026-11-04 增）
 error SqError;
 
-spec sum_sq(const Vec<u64>& xs) -> u64 {
+spec sum_sq(const vector<u64>& xs) -> u64 {
     effects {};
 
     benchmodel {

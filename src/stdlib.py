@@ -370,6 +370,15 @@ def _rand_u64(args: List[Any]) -> int:
 
 #: 内建 → 效果集。**这是"可撒谎位置"之外唯一能自动验证的契约维度。**
 EFFECTS = {
+    # **会 panic 的内建必须声明出来**（L-05，2026-11-06）：
+    # 以前 `EFFECTS` 里没有它们，于是 `effects { }` 的函数里调 `unwrap`
+    # **一声不响**——而 panic 是能让程序中止的效果，藏起来等于契约在撒谎。
+    # 现有样例与测试里这些调用出现 0 次（实测），所以这条加上去**零误报**。
+    "panic": {"panic"},
+    "unwrap": {"panic"},
+    "expect": {"panic"},
+    "assert": {"panic"},
+    "assert_eq": {"panic"},
     "print": {"io"},
     "rand_u64": {"nondet"},
     "read_file": {"fs"},
@@ -492,7 +501,7 @@ FAIL_MODE: Dict[str, str] = {
         "utf8_char_at", "utf8_byte_of_char", "file_exists", "slice",
         "args", "args_len", "cwd", "exit", "option_some", "option_none", "option_is_some",
         "text_split_vec", "text_join_vec", "close", "close_write", "write_chunk",
-        "env_set", "json_array", "json_object", "utf8_chars_vec", "vec_push", "option_unwrap_or",
+        "env_set", "json_array", "json_object", "utf8_chars_vec", "vec_push", "option_unwrap_or", "option_unwrap",
         "json_parse",
         "format",
     )},
@@ -1754,6 +1763,19 @@ _register("fs_remove", 1, _fs_remove, "ext", ret="result-u64", empty="失败 →
 _register("utf8_chars_vec", 1, _utf8_chars_vec, "n", ret="vec-u64", empty="空 → 空")
 
 
+def _option_unwrap(args: List[Any]) -> Any:
+    """`option_unwrap(o) -> T`：`Some(v) → v`；`None` 是**错误**。
+
+    以前只有 `option_unwrap_or(o, default)`，想"一定要有值"只能写
+    `option_unwrap_or(o, 0)`——**把漏判静默变成 0**，那是这个语言最不该有的东西。
+    """
+    v = args[0]
+    if getattr(v, "variant", "") != "Some":
+        from interp import InterpError as _IE      # 延迟导入，避免成环
+        raise _IE("option_unwrap：值不是 Some（要么漏判，要么该用 option_unwrap_or）")
+    return getattr(v, "payload", None)
+
+
 def _option_unwrap_or(args: List[Any]) -> Any:
     """`option_unwrap_or(o, default) -> T`：`Some(v) → v`，`None → default`。
 
@@ -1765,6 +1787,7 @@ def _option_unwrap_or(args: List[Any]) -> Any:
 
 
 _register("option_unwrap_or", 2, _option_unwrap_or, "1", ret="any", empty="None → default")
+_register("option_unwrap", 1, _option_unwrap, "1", ret="any", empty="None → 报错")
 
 
 def _to_bytes(x) -> bytes:

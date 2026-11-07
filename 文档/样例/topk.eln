@@ -19,7 +19,7 @@
 
 // #region fn
 pub func topk(
-              const Vec<u64>& xs, u64 k) -> u64! {
+              const vector<u64>& xs, u64 k) -> u64! {
     const u64 len = xs.length();
     // 名次从 1 开始：0 是非法名次
     if (k == 0) {
@@ -34,11 +34,11 @@ pub func topk(
     }
     return ?!topk_kernel(xs, k);
 } kernels topk_kernel(
-                      const Vec<u64>& xs, u64 k) -> u64! {
+                      const vector<u64>& xs, u64 k) -> u64! {
     topk_heap {
         const u64 n = xs.length();
-        FixedVec<u64,
-        HEAP_CAP> heap = FixedVec<u64,
+        array<u64,
+        HEAP_CAP> heap = array<u64,
         HEAP_CAP>::make();
         u64 i = 0;
         u64 pos = 0;

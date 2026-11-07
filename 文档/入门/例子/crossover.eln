@@ -1,9 +1,9 @@
-﻿func top(const Vec<u64>& xs) -> u64! {
+﻿func top(const vector<u64>& xs) -> u64! {
     if (xs.length() == 0) {
         return 0;
     }
     return ?!kernel(xs);
-} kernels kernel(const Vec<u64>& xs) -> u64! {
+} kernels kernel(const vector<u64>& xs) -> u64! {
     // 小 n 赢：无固定开销，每元素 6 次 max（斜率大）
     by_scan_heavy {
         u64 b = 0;

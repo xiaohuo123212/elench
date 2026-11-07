@@ -44,7 +44,7 @@ def test_shrinker_mechanics():
     """缩小器的机械行为：只要"还是反例"，无关行就被删掉。"""
     import shrink
 
-    fake = ("func f(const Vec<u64>& xs, u64 n) -> u64 {\n"
+    fake = ("func f(const vector<u64>& xs, u64 n) -> u64 {\n"
             "    u64 s = 0;\n"
             "    u64 KEEP = 1;\n"
             "    s = s + KEEP;\n"

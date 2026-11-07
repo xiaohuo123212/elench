@@ -344,6 +344,14 @@ def callee_lines(ci: Any, fn: str, size_var: str, n: int = 0,
         cur = stack.pop()
         if getattr(cur, "kind", "") == "call":
             calls.append(cur)
+            # **高阶内建把函数名当实参**（`sort_by(xs, earlier)`）：
+            # 那不是 call 节点，以前从"被调方"里漏掉——实测 merge 样例的
+            # `earlier` 就这样消失了。这里把它补成一条调用。
+            _an = next((c for c in (getattr(cur, "children", None) or [])
+                        if getattr(c, "kind", "") == "args"), None)
+            for _a in (getattr(_an, "children", None) or []):
+                if getattr(_a, "kind", "") == "path":
+                    calls.append(_a)
         stack.extend(getattr(cur, "children", None) or [])
     seen, rows = set(), []
     for c in calls:

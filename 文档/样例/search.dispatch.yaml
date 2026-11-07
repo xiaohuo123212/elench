@@ -1,0 +1,6 @@
+# 由 `elench measure` 生成；MUST NOT 手改。
+module: search
+label: search_impl
+segments:
+  - {lo: 1, hi: 127, candidate: search_linear}
+  - {lo: 128, hi: 256, candidate: search_binary}

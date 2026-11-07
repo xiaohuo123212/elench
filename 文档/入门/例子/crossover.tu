@@ -5,14 +5,14 @@
 // 两条成本线在 n≈2200 处相交，`elench dispatch crossover` 不用实测就能给出两段。
 error CrossError;
 
-spec top(const Vec<u64>& xs) -> u64! {
+spec top(const vector<u64>& xs) -> u64! {
     effects {};
     benchmodel {
         data { xs = random_u64s(); }
         scale { xs in range(1, 4096, *2); }
     };
     target { time: { max: O(xs.length()) }, allocation: { max: 0 }, };
-    choose kernel(const Vec<u64>& xs) -> u64! {
+    choose kernel(const vector<u64>& xs) -> u64! {
         over { by_scan_heavy, by_scan_setup };
         objective time;
     };

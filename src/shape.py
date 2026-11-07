@@ -26,7 +26,7 @@ shape.validate(...)   ← 只此一份
 ```
 
 **接一个新语言 = 加一个编组表，不动校验器。** 多后端编组的设计见
-`文档/设计/目前设计/未做/设计-多语言FFI编组.md`；本轮只做 C ABI。
+`文档/设计/目前设计/未做/挂起/挂起-多语言FFI编组.md`；本轮只做 C ABI。
 
 ## 两种失败必须分开
 
@@ -38,6 +38,9 @@ shape.validate(...)   ← 只此一份
 混在一起，人会去改一个没写错的调用。
 """
 from __future__ import annotations
+import re
+
+from typenames import canon, display
 
 from typing import Any, List, Sequence, Tuple
 
@@ -63,13 +66,32 @@ class UnsupportedError(Exception):
 
 
 def _is_vec(t: str) -> bool:
-    return t.startswith("Vec") or t.startswith("[")
+    # **名字后面可能跟着 `<…>` 和 `&`**（`Vec<u8>&`），所以不能直接
+    # `canon(t)`——只认整词会漏掉带修饰的写法。先取头部再规范化。
+    _head = (t or "").split("<")[0].split("&")[0].strip()
+    return canon(_head) in ("vector", "array") or t.startswith("[")
 
 
 def _check_one(fn: str, i: int, ty: str, v: Any) -> None:
     """第 i 个实参（0 基）是否符合声明类型。"""
     where = f"{fn} 的第 {i + 1} 个参数（声明 {ty}）"
     if _is_vec(ty):
+        # **定容 `array<T, N>` 的长度是静态可查的**：声明里就有 N。
+        # `vector<T>` 没有声明长度，**查不了**——这一条要写进文档，
+        # 免得有人以为"长度校验"对所有容器都做了。
+        _m = re.match(r"\s*array\s*<[^,>]+,\s*(\d+)\s*>", ty or "")
+        if _m:
+            _want = int(_m.group(1))
+            try:
+                _got = len(v) if not isinstance(v, str) else len(v.encode("utf-8"))
+            except TypeError:
+                raise ShapeError(f"{where}期望长度为 {_want} 的定容数组，实际是 {type(v).__name__}")
+            if _got != _want:
+                raise ShapeError(f"{where}长度必须是 {_want}（定容数组），实际 {_got}")
+            if not isinstance(v, (bytes, bytearray, str)):
+                if not (isinstance(v, (list, tuple)) and all(isinstance(x, int) for x in v)):
+                    raise ShapeError(f"{where}期望字节串或整数列表，实际是 {type(v).__name__}")
+            return
         if isinstance(v, (bytes, bytearray, str)):
             return
         if isinstance(v, (list, tuple)) and all(isinstance(x, int) for x in v):

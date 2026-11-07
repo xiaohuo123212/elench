@@ -27,8 +27,11 @@ from typing import Dict, List, Optional
 
 from .bound import Bound, bound_of_while, expr_to_bound, _descendants
 from parser import Node
+from typenames import canon
 from .symbolic import Cost
 from ast_util import descendants as _descendants
+from ast_util import arms_of, match_scrutinee, arm_pattern, arm_block, arm_single_stmts
+from ast_util import stmt_body, stmt_else, while_cond, for_iterable
 from ast_util import const_int_value as _const_int_value
 from kinds import COST_EXPR, COST_STMT
 
@@ -106,6 +109,18 @@ def as_cost(n: Optional[Node], const_sizes: Dict[str, Cost],
 
 
 # ---------------------------------------------------------------- 主解释器
+
+def _rename_sizes(c, mapping: dict):
+    """把 Cost 里的 `size(局部名)` 换成 `size(容器名)`；其余结构原样。"""
+    if c is None:
+        return c
+    if getattr(c, "kind", "") == "size" and c.value in mapping:
+        return type(c).size(mapping[c.value])
+    args = getattr(c, "args", ())
+    if args:
+        return type(c)(c.kind, c.value, [_rename_sizes(a, mapping) for a in args])
+    return c
+
 
 class CostInterp:
     """一个模块的成本解释器。
@@ -200,6 +215,7 @@ class CostInterp:
                 self.specs.setdefault(sp.name, sp)
         # 模块级常量（`const BUCKET_COUNT: u64 = 256;`）——成本式里要当常数，不是尺寸变量
         self.const_values: Dict[str, int] = {}
+        self.vty: Dict[str, str] = {}
         for scope in (decl, mod):
             if scope is None:
                 continue
@@ -329,6 +345,33 @@ class CostInterp:
                         self.repeats[name] = expr_to_bound(c.children[0])
                         break
 
+    def _len_alias(self, fn_name: str) -> dict:
+        """`const n = xs.length();` → {n: xs}（**E23 尺寸量统一**，2026-11-06）。
+
+        以前 target 写 `O(n)` 会变成 `n(n)`，而 κ 侧写的是 `n(xs)`——
+        两个符号对不上，判定直接落成"无法判定"，**尽管 κ 早就算出来了**。
+        """
+        out = {}
+        fn = next((c for c in (getattr(self.mod, "children", []) or [])
+                   if getattr(c, "kind", "") == "fn" and getattr(c, "name", "") == fn_name),
+                  None)
+        if fn is None:
+            return out
+        # **const 与 var 都算**：`u64 n = xs.length();` 是 var-decl。
+        # 只扫 const 的话，最常见的写法反而漏掉（实测 two_pointer_dedup 就是这种）。
+        for d in list(_descendants(fn, "const-decl")) + list(_descendants(fn, "var-decl")):
+            if not getattr(d, "name", "") or len(d.children) < 2:
+                continue
+            v = d.children[-1]
+            if getattr(v, "kind", "") not in ("method-call", "call"):
+                continue
+            if (v.name or "").split(".")[-1] not in ("length", "size", "len"):
+                continue
+            recv = v.children[0] if v.children else None
+            if getattr(recv, "kind", "") == "path" and recv.name:
+                out[d.name] = recv.name
+        return out
+
     def target_cost(self, name: str, dim: str = "time") -> Optional[Cost]:
         """取函数的 `target` 里某个维度（`time` / `allocation`）的 max 表达式；没有则 None。"""
         sp = self.specs.get(name)
@@ -339,6 +382,9 @@ class CostInterp:
             if c.kind == "clause" and (c.name or "") == "target":
                 got = self._find_slot(c, dim)
                 if got is not None:
+                    _m = self._len_alias(name)
+                    if _m:
+                        got = _rename_sizes(got, _m)
                     return got
         return None
 
@@ -469,7 +515,7 @@ class CostInterp:
             fn = self.fns.get(fn_name)
             if fn is None:
                 return Cost.num(0)
-            body = next((c for c in fn.children if c.kind == "block"), None)
+            body = stmt_body(fn)
             return self._alloc_stmts(body.children if body else [])
         finally:
             self._alloc_visiting.pop()
@@ -483,8 +529,8 @@ class CostInterp:
     def _alloc_stmt(self, s) -> "Cost":
         k = getattr(s, "kind", "")
         if k == "while":
-            cond = next((c for c in s.children if c.kind != "block"), None)
-            body = next((c for c in s.children if c.kind == "block"), None)
+            cond = while_cond(s)
+            body = stmt_body(s)
             inner = self._alloc_stmts(body.children if body else [])
             if inner.is_const() and inner.value == 0:
                 return Cost.num(0)      # 循环里不分配 → 轮数无关
@@ -500,11 +546,11 @@ class CostInterp:
             return Cost.mul(bound, inner)
         if k == "for":
             # `for (x in xs) { Vec<u64> t = [1,2]; … }` 每轮分配一次 → 上界 = 轮数 × 每轮
-            body = next((c for c in s.children if c.kind == "block"), None)
+            body = stmt_body(s)
             inner = self._alloc_stmts(body.children if body else [])
             if inner.is_const() and inner.value == 0:
                 return Cost.num(0)
-            iterable = next((c for c in s.children if c.kind not in ("block", "param")), None)
+            iterable = for_iterable(s)
             if iterable is not None and iterable.kind == "binary" and iterable.value == "..":
                 return Cost.mul(iterable, inner)      # 区间：轮数就是长度（保守用表达式本身）
             if iterable is not None and iterable.kind == "path":
@@ -523,8 +569,8 @@ class CostInterp:
                 worst = Cost.max(worst, acc)
             return worst
         if k == "if":
-            body = next((c for c in s.children if c.kind == "block"), None)
-            els = next((c for c in s.children if c.kind == "else"), None)
+            body = stmt_body(s)
+            els = stmt_else(s)
             a = self._alloc_stmts(body.children if body else [])
             b = self._alloc_stmt(els.children[0]) if (els is not None and els.children) else Cost.num(0)
             return Cost.max(a, b)
@@ -641,6 +687,12 @@ class CostInterp:
 
 
     def _k_stmt_const_decl(self, st, env):
+        # **记下声明类型**：`unordered_map`/`unordered_set` 的成本是 O(n)，
+        # `map`/`set` 是 O(log n)——同一个方法名，靠接收者的类型区分。
+        _tyn = st.children[0] if st.children else None
+        _head = getattr(_tyn, "name", None) if getattr(_tyn, "kind", "") == "type-name" else None
+        if _head and getattr(st, "name", None):
+            self.vty[st.name] = canon(_head)
         # **E22**：`const FixedVec<Token, MAX_TOKENS> tokens = ...;`
         # 这个局部的长度上界是 MAX_TOKENS（常数），不是新的尺寸变量。
         _tnode = st.children[0] if st.children else None
@@ -737,7 +789,7 @@ class CostInterp:
     def _k_stmt_parallel(self, st, env):
         # **B-24**：κ = Σ_i κ_i（每个任务是 `parallel { {…} {…} }` 里的一个块）。
         # 判阶时等价于 max（阶相加取 max），因此 target 判定仍成立。
-        body = next((c for c in st.children if c.kind == "block"), None)
+        body = stmt_body(st)
         if body is None:
             return Cost.num(0)
         total = Cost.num(0)
@@ -858,7 +910,7 @@ class CostInterp:
         return Cost.add(Cost.mul(n, per), per)
 
     def _for(self, st: Node, env: Dict[str, Cost]) -> Cost:
-        body = next((c for c in st.children if c.kind == "block"), None)
+        body = stmt_body(st)
         base = next((c for c in st.children if c.kind == "path"), None)
         name = base.name if base is not None else None
         if name is None:
@@ -878,12 +930,12 @@ class CostInterp:
         **以前只收集 `kind=="block"` 的臂**，于是 `0 => return 1,` 这种单语句臂
         只贡献 `OP_COST`；如果整条 match 还因为模式解析失败被丢掉，κ 直接变 0。
         """
-        # 被匹配的表达式（第一个非 arm 子节点）
-        scrut = next((c for c in st.children if c.kind != "arm"), None)
+        # 被匹配的表达式（第一个非 arm 子节点）——助手与 interp 共用，防两边漂移
+        scrut = match_scrutinee(st)
         base = Cost.num(OP_COST)
         if scrut is not None:
             base = Cost.add(base, self._expr(scrut, env))
-        arms = [c for c in st.children if c.kind == "arm"]
+        arms = arms_of(st)
         worst: Optional[Cost] = None
         for a in arms:
             c = Cost.num(OP_COST)
@@ -987,6 +1039,20 @@ class CostInterp:
             args_cost = Cost.add(args_cost, self._expr(a, env))
         total = Cost.max(Cost.num(OP_COST * 3),
                          Cost.add(Cost.num(OP_COST * 2), args_cost))
+        # **有序 map/set 的操作是 `O(log2 n)`，不是常数**（B2）。
+        # 以前按普通方法调用记常数 —— 那让 κ **偏小**：调用方会以为
+        # `m.get(k)` 是 O(1)，而承诺是 O(log n)。**偏小的上界比没有更糟。**
+        _mname = (n.name or "").split(".")[-1]
+        if _mname in ("get", "insert", "contains", "remove", "keys", "values"):
+            _recv = n.children[0] if n.children else None
+            if getattr(_recv, "kind", "") == "path" and getattr(_recv, "name", None):
+                _rt = canon(self.vty.get(_recv.name, ""))
+                # **unordered：承诺最坏 O(n)**（哈希）。map/set：O(log n)。
+                # 同一方法名靠接收者声明类型区分——不然就会给错的阶。
+                if _rt in ("unordered_map", "unordered_set"):
+                    total = Cost.add(total, Cost.size(_recv.name))
+                else:
+                    total = Cost.add(total, Cost.log2(Cost.size(_recv.name)))
         for c in n.children:
             if c.kind == "args":
                 continue        # 实参节点本身不计费（解释器也不求值它），逐个实参上面已计
@@ -1231,6 +1297,17 @@ class CostInterp:
         return total
 
     def _call_inner(self, name: Optional[str], node: Node, env: Dict[str, Cost]) -> Cost:
+        # **堆原语是 `O(log2 n)`，不是常数**（对齐 std::push_heap/pop_heap）。
+        _short_hp = (name or "").split(".")[-1]
+        if _short_hp in ("push_heap", "pop_heap"):
+            _an = next((c for c in node.children if c.kind == "args"), None)
+            _items = _an.children if _an is not None else []
+            _recv = _items[0] if _items and getattr(_items[0], "kind", "") == "path" else None
+            _base = Cost.add(Cost.num(OP_COST), self._args_cost(node, env))
+            if _recv is not None and getattr(_recv, "name", None):
+                return Cost.add(_base, Cost.log2(Cost.size(_recv.name)))
+            return _base
+
         # **FFI**：`extern` 声明的名字 —— 成本是 `ext(name)`（或 `external` 登记值）
         # **高阶内建**：成本 = n(容器) × κ(回调) + n(容器)
         _short_hof = (name or "").split(".")[-1]
@@ -1419,6 +1496,17 @@ class CostInterp:
 
         # ① 有 target → 用 target（用户的第 4 条）
         t = self.target_cost(short)
+        # **G1：承诺没建立就不能被信任。**
+        # 被调函数的 κ 里若还留着未解释的符号（`k(f)` 这种），它的 target
+        # 本身就是悬空的（实测 `apply` 的 target 是 O(n)，但传进 O(n²) 的函数就不成立）。
+        # 这时调用方**不能**拿它的 target 当上界——退回 ⊤，让别人看到"算不出"。
+        if t is not None:
+            try:
+                _ck = self.cost_of(short)
+            except Exception:
+                _ck = None
+            if _ck is not None and _has_unresolved_sym(_ck):
+                t = None
         if t is not None:
             # target 也是用**被调函数的形参名**写的，同样要按实参实例化。
             # 注意：此处 `fn` 还没赋值（内联分支才赋值），要自己取一次。
@@ -1651,7 +1739,10 @@ def _is_container_type(ty: Optional[Node]) -> bool:
         ty = ty.children[0]
     if ty.kind != "type-name":
         return False
-    return (ty.name or "") in ("Vec", "FixedVec")
+    # **过 canon**：改名期 `Vec` 与 `vector` 必须判成同一个东西。
+    # 写死旧名会让 `const vector<u64> r = ...` 不被当成容器，
+    # κ 少算 1 个操作——**改名静默改成本**，正是这条路线的最大风险。
+    return canon(ty.name) in ("vector", "array")
 
 
 def _substitute_size(b, row_of: Dict[str, str]):
@@ -1675,7 +1766,19 @@ def bound_of_condition_wrapper(st: Node, repeats_of, env, row_of=None,
       · 初值为 0 的变量（决定上界写成 `e` 还是 `e - i`）
       · 尺寸别名（`const n = scores.length();` → 上界里出现 n 时换成 scores.length()）
     """
-    from .bound import bound_of_condition, monotone_decreasing, substitute, progresses
+    from .bound import (bound_of_condition, monotone_decreasing, substitute,
+                        progresses, _log_loop)
+    # **L-01**：每轮 ×2 / ÷2 的循环要走对数界，不能走一般推导（那会给出 O(n)）。
+    _lg = _log_loop(st, cur_fn)
+    if _lg is not None:
+        return _lg
+    from .bound import _cyclic_loop, _gcd_loop
+    _cy = _cyclic_loop(st, cur_fn)
+    if _cy is not None:
+        return _cy
+    _gd = _gcd_loop(st, cur_fn)
+    if _gd is not None:
+        return _gd
     # **E21**：循环体不推进计数器 ⇒ 这是死循环，**不许给上界**。
     # 不给上界会变成 ⊤，而 ⊤ 会让"达成"判定变成"无法判定"——这正是我们要的诚实。
     ok, prog_why = progresses(st)
@@ -1754,7 +1857,9 @@ def bound_to_cost_inst(b, consts=None) -> Cost:
 def type_capacity_inst(tn, consts=None):
     """`_type_capacity` 的实例级版本（常量表由参数传入）。"""
     consts = consts or {}
-    if tn is None or (tn.name or "") != "FixedVec":
+    # **过 canon**：`FixedVec` 与 `array` 必须同判。写死旧名会让改名后的
+    # 定容局部丢掉容量（κ 从常数变回符号，`reduce` 实测 6717 → 一大串符号）。
+    if tn is None or canon(tn.name) != "array":
         return None
     for c in tn.children:
         if c.kind != "type-args":
@@ -1788,10 +1893,13 @@ def drop_cost_of(ty_node, name: str) -> Cost:
         return Cost.num(0)
     names = [getattr(d, "name", None) for d in _descendants(ty_node, "type-name")]
     names += [getattr(d, "name", None) for d in _descendants(ty_node, "type-ref")]
-    names = [n for n in names if n]
-    if names and names[0] == "FixedVec":
+    # **过 canon**（2026-11-05）：改名期 `Vec` 与 `vector` 必须同判。
+    # 写死旧名会让 `vector<u64>` 的析构成本变 0 —— 那是**改名静默改成本**，
+    # 也是此前翻数据时 κ 差 1 的真正来源（`Vec` 记 1、`vector` 记 0）。
+    names = [canon(n) for n in names if n]
+    if names and names[0] == "array":
         return Cost.num(0)
-    vecs = sum(1 for n in names if n == "Vec")
+    vecs = sum(1 for n in names if n == "vector")
     if vecs == 0:
         return Cost.num(0)
     if vecs >= 2:
@@ -1876,3 +1984,15 @@ def _collect_ext(c, acc) -> None:
             _collect_ext(sub, acc)
     for a in getattr(c, "args", ()):
         _collect_ext(a, acc)
+
+
+def _has_unresolved_sym(c) -> bool:
+    """成本式里有没有未解释的符号（`k(f)`）。"""
+    if c is None:
+        return False
+    if getattr(c, "kind", "") == "sym":
+        return True
+    for a in (getattr(c, "args", None) or []):
+        if _has_unresolved_sym(a):
+            return True
+    return False

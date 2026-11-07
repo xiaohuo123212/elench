@@ -36,7 +36,6 @@
 | `random_u64s(n)` | 伪随机的 n 个 u64（由 n 定种子，可复现） |
 | `make_u8s(n)` | n 个 0..255 |
 | `make_texts(n)` | n 个数字字符的字节数组 |
-| `any_u64()` | 单个 u64 |
 
 **确定性**：同一个 n 永远生成同一份数据（MO-3 / MB-3 的要求）。
 """
@@ -82,24 +81,11 @@ def make_texts(seed: int, n: int) -> List[int]:
 
 #: 内置生成器：名字 → (seed, n) -> 值。
 #: **MB-7 下每个都必须在 `.tu` 里有对应 `spec`**（见 checker 的 E-Bench-BadGenerator）。
-def any_u64(seed: int, n: int) -> list:
-    """`any_u64()` —— **单个** u64（不是序列）。
-
-    为什么需要它：`benchmodel.data` 里**标量形参**（`k`、`dim`、`width`）
-    没有生成器可写——四个内置生成器都产出序列。
-    没有它，"有标量形参的函数"就无法写合法的 `data`，也就无法测量。
-    """
-    import random as _r
-    g = _r.Random((seed << 8) ^ n ^ 0x9E37)
-    return [g.getrandbits(32)]
-
-
 BUILTIN = {
     "sorted_u64s": sorted_u64s,
     "random_u64s": random_u64s,
     "make_u8s": make_u8s,
     "make_texts": make_texts,
-    "any_u64": any_u64,
 }
 
 
@@ -132,6 +118,24 @@ def read_benchmodel(decl_mod: Node):
                 continue
             gen = bind.children[0] if bind.children else None
             name = None
+            if gen is not None and gen.kind == "call" and (gen.name or "") == "structs":
+                # **E14**：`pts = structs(Point);` —— 造 `Vec<Point>`。
+                # 字段表在这里一次解析完并编码进名字里，`make_args` 就不用再拿 decl_mod。
+                _sn = None
+                _args = next((c for c in gen.children if c.kind == "args"), None)
+                if _args is not None and _args.children:
+                    _sn = _args.children[0].name
+                _fields = []
+                for _st in _desc(decl_mod, "struct"):
+                    if _st.name != _sn:
+                        continue
+                    for _f in _st.children:
+                        if _f.kind != "field":
+                            continue
+                        _ty = _f.children[0].name if _f.children else "?"
+                        _fields.append("%s=%s" % (_f.name, _ty))
+                data[bind.name] = "structs:%s:%s" % (_sn or "?", ",".join(_fields))
+                continue
             if gen is not None and gen.kind == "call":
                 name = gen.name
             elif gen is not None and gen.kind == "path":
@@ -168,20 +172,54 @@ def make_args(data: Dict[str, str], sized: Dict[str, int], size: int,
     out = []
     bound: Dict[str, Any] = {}
     for pname, gen in data.items():
-        n = size if pname in sized else 1
+        # **逐参数尺寸**：`sized[pname]` 给了正数就用它，否则跟随 size。
+        # 为什么需要：`lcs(a, b)` 的上界是 `a.len × b.len`，而原来只有**第一个**
+        # 规模参数跟着 n 变，`b` 永远是 1 —— 于是 O(n²) 的样例被当成 O(n) 测，
+        # 实测只有 23 次操作，比值 11614× 毫无意义。
+        _explicit = sized.get(pname) if hasattr(sized, "get") else None
+        n = _explicit if _explicit else (size if pname in sized else 1)
         if gen and gen.startswith("#"):
             # 字面量标量：原样给（`k = 32;` → 32），不随规模变——这是作者的选择
             try:
                 lit = int(gen[1:])
             except ValueError:
                 raise RuntimeError(f"benchmodel.data 里的字面量 {gen!r} 不是整数") from None
-            out.append(lit)
-            bound[pname] = lit
+            # **标量形参也能被 `scale` 驱动**（2026-11-07 修）。
+            # `data` 里的字面量是"默认值"；一旦这个参数也在 `scale` 里出现
+            # （`k in range(1, 64, *2)`），就按当前规模取值。
+            # 以前字面量永远赢，于是"参数是数字"的函数**规模列在变、参数不变**，
+            # 表是假的（`blur` 实测 7 行 κ/实测 全相同）。
+            val = size if pname in sized else lit
+            out.append(val)
+            bound[pname] = val
             continue
         if gen == "any_of":
             # 从前面已造好的容器里取一个元素；空容器 → T 的类型上界
             src = next(iter(bound.values()), None)
             out.append(any_of(src, seed))
+            bound[pname] = out[-1]
+            continue
+        if gen.startswith("structs:"):
+            # **E14**：造 `Vec<T>`，T 是 .tu 里声明的结构体。
+            # **只填整数字段**：别的类型（Vec/字符串/结构体）不猜，直接报错。
+            from interp import StructVal
+            _parts = gen.split(":", 2)
+            _sn = _parts[1]
+            _fs = [x for x in (_parts[2] if len(_parts) > 2 else "").split(",") if x]
+            if not _fs:
+                raise RuntimeError(
+                    "benchmodel.data 里的 structs(%s)：找不到这个结构体或它没有字段" % _sn)
+            _rnd = random.Random((seed & 0xFFFFFFFF) ^ 0x71F3A0D1)
+            _vals = []
+            for _f in _fs:
+                _fname, _, _fty = _f.partition("=")
+                if _fty not in ("u64", "u32", "i64", "i32", "u8", "i8"):
+                    raise RuntimeError(
+                        "benchmodel.data 里的 structs(%s)：字段 %s 的类型 %r 不是整数，"
+                        "生成器不会替你猜（E14）" % (_sn, _fname, _fty))
+                _cap = 1000 if _fty in ("u64", "i64", "u32", "i32") else 200
+                _vals.append((_fname, _rnd.randrange(0, _cap)))
+            out.append([StructVal(_sn, dict(_vals)) for _ in range(max(1, n))])
             bound[pname] = out[-1]
             continue
         f = BUILTIN.get(gen)
@@ -321,7 +359,7 @@ if __name__ == "__main__":
 
     sys.stdout.reconfigure(encoding="utf-8")
     HERE = os.path.dirname(os.path.abspath(__file__))
-    S = os.path.join(HERE, "..", "文档", "设计", "目前设计", "样例")
+    S = os.path.join(HERE, "..", "文档", "样例")
 
     for base, fn, label, cands in (
         ("sum", "average", "sum_kernel", ["sum_by_index", "sum_by_iter"]),

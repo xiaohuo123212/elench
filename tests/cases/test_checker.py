@@ -35,7 +35,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 from checker import check_files, check_module
 from parser import parse_source
 
-SAMPLE = os.path.join(HERE, "..", "文档", "设计", "目前设计", "样例")
+SAMPLE = os.path.join(HERE, "..", "文档", "样例")
 
 _passed = 0
 _failed = []
@@ -103,8 +103,8 @@ def test_signatures():
     check(has(r, "E-Spec-SigMismatch"), "返回类型不同 → 报错")
 
     # 复杂类型也要比对
-    tu2 = "spec f(v: Vec<u8>) -> (i64! { effects {}; }"
-    ai6 = "func f(v: Vec<u8>) -> (i64! { return ??? ; }"
+    tu2 = "spec f(v: vector<u8>) -> (i64! { effects {}; }"
+    ai6 = "func f(v: vector<u8>) -> (i64! { return ??? ; }"
     # 上面故意用了不存在的记号，只为确认签名一致时不会误报签名错误
     r = check_module(tu2, ai6)
     check(not has(r, "E-Spec-SigMismatch"), "复杂类型一致时无签名错误", str(codes(r)))
@@ -132,14 +132,14 @@ def test_ai_no_decl():
 # ---------------------------------------------------------------- choose
 
 BASE_TU = """
-spec host(const Vec<u64>& xs) -> u64 {
+spec host(const vector<u64>& xs) -> u64 {
     effects   {};
     target { time: { max: O(xs.length()) }, };
     benchmodel {
         data  { xs = random_u64s(); }
         scale { xs in range(1, 1024, *2); }
     };
-    choose L(const Vec<u64>& xs) -> u64 {
+    choose L(const vector<u64>& xs) -> u64 {
         over     {f};
         objective  time;
     };
@@ -147,11 +147,11 @@ spec host(const Vec<u64>& xs) -> u64 {
 """
 
 BASE_AI = """
-func host(const Vec<u64>& xs) -> u64 {
+func host(const vector<u64>& xs) -> u64 {
     const u64 n = xs.length();
     if (n == 0) { return 0; }
     return ?!L(xs);
-} kernels L(const Vec<u64>& xs) -> u64 {
+} kernels L(const vector<u64>& xs) -> u64 {
     f { return 1; }
 }
 """
@@ -187,10 +187,10 @@ def test_choose():
 
     # 宿主：?! 写到别的函数里
     tu2 = BASE_TU + """
-spec other(const Vec<u64>& xs) -> u64 { effects {}; }
+spec other(const vector<u64>& xs) -> u64 { effects {}; }
 """
     ai2 = BASE_AI + """
-func other(const Vec<u64>& xs) -> u64 {
+func other(const vector<u64>& xs) -> u64 {
     const u64 n = xs.length();
     return ?!L(n);
 }
@@ -206,8 +206,8 @@ func other(const Vec<u64>& xs) -> u64 {
           str(codes(r)))
 
     # 签名不一致
-    ai4 = BASE_AI.replace("kernels L(const Vec<u64>& xs) -> u64",
-                          "kernels L(const Vec<u8>& xs) -> u64")
+    ai4 = BASE_AI.replace("kernels L(const vector<u64>& xs) -> u64",
+                          "kernels L(const vector<u8>& xs) -> u64")
     r = check_module(BASE_TU, ai4)
     check(has(r, "E-Spec-SigMismatch"), "kernels 签名与 choose 不一致 → E-Spec-SigMismatch",
           str(codes(r)))
@@ -408,10 +408,10 @@ def test_strict():
 
 def test_no_ai_file():
     print("[12] 没有 .ai 文件（纯计划态模块）")
-    tu = ("spec a(const Vec<u64>& xs) -> u64 { effects {}; target { time: { max: O(1) }, };\n"
+    tu = ("spec a(const vector<u64>& xs) -> u64 { effects {}; target { time: { max: O(1) }, };\n"
           "    benchmodel { data { xs = random_u64s(); } "
           "scale { xs in range(1, 64, *2); } }\n"
-          "    choose L(const Vec<u64>& xs) -> u64 { over {k pending}; objective time; }\n"
+          "    choose L(const vector<u64>& xs) -> u64 { over {k pending}; objective time; }\n"
           "}\n")
     r = check_module(tu, None)
     check(r.ok, "无 .ai 时通过", str(codes(r)))
@@ -447,28 +447,28 @@ def test_while_bounds():
     effects {};
     repeats log(hi - lo);
 }
-spec a(const Vec<u64>& xs) -> u64 { effects {}; }"""
+spec a(const vector<u64>& xs) -> u64 { effects {}; }"""
 
     # ① 条件含尺寸比较 → 无诊断
-    ok = ("func a(const Vec<u64>& xs) -> u64 { u64 i = 0; "
+    ok = ("func a(const vector<u64>& xs) -> u64 { u64 i = 0; "
           "while (i < xs.length()) { i = i + 1; } return i; }")
     r = check_module(tu, ok)
     check(not has(r, "E-While-NoBound"), "T13-① 尺寸比较：无诊断", str(codes(r)))
 
     # ① const 绑定的尺寸变量
-    ok2 = ("func a(const Vec<u64>& xs) -> u64 { const u64 n = xs.length(); u64 i = 0; "
+    ok2 = ("func a(const vector<u64>& xs) -> u64 { const u64 n = xs.length(); u64 i = 0; "
            "while (i < n) { i = i + 1; } return i; }")
     r = check_module(tu, ok2)
     check(not has(r, "E-While-NoBound"), "T13-① const 尺寸变量：无诊断", str(codes(r)))
 
     # ② 谓词 + repeats
-    ok3 = ("func a(const Vec<u64>& xs) -> u64 { u64 i = 0; "
+    ok3 = ("func a(const vector<u64>& xs) -> u64 { u64 i = 0; "
            "while (pred(i, xs.length())) { i = i + 1; } return i; }")
     r = check_module(tu, ok3)
     check(not has(r, "E-While-NoBound"), "T13-② 谓词 repeats：无诊断", str(codes(r)))
 
     # ③ 推不出：宽松是 warning，严格是 error
-    bad = ("func a(const Vec<u64>& xs) -> u64 { u64 i = 0; "
+    bad = ("func a(const vector<u64>& xs) -> u64 { u64 i = 0; "
            "while (i < bound_of(xs.length())) { i = i + 1; } return i; }")
     r_lax = check_module(tu, bad)
     w = [d for d in r_lax.diagnostics if d.code == "E-While-NoBound"]
@@ -476,7 +476,7 @@ spec a(const Vec<u64>& xs) -> u64 { effects {}; }"""
           "T13-③ 宽松模式：warning", str([(d.code, d.severity) for d in r_lax.diagnostics]))
 
     # ④ 常量上界：`while (i < 10)` 可推，不该报警
-    ok4 = ("func a(const Vec<u64>& xs) -> u64 { u64 i = 0; "
+    ok4 = ("func a(const vector<u64>& xs) -> u64 { u64 i = 0; "
            "while (i < 10) { i = i + 1; } return i; }")
     r = check_module(tu, ok4)
     check(not has(r, "E-While-NoBound"), "T13-④ 常量上界：无诊断", str(codes(r)))
@@ -508,8 +508,8 @@ spec f(u64 x) -> i64 { effects {}; }"""
 
     # 值上的方法调用不受影响
     tu2 = """enum Token { Plus }
-spec g(const Vec<u64>& xs) -> u64 { effects {}; }"""
-    ok2 = ("func g(const Vec<u64>& xs) -> u64 {\n"
+spec g(const vector<u64>& xs) -> u64 { effects {}; }"""
+    ok2 = ("func g(const vector<u64>& xs) -> u64 {\n"
            "    return xs.length();\n}")
     r3 = check_module(tu2, ok2, "m")
     check(not has(r3, "E-Member-WrongSep"), "`xs.length()` 不报", str(codes(r3)))

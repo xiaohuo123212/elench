@@ -49,7 +49,7 @@ import urllib.request
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
 DSH = os.path.join(ROOT, "src", "dsh.py")
-OUT_DIR = os.path.join(ROOT, "文档", "实验", "raw")
+OUT_DIR = os.path.join(ROOT, "文档", "设计", "归档", "实验-2026-11", "raw")
 
 sys.path.insert(0, os.path.join(ROOT, "src"))
 

@@ -14,8 +14,8 @@
 
 // #region fn
 pub func matmul(
-                const Vec<u64>& a,
-                    const Vec<u64>& b, u64 dim) -> Vec<u64>! {
+                const vector<u64>& a,
+                    const vector<u64>& b, u64 dim) -> vector<u64>! {
     const u64 need = dim * dim;
     if (a.length() != need) {
         return Err(MatError::DimensionMismatch);
@@ -24,7 +24,7 @@ pub func matmul(
         return Err(MatError::DimensionMismatch);
     }
 
-    Vec<u64> out = Vec<u64>::make();
+    vector<u64> out = vector<u64>::make();
     u64 i = 0;
     while (i < dim) {
         u64 j = 0;

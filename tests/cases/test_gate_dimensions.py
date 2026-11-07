@@ -66,16 +66,16 @@ def test_h3_alloc():
 
 
 # ---------------------------------------------------------------- CLI 判 H1/H2
-ALLOC_TU = """spec f(const Vec<u8>& xs) -> u64 {
+ALLOC_TU = """spec f(const vector<u8>& xs) -> u64 {
     effects {};
     target { time: { max: O(xs.length() * xs.length()) }, allocation: { max: 0 }, };
 }
 """
-ALLOC_ELN = """func f(const Vec<u8>& xs) -> u64 {
+ALLOC_ELN = """func f(const vector<u8>& xs) -> u64 {
     u64 i = 0;
     u64 s = 0;
     while (i < xs.length()) {
-        Vec<u8> parts = text_join(xs, 44);
+        vector<u8> parts = text_join(xs, 44);
         s = s + parts.length();
         i = i + 1;
     }
@@ -83,12 +83,12 @@ ALLOC_ELN = """func f(const Vec<u8>& xs) -> u64 {
 }
 """
 
-CONST_TU = """spec f(const Vec<u64>& xs) -> u64 {
+CONST_TU = """spec f(const vector<u64>& xs) -> u64 {
     effects {};
     target { time: { max: O(1) }, };
 }
 """
-CONST_ELN = """func f(const Vec<u64>& xs) -> u64 {
+CONST_ELN = """func f(const vector<u64>& xs) -> u64 {
     u64 i = 0;
     u64 s = 0;
     while (i < xs.length()) {
@@ -99,12 +99,12 @@ CONST_ELN = """func f(const Vec<u64>& xs) -> u64 {
 }
 """
 
-UNKNOWN_TU = """spec f(const Vec<u64>& xs) -> u64 {
+UNKNOWN_TU = """spec f(const vector<u64>& xs) -> u64 {
     effects {};
     target { time: { max: O(xs.length()) }, };
 }
 """
-UNKNOWN_ELN = """func f(const Vec<u64>& xs) -> u64 {
+UNKNOWN_ELN = """func f(const vector<u64>& xs) -> u64 {
     u64 s = 0;
     bool go = true;
     while (go) {
@@ -161,10 +161,10 @@ def test_g25_concurrency():
     from parser import parse_source
 
     tu = parse_source(
-        "spec f(const Vec<u64>& xs) -> u64 { effects {}; "
+        "spec f(const vector<u64>& xs) -> u64 { effects {}; "
         "target { time: { max: O(xs.length()) } }; }", "g25.tu").module
     ch = parse_source(
-        "func f(const Vec<u64>& xs) -> u64 {\n"
+        "func f(const vector<u64>& xs) -> u64 {\n"
         "    u64 s = 0;\n"
         "    parallel {\n"
         "        { s = s + 1; }\n"
@@ -175,7 +175,7 @@ def test_g25_concurrency():
     check("报 W-Concurrency-Time", "W-Concurrency-Time" in codes, str(codes))
 
     # 没有并发就不该报
-    ch2 = parse_source("func f(const Vec<u64>& xs) -> u64 {\n"
+    ch2 = parse_source("func f(const vector<u64>& xs) -> u64 {\n"
                        "    return xs.length();\n}\n", "g25b.eln").module
     check("无并发不报", not _check_concurrency_cost(tu, ch2), "")
 

@@ -58,29 +58,29 @@ def codes(tu, ch):
 
 
 def spec(effects="{}", extra=""):
-    return f"spec f(const Vec<u64>& xs) -> u64 {{ effects {effects}; {extra}{T}}}\n"
+    return f"spec f(const vector<u64>& xs) -> u64 {{ effects {effects}; {extra}{T}}}\n"
 
 
 def main() -> int:
     print("=== 效果检查 ===")
     check("纯函数 → 无诊断",
-          codes(spec(), "func f(const Vec<u64>& xs) -> u64 { return 1; }\n") == [])
+          codes(spec(), "func f(const vector<u64>& xs) -> u64 { return 1; }\n") == [])
     check("用了 print 却没声明 io → E-Effect-Missing",
-          "E-Effect-Missing" in codes(spec(), "func f(const Vec<u64>& xs) -> u64 { print(1); return 1; }\n"))
+          "E-Effect-Missing" in codes(spec(), "func f(const vector<u64>& xs) -> u64 { print(1); return 1; }\n"))
     check("声明了 io → 通过",
-          codes(spec("{ io }"), "func f(const Vec<u64>& xs) -> u64 { print(1); return 1; }\n") == [])
+          codes(spec("{ io }"), "func f(const vector<u64>& xs) -> u64 { print(1); return 1; }\n") == [])
     check("未知效果名 → E-Effect-Unknown",
           "E-Effect-Unknown" in codes(spec("{ telepathy }"),
-                                      "func f(const Vec<u64>& xs) -> u64 { return 1; }\n"))
+                                      "func f(const vector<u64>& xs) -> u64 { return 1; }\n"))
     check("经调用传递也要报 → E-Effect-Missing",
           "E-Effect-Missing" in codes(
               spec() + spec(),
-              "func f(const Vec<u64>& xs) -> u64 { return g(xs); }\n"
-              "func g(const Vec<u64>& xs) -> u64 { print(1); return 1; }\n"))
+              "func f(const vector<u64>& xs) -> u64 { return g(xs); }\n"
+              "func g(const vector<u64>& xs) -> u64 { print(1); return 1; }\n"))
 
     print("=== requires 断言 ===")
     tu = parse_source(spec(extra="requires xs.length() > 0; "), "m.tu").module
-    ch = parse_source("func f(const Vec<u64>& xs) -> u64 { return xs.at(0); }\n", "m.eln").module
+    ch = parse_source("func f(const vector<u64>& xs) -> u64 { return xs.at(0); }\n", "m.eln").module
     check("满足前提 → 正常返回", Interp(ch, tu).call("f", [[7, 8]]) == 7)
     raised = False
     try:

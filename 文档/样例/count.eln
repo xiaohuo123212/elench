@@ -16,18 +16,18 @@
 
 // #region fn
 pub func count(
-               const Vec<u8>& text) -> u64! {
+               const vector<u8>& text) -> u64! {
     const u64 len = text.length();
     if (len == 0) {
         return Err(CountError::Empty);
     }
     return ?!freq_kernel(text);
 } kernels freq_kernel(
-                      const Vec<u8>& text) -> u64! {
+                      const vector<u8>& text) -> u64! {
     freq_bucket {
         // 定长桶数组：`filled(0)` 一次给足 BUCKET_COUNT 个零，直接可写
-        FixedVec<u64,
-        BUCKET_COUNT> buckets = FixedVec<u64,
+        array<u64,
+        BUCKET_COUNT> buckets = array<u64,
         BUCKET_COUNT>::filled(0);
 
         const u64 n = text.length();

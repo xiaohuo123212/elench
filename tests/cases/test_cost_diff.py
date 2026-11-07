@@ -32,12 +32,12 @@ def check(name, cond, detail=""):
         print(f"  FAIL {name}   {detail}")
 
 
-V1_TU = """spec f(const Vec<u64>& xs) -> u64 {
+V1_TU = """spec f(const vector<u64>& xs) -> u64 {
     effects {};
     target { time: { max: O(n * n) } };
 }
 """
-V1_ELN = """func f(const Vec<u64>& xs) -> u64 {
+V1_ELN = """func f(const vector<u64>& xs) -> u64 {
     u64 i = 0;
     u64 s = 0;
     while (i < xs.length()) {
@@ -48,7 +48,7 @@ V1_ELN = """func f(const Vec<u64>& xs) -> u64 {
 }
 """
 # 加一层循环：O(n) → O(n²)
-V2_ELN = """func f(const Vec<u64>& xs) -> u64 {
+V2_ELN = """func f(const vector<u64>& xs) -> u64 {
     u64 i = 0;
     u64 s = 0;
     while (i < xs.length()) {
@@ -63,7 +63,7 @@ V2_ELN = """func f(const Vec<u64>& xs) -> u64 {
 }
 """
 # 只改常数：多一条加法
-V3_ELN = """func f(const Vec<u64>& xs) -> u64 {
+V3_ELN = """func f(const vector<u64>& xs) -> u64 {
     u64 i = 0;
     u64 s = 0;
     while (i < xs.length()) {
@@ -89,6 +89,10 @@ def test_classify():
           classify([100.0, 400.0, 1600.0], [100.0, 1600.0, 25600.0]) == "L1")
     check("完全一样 → 不变",
           classify([1.0, 2.0], [1.0, 2.0]) == "不变")
+    _a = [100.0, 400.0, 1600.0]
+    check("非均匀微漂移 → L2（以前误报成 L1）",
+          classify(_a, [102.0, 410.0, 1650.0]) == "L2",
+          classify(_a, [102.0, 410.0, 1650.0]))
 
 
 def test_cli():

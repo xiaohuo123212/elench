@@ -42,14 +42,14 @@ def names(tu_src, ch_src):
     return [n for n, _ in _unknown_calls(tu, ch)]
 
 
-TU = """spec f(const Vec<u64>& xs) -> u64 {
+TU = """spec f(const vector<u64>& xs) -> u64 {
     effects {};
     target { time: { max: O(xs.length()) }, allocation: { max: 0 }, };
 }
 """
 
 print("[1] 真的未知调用 → 报出来")
-got = names(TU, """func f(const Vec<u64>& xs) -> u64 {
+got = names(TU, """func f(const vector<u64>& xs) -> u64 {
     u64 y = mystery_fn(xs);
     return y;
 }
@@ -58,21 +58,21 @@ check("抓到 mystery_fn", got == ["mystery_fn"], got)
 
 print("[2] 不该报的四类")
 cases = [
-    ("方法调用", """func f(const Vec<u64>& xs) -> u64 {
+    ("方法调用", """func f(const vector<u64>& xs) -> u64 {
     return xs.length();
 }
 """),
-    ("语言内建 max", """func f(const Vec<u64>& xs) -> u64 {
+    ("语言内建 max", """func f(const vector<u64>& xs) -> u64 {
     return max(xs.length(), 1);
 }
 """),
-    ("高阶内建 sort_by", """func f(Vec<u64>& xs) -> u64 {
+    ("高阶内建 sort_by", """func f(vector<u64>& xs) -> u64 {
     sort_by(xs, cmp);
     return xs.length();
 }
 """),
-    ("用户函数", """func helper(const Vec<u64>& xs) -> u64 { return xs.length(); }
-func f(const Vec<u64>& xs) -> u64 { return helper(xs); }
+    ("用户函数", """func helper(const vector<u64>& xs) -> u64 { return xs.length(); }
+func f(const vector<u64>& xs) -> u64 { return helper(xs); }
 """),
 ]
 for label, src in cases:
@@ -80,8 +80,8 @@ for label, src in cases:
     check(f"{label} 不报", got == [], got)
 
 print("[3] 已声明的 extern 不报")
-got = names("extern read_file(const Vec<u8>& p) -> u64;\n" + TU,
-            """func f(const Vec<u64>& xs) -> u64 {
+got = names("extern read_file(const vector<u8>& p) -> u64;\n" + TU,
+            """func f(const vector<u64>& xs) -> u64 {
     return read_file(xs);
 }
 """)
@@ -91,7 +91,7 @@ check("extern 不报", got == [], got)
 print("[4] 方案 B：`check` 报 E-Call-Undeclared，声明后不再报")
 from checker import check_module                    # noqa: E402
 
-_bad = check_module(TU, """func f(const Vec<u64>& xs) -> u64 {
+_bad = check_module(TU, """func f(const vector<u64>& xs) -> u64 {
     return mystery_fn(xs);
 }
 """)
@@ -101,8 +101,8 @@ _msg = next((d.message for d in _bad.diagnostics if d.code == "E-Call-Undeclared
 check("报错里给出要补的那一行", "external {" in _msg and "mystery_fn" in _msg, _msg[:70])
 
 _good = check_module(
-    """extern strlen(const Vec<u8>& s) -> u64 from "ucrtbase" effects { io };
-""" + TU, """func f(const Vec<u8>& s) -> u64 {
+    """extern strlen(const vector<u8>& s) -> u64 from "ucrtbase" effects { io };
+""" + TU, """func f(const vector<u8>& s) -> u64 {
     return strlen(s);
 }
 """)

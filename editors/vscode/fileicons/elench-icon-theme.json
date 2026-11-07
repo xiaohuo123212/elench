@@ -1,0 +1,11 @@
+{
+  "iconDefinitions": {
+    "_elench": {
+      "iconPath": "../file-icon-tu.png"
+    }
+  },
+  "fileExtensions": {
+    "eln": "_elench",
+    "tu": "_elench"
+  }
+}

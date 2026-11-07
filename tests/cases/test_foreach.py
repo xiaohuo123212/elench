@@ -33,9 +33,9 @@ from interp import Interp              # noqa: E402
 from parser import parse_source        # noqa: E402
 
 FAILED = []
-TU = ("spec f(const Vec<u64>& xs) -> u64 { effects {}; }\n"
-      "spec visit(const Vec<u8>& k, u64 v) -> u64 { effects {}; }\n"
-      "spec touch_all(const Vec<u64>& xs) -> u64 { effects {}; }\n")
+TU = ("spec f(const vector<u64>& xs) -> u64 { effects {}; }\n"
+      "spec visit(const vector<u8>& k, u64 v) -> u64 { effects {}; }\n"
+      "spec touch_all(const vector<u64>& xs) -> u64 { effects {}; }\n")
 
 
 def check(name, cond, detail=""):
@@ -47,9 +47,9 @@ def check(name, cond, detail=""):
 
 
 def run(body: str, xs=(1,)):
-    ch = """func visit(const Vec<u8>& k, u64 v) -> u64 { return v; }
-func touch_all(const Vec<u64>& xs) -> u64 { return 0; }
-func f(const Vec<u64>& xs) -> u64 {
+    ch = """func visit(const vector<u8>& k, u64 v) -> u64 { return v; }
+func touch_all(const vector<u64>& xs) -> u64 { return 0; }
+func f(const vector<u64>& xs) -> u64 {
 """ + body + """
 }
 """
@@ -59,19 +59,19 @@ func f(const Vec<u64>& xs) -> u64 {
 
 def main() -> int:
     print("=== 遍历 ===")
-    n = run("""    HashMap<Vec<u8>, u64> m = map_new();
+    n = run("""    HashMap<vector<u8>, u64> m = map_new();
     map_put(m, "a", 1);
     map_put(m, "b", 2);
     map_put(m, "c", 3);
     return for_each(m, visit);""")
     check("3 个键 → 返回 3", n == 3, str(n))
 
-    n0 = run("""    HashMap<Vec<u8>, u64> m = map_new();
+    n0 = run("""    HashMap<vector<u8>, u64> m = map_new();
     return for_each(m, visit);""")
     check("空 map → 返回 0", n0 == 0, str(n0))
 
     print("=== 快照语义：回调里改容器 ===")
-    n = run("""    HashMap<Vec<u8>, u64> m = map_new();
+    n = run("""    HashMap<vector<u8>, u64> m = map_new();
     map_put(m, "a", 1);
     map_put(m, "b", 2);
     // 回调里再塞一个键：本次遍历不受影响
@@ -80,21 +80,21 @@ def main() -> int:
     return map_len(m);""")
     check("遍历后新增的键计数正常（3）", n == 3, str(n))
 
-    print("=== Vec 也支持（v0.73：一元回调） ===")
-    nv = run("""    Vec<u64> v = copy(xs);
+    print("=== vector 也支持（v0.73：一元回调） ===")
+    nv = run("""    vector<u64> v = copy(xs);
     return for_each(v, touch_all);""", xs=(1, 2, 3))
-    check("Vec 遍历 → 返回元素个数", nv == len([1, 2, 3]), str(nv))
+    check("vector 遍历 → 返回元素个数", nv == len([1, 2, 3]), str(nv))
 
     print("=== 错误路径 ===")
     try:
         run("""    return for_each(42, visit);""")
-        check("实参既不是 Vec 也不是 Map → 报错", False, "没有报错")
+        check("实参既不是 vector 也不是 map → 报错", False, "没有报错")
     except Exception as exc:                        # noqa: BLE001
-        check("实参既不是 Vec 也不是 Map → 报错",
-              "Vec" in str(exc) or "HashMap" in str(exc), str(exc)[:60])
+        check("实参既不是 vector 也不是 map → 报错",
+              "vector" in str(exc) or "HashMap" in str(exc), str(exc)[:60])
 
     try:
-        run("""    HashMap<Vec<u8>, u64> m = map_new();
+        run("""    HashMap<vector<u8>, u64> m = map_new();
     return for_each(m, 42);""")
         check("第二个实参不是函数 → 报错", False, "没有报错")
     except Exception as exc:                        # noqa: BLE001

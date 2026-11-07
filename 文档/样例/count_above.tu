@@ -1,7 +1,7 @@
 // count_above.tu —— 算法样例（κ vs ops 对拍用，2026-11-04 增）
 error CountError;
 
-spec count_above(const Vec<u64>& xs) -> u64 {
+spec count_above(const vector<u64>& xs) -> u64 {
     effects {};
 
     benchmodel {

@@ -1,0 +1,12 @@
+# highlight-only extension: no bundled runtime, no commands, no old vsix
+**/*.vsix
+runtime/**
+bin/**
+test/**
+lib/**
+extension.js
+build-vsix.py
+node_modules/**
+**/__pycache__/**
+python/**
+README-运行时.md

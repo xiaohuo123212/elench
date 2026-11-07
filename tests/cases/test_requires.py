@@ -42,17 +42,17 @@ from checker import check_module          # noqa: E402
 FAILED = []
 T = "target { time: { max: O(1) }, allocation: { max: 0 }, };\n"
 
-HEAD_TU = (f"spec head(const Vec<u64>& xs) -> u64 {{ effects {{}}; "
+HEAD_TU = (f"spec head(const vector<u64>& xs) -> u64 {{ effects {{}}; "
            f"requires xs.length() > 0; {T}}}\n")
-HEAD_CH = "func head(const Vec<u64>& xs) -> u64 { return xs[0]; }\n"
+HEAD_CH = "func head(const vector<u64>& xs) -> u64 { return xs[0]; }\n"
 
-SORTED_TU = (f"spec find(const Vec<u64>& xs, u64 key) -> u64 {{ effects {{}}; "
+SORTED_TU = (f"spec find(const vector<u64>& xs, u64 key) -> u64 {{ effects {{}}; "
              f"requires is_sorted(xs); {T}}}\n")
-SORTED_CH = "func find(const Vec<u64>& xs, u64 key) -> u64 { return xs[0]; }\n"
+SORTED_CH = "func find(const vector<u64>& xs, u64 key) -> u64 { return xs[0]; }\n"
 
-SCALAR_TU = (f"spec ith(const Vec<u64>& xs, u64 k) -> u64 {{ effects {{}}; "
+SCALAR_TU = (f"spec ith(const vector<u64>& xs, u64 k) -> u64 {{ effects {{}}; "
              f"requires k > 0; {T}}}\n")
-SCALAR_CH = "func ith(const Vec<u64>& xs, u64 k) -> u64 { return xs[0]; }\n"
+SCALAR_CH = "func ith(const vector<u64>& xs, u64 k) -> u64 { return xs[0]; }\n"
 
 
 def codes(tu, ch):
@@ -60,8 +60,8 @@ def codes(tu, ch):
 
 
 def with_g(tu, ch, callee):
-    g = (f"spec g(const Vec<u64>& xs) -> u64 {{ effects {{}}; {T}}}\n")
-    return codes(tu + g, "func g(const Vec<u64>& xs) -> u64 {\n" + ch + "\n}\n" + callee)
+    g = (f"spec g(const vector<u64>& xs) -> u64 {{ effects {{}}; {T}}}\n")
+    return codes(tu + g, "func g(const vector<u64>& xs) -> u64 {\n" + ch + "\n}\n" + callee)
 
 
 def check(name, cond, detail=""):

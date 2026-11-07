@@ -43,7 +43,7 @@ from parser import parse_source
 _passed = 0
 _failed = []
 
-TU = "spec f(const Vec<u64>& xs) -> u64 { effects {}; }"
+TU = "spec f(const vector<u64>& xs) -> u64 { effects {}; }"
 
 
 def check(ok, label, detail=""):
@@ -70,7 +70,7 @@ def codes(ds):
 
 def main() -> int:
     print("[1] 回边漏报：循环里每轮先读后改——旧版看不见，新版必须看见")
-    src = """func f(Vec<u64>& xs) -> u64! {
+    src = """func f(vector<u64>& xs) -> u64! {
     const u64& r = xs.at(0);
     u64 s = 0;
     u64 i = 0;
@@ -89,7 +89,7 @@ def main() -> int:
 
     print("[2] 十个样例：两版都必须是 0 条（谁多报谁有 bug）")
     root = ROOT
-    S = os.path.join(root, "文档", "设计", "目前设计", "样例")
+    S = os.path.join(root, "文档", "样例")
     bad = []
     for b in ["calculator", "search", "sum", "stats", "merge",
               "paren", "count", "matmul", "lcs", "topk"]:
@@ -101,7 +101,7 @@ def main() -> int:
     check(not bad, "十个样例两版都零诊断", str(bad))
 
     print("[3] 互斥分支：then 里改、else 里用——**不该报**（分支敏感的正确性）")
-    src = """func f(Vec<u64>& xs) -> u64! {
+    src = """func f(vector<u64>& xs) -> u64! {
     const u64& r = xs.at(0);
     u64 s = 0;
     if (n > 0) {
@@ -118,7 +118,7 @@ def main() -> int:
           "旧版会误报（按时间线把 else 的读排在 then 的改之后）", str(codes(old)))
 
     print("[4] 放行即可跑：新分析不报的程序，解释器必须能跑通")
-    src = """func f(const Vec<u64>& xs) -> u64! {
+    src = """func f(const vector<u64>& xs) -> u64! {
     const u64& r = xs.at(0);
     const u64 a = r;
     return a + 1;

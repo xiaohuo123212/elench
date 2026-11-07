@@ -13,7 +13,7 @@
 
 // #region fn
 pub func summarize(
-                   const Vec<u64>& xs) -> Summary! {
+                   const vector<u64>& xs) -> Summary! {
     // 宿主局部名故意避开 `i` / `n`：候选默认 inline，能读宿主局部变量，
     // 若同名就是「遮蔽」——本语言禁止遮蔽（E-Name-Shadowed）。
     const u64 count = xs.length();
@@ -51,7 +51,7 @@ pub func summarize(
     const u64 variance = (diff_sum / count)?;
     return Summary { mean: mean, variance: variance, min_value: min_value, max_value: max_value, };
 } kernels sum_kernel(
-                     const Vec<u64>& xs) -> u64! {
+                     const vector<u64>& xs) -> u64! {
     sum_forward {
         u64 s = 0;
         u64 i = 0;

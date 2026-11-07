@@ -44,10 +44,10 @@ CASES = os.path.join(HERE, "cases")
 #: **已知失败**：不是「应该失败」，是「目前失败、且与本次改动无关」。
 #: 每次跑都会重新验证：如果它**通过**了，会报 `xpass`，提醒把它从这里删掉。
 KNOWN_FAIL = {
-    "test_dispatch_consistency": "stats 的分段说法与 dispatch 不一致（2026-11-02 实测仍红）",
     "test_assume": "报告里「假设：n ≤ …」那一行没打出来（历史遗留，未修）",
-    "test_invalid": "V14 条件无尺寸比较：宽松模式没产生诊断（历史遗留）",
 }
+# 2026-11-05：`test_dispatch_consistency` 与 `test_invalid` 已通过（xpass 连续两次），
+# 按规矩从上面删掉——**登记表只放"现在真的红"的**。
 
 #: 文件名 → 标签。**这就是「统一词汇表」的第一版**：检测器的覆盖表将来用同一套标签。
 TAGS = {

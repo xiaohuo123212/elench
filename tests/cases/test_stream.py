@@ -36,7 +36,7 @@ from parser import parse_source       # noqa: E402
 
 FAILED = []
 TU = """error Io;
-spec f(const Vec<u8>& path) -> u64! {
+spec f(const vector<u8>& path) -> u64! {
     effects { fs };
     target { time: { max: O(1) }, allocation: { max: O(1) }, };
 }
@@ -53,7 +53,7 @@ def check(name, cond, detail=""):
 
 def run(body, path: bytes):
     tu = parse_source(TU, "m.tu").module
-    ch = parse_source("func f(const Vec<u8>& path) -> u64! {\n" + body + "\n}\n", "m.eln").module
+    ch = parse_source("func f(const vector<u8>& path) -> u64! {\n" + body + "\n}\n", "m.eln").module
     return Interp(ch, tu).call("f", [list(path)])
 
 
@@ -69,8 +69,8 @@ def main() -> int:
     u64 more = 1;
     while (more == 1) {
         match (next_line(r)) {
-            Option::Some(line) => { n = n + 1; }
-            Option::None => { more = 0; }
+            optional::Some(line) => { n = n + 1; }
+            optional::None => { more = 0; }
             _ => { more = 0; }
         }
     }
@@ -81,23 +81,23 @@ def main() -> int:
     print("=== 内容与长度 ===")
     first = run("""    Reader r = open_read(path)?;
     match (next_line(r)) {
-        Option::Some(line) => { close(r); return line.length(); }
-        Option::None => { close(r); return 0; }
+        optional::Some(line) => { close(r); return line.length(); }
+        optional::None => { close(r); return 0; }
         _ => { close(r); return 0; }
     }""", pb)
     check("第一行长度 5（alpha）", getattr(first, "v", first) == 5, repr(first))
 
-    print("=== EOF 是 Option::None，不是错误 ===")
+    print("=== EOF 是 optional::None，不是错误 ===")
     eof = run("""    Reader r = open_read(path)?;
     u64 i = 0;
     while (i < 3) {
-        match (next_line(r)) { Option::Some(l) => { } Option::None => { } _ => { } }
+        match (next_line(r)) { optional::Some(l) => { } optional::None => { } _ => { } }
         i = i + 1;
     }
     close(r);
     match (next_line(r)) {
-        Option::Some(l) => { return 1; }
-        Option::None => { return 2; }
+        optional::Some(l) => { return 1; }
+        optional::None => { return 2; }
         _ => { return 3; }
     }""", pb)
     check("读完 3 行后再读 → None（返回 2）", getattr(eof, "v", eof) == 2, repr(eof))
@@ -113,7 +113,7 @@ def main() -> int:
           open(out, "rb").read() == b"abcde", str(getattr(wrote, "v", wrote)))
 
     print("=== 成本：1 + n(ret)，不是常数 ===")
-    ch = """func f(const Vec<u8>& path) -> u64! {
+    ch = """func f(const vector<u8>& path) -> u64! {
     Reader r = open_read(path)?;
     const u64 x = next_line(r).length();
     close(r);

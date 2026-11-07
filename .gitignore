@@ -59,3 +59,11 @@ cpp/docnums/build-cmake/
 
 # 从 PR / fork 取回来的文件（临时对比用）
 _incoming/
+
+# 生成物：artifact_check 每次跑都会重写它，入库只会制造噪声 diff
+artifact-report.md
+# 接受声明时留的 .tu 全文快照（派生文件，不入库）
+*.accept.tu.txt
+# 测试/图表产物（每次跑测试会重写）
+otel.ndjson
+pick-图.svg

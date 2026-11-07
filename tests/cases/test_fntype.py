@@ -40,15 +40,15 @@ from parser import parse_source       # noqa: E402
 from typecheck import typecheck       # noqa: E402
 
 FAILED = []
-TU = "spec f(const Vec<u64>& xs, func(u64, u64) -> u64 g) -> u64 { effects {}; }\n"
-TU_CALL = ("spec f(const Vec<u64>& xs, func(u64, u64) -> u64 g) -> u64 { effects {}; }\n"
-           "spec h(const Vec<u64>& xs) -> u64 { effects {}; }\n")
+TU = "spec f(const vector<u64>& xs, func(u64, u64) -> u64 g) -> u64 { effects {}; }\n"
+TU_CALL = ("spec f(const vector<u64>& xs, func(u64, u64) -> u64 g) -> u64 { effects {}; }\n"
+           "spec h(const vector<u64>& xs) -> u64 { effects {}; }\n")
 CH = """func add(u64 a, u64 b) -> u64 { return a + b; }
-func f(const Vec<u64>& xs, func(u64, u64) -> u64 g) -> u64 { return g(3, 4); }
+func f(const vector<u64>& xs, func(u64, u64) -> u64 g) -> u64 { return g(3, 4); }
 """
 CH_CALL = """func add(u64 a, u64 b) -> u64 { return a + b; }
-func f(const Vec<u64>& xs, func(u64, u64) -> u64 g) -> u64 { return g(3, 4); }
-func h(const Vec<u64>& xs) -> u64 { return f(xs, add); }
+func f(const vector<u64>& xs, func(u64, u64) -> u64 g) -> u64 { return g(3, 4); }
+func h(const vector<u64>& xs) -> u64 { return f(xs, add); }
 """
 
 
@@ -76,14 +76,14 @@ def main() -> int:
     check("h → g(3,4) = 7", got == 7, str(got))
 
     print("=== 成本：k(f) 是裸符号 ===")
-    TU_COST = """spec f(const Vec<u64>& xs) -> u64 {
+    TU_COST = """spec f(const vector<u64>& xs) -> u64 {
     effects {};
     target { time: { max: O(xs.length() * k(visit)) }, allocation: { max: 0 }, };
 }
 """
-    CH_COST = """func visit(const Vec<u8>& k, u64 v) -> u64 { return v; }
-func f(const Vec<u64>& xs) -> u64 {
-    HashMap<Vec<u8>, u64> m = map_new();
+    CH_COST = """func visit(const vector<u8>& k, u64 v) -> u64 { return v; }
+func f(const vector<u64>& xs) -> u64 {
+    HashMap<vector<u8>, u64> m = map_new();
     for_each(m, visit);
     return 0;
 }

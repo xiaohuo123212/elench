@@ -1,12 +1,12 @@
 // merge.tu —— 区间合并（十个手写程序之五）的声明部分
 //
 // 考的三样本事：
-//   1. `Vec<struct>` —— 结构体数组（现有三个样例都没有）
+//   1. `vector<struct>` —— 结构体数组（现有三个样例都没有）
 //   2. 原地写 `xs[i] = Interval { ... }` —— 排序必须原地动数组
 //   3. 边界：相邻 / 重叠 / 完全包含 / 单元素 / 空
 //
 // **没有 `?!`，也没有 benchmodel**：
-//   内置生成器只能造**整数序列**，造不出 `Vec<Interval>`
+//   内置生成器只能造**整数序列**，造不出 `vector<Interval>`
 //   （见设计缺口 E14）。没有数据就测不了，所以这里只写 `target`。
 //   这是诚实的降级：有 `?!` 而无 benchmodel 会被 MB-10 直接判失败。
 
@@ -19,7 +19,7 @@ spec earlier(Interval a, Interval b) -> bool {
     effects { };
 }
 
-spec merge(Vec<Interval>& xs) -> Vec<Interval>! {
+spec merge(vector<Interval>& xs) -> vector<Interval>! {
     effects { alloc };
 
     target { time: { max: O(xs.length() * xs.length()) }, allocation: { max: O(xs.length()) }, };

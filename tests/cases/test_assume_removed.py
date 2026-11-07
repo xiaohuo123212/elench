@@ -34,7 +34,7 @@ def check(name, cond, detail=""):
         print(f"  FAIL {name}   {detail}")
 
 
-CH = """func f(const Vec<u64>& xs) -> u64 {
+CH = """func f(const vector<u64>& xs) -> u64 {
     u64 i = 0;
     while (i < n) { i = i + 1; }
     return i;

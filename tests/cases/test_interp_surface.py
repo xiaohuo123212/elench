@@ -24,7 +24,7 @@ _passed = 0
 _failed = []
 
 TARGET = "target { time: { max: O(n) }, allocation: { max: 0 } }; "
-TU = "spec f(const Vec<u64>& xs) -> u64 { effects {}; " + TARGET + "}\n"
+TU = "spec f(const vector<u64>& xs) -> u64 { effects {}; " + TARGET + "}\n"
 
 
 def check(ok, label, detail=""):
@@ -45,20 +45,20 @@ def run(eln, tu=None):
 
 def test_range_for():
     print("[1] 区间 for 是半开 [a,b)，不再静默 0 次")
-    v = run('func f(const Vec<u64>& xs) -> u64 {\n'
+    v = run('func f(const vector<u64>& xs) -> u64 {\n'
             '    u64 s = 0;\n    for (i in 0..3) { s = s + 1; }\n    return s;\n}\n')
     check(v == 3, "0..3 执行 3 次", str(v))
-    v0 = run('func f(const Vec<u64>& xs) -> u64 {\n'
+    v0 = run('func f(const vector<u64>& xs) -> u64 {\n'
              '    u64 s = 0;\n    for (i in 0..0) { s = s + 1; }\n    return s;\n}\n')
     check(v0 == 0, "0..0 执行 0 次", str(v0))
 
 
 def test_break_continue():
     print("[2] break / continue")
-    v = run('func f(const Vec<u64>& xs) -> u64 {\n'
+    v = run('func f(const vector<u64>& xs) -> u64 {\n'
             '    u64 i = 0;\n    while (true) { i = i + 1; break; }\n    return i;\n}\n')
     check(v == 1, "break 跳出", str(v))
-    v2 = run('func f(const Vec<u64>& xs) -> u64 {\n'
+    v2 = run('func f(const vector<u64>& xs) -> u64 {\n'
              '    u64 s = 0;\n    u64 i = 0;\n'
              '    while (i < 5) { i = i + 1; if (i == 3) { continue; } s = s + 1; }\n'
              '    return s;\n}\n')
@@ -67,12 +67,12 @@ def test_break_continue():
 
 def test_div():
     print("[3] 除法/取模返回整数，除零报错")
-    check(run('func f(const Vec<u64>& xs) -> u64 {\n    u64 a = 6;\n'
+    check(run('func f(const vector<u64>& xs) -> u64 {\n    u64 a = 6;\n'
               '    u64 b = 2;\n    return a / b;\n}\n') == 3, "6/2 = 3")
-    check(run('func f(const Vec<u64>& xs) -> u64 {\n    u64 a = 6;\n'
+    check(run('func f(const vector<u64>& xs) -> u64 {\n    u64 a = 6;\n'
               '    u64 b = 4;\n    return a % b;\n}\n') == 2, "6%4 = 2")
     try:
-        run('func f(const Vec<u64>& xs) -> u64 {\n    u64 a = 6;\n'
+        run('func f(const vector<u64>& xs) -> u64 {\n    u64 a = 6;\n'
             '    u64 b = 0;\n    return a / b;\n}\n')
         check(False, "除零应报错", "没抛")
     except InterpError as exc:
@@ -81,7 +81,7 @@ def test_div():
 
 def test_assign_op():
     print("[4] 复合赋值回绕")
-    v = run('func f(const Vec<u64>& xs) -> u64 {\n'
+    v = run('func f(const vector<u64>& xs) -> u64 {\n'
             '    u64 a = 18446744073709551615;\n    a += 1;\n    return a;\n}\n')
     check(v == 0, "2^64-1 += 1 → 0", str(v))
 
@@ -89,12 +89,12 @@ def test_assign_op():
 def test_field_and_cast():
     print("[5] 结构体字段赋值 / as 截断")
     tu = "struct P { x: u64 }\n" + TU
-    v = run('func f(const Vec<u64>& xs) -> u64 {\n'
+    v = run('func f(const vector<u64>& xs) -> u64 {\n'
             '    P p = P { x: 1 };\n    p.x = 5;\n    return p.x;\n}\n', tu=tu)
     check(v == 5, "p.x = 5", str(v))
-    check(run('func f(const Vec<u64>& xs) -> u64 {\n    return 300 as u8;\n}\n') == 44,
+    check(run('func f(const vector<u64>& xs) -> u64 {\n    return 300 as u8;\n}\n') == 44,
           "300 as u8 → 44")
-    check(run('func f(const Vec<u64>& xs) -> u64 {\n    return 7 as u64;\n}\n') == 7,
+    check(run('func f(const vector<u64>& xs) -> u64 {\n    return 7 as u64;\n}\n') == 7,
           "7 as u64 恒等")
 
 

@@ -4,14 +4,14 @@
 // 交叉点在 n≈700：小 n 用 heavy（省掉 34 万准备），大 n 用 setup（斜率小 30 倍）。
 error GapError;
 
-spec top(const Vec<u64>& xs) -> u64! {
+spec top(const vector<u64>& xs) -> u64! {
     effects {};
     benchmodel {
         data { xs = random_u64s(); }
         scale { xs in range(8, 65536, *2); }
     };
     target { time: { max: O(xs.length()) }, allocation: { max: 0 }, };
-    choose kernel(const Vec<u64>& xs) -> u64! {
+    choose kernel(const vector<u64>& xs) -> u64! {
         over { by_scan_heavy, by_scan_setup };
         objective time;
     };

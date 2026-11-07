@@ -35,7 +35,7 @@ from dispatch import crossing, order_of, plan_dispatch, table_from_measure
 from parser import parse_source
 from symbolic import Cost
 
-SAMPLE = os.path.join(HERE, "..", "文档", "设计", "目前设计", "样例")
+SAMPLE = os.path.join(HERE, "..", "文档", "样例")
 
 _passed = 0
 _failed = []
@@ -241,11 +241,11 @@ def test_nested_row_alias():
     """L2（甲）：局部行别名的尺寸要归一到外层容器，否则二维成本式失真。"""
     print("[10] 嵌套二维：行别名归一")
 
-    CH = """func f(Vec<Vec<u64>>& m) -> u64! {
+    CH = """func f(vector<vector<u64>>& m) -> u64! {
     u64 s = 0;
     u64 i = 0;
     while (i < m.length()) {
-        const Vec<u64> row = m.at(i);
+        const vector<u64> row = m.at(i);
         u64 j = 0;
         while (j < row.length()) {
             s = s + row.at(j);
@@ -261,7 +261,7 @@ def test_nested_row_alias():
     check(r.count("n(m)") >= 2, "n(m) 出现两次（外层 × 内层）", r)
 
     # 非容器别名不绑（`const Token t = tokens.at(i);` 里 t 不是一行）
-    CH2 = """func g(Vec<u64>& xs) -> u64! {
+    CH2 = """func g(vector<u64>& xs) -> u64! {
     const u64 v = xs.at(0);
     u64 i = 0;
     while (i < xs.length()) {
@@ -274,8 +274,8 @@ def test_nested_row_alias():
     check(ci2.row_of == {}, "标量别名不进 row_of", str(ci2.row_of))
 
     # 别名被重新赋值 → 撤销（宁可不认，不可算错）
-    CH3 = """func h(Vec<Vec<u64>>& m) -> u64! {
-    Vec<u64> row = m.at(0);
+    CH3 = """func h(vector<vector<u64>>& m) -> u64! {
+    vector<u64> row = m.at(0);
     row = m.at(1);
     u64 j = 0;
     while (j < row.length()) {
@@ -295,7 +295,7 @@ def test_call_composition():
     """
     print("[11] 调用链成本传播（E17 回归）")
 
-    CH = """func inner(const Vec<u64>& xs) -> u64! {
+    CH = """func inner(const vector<u64>& xs) -> u64! {
     u64 s = 0;
     u64 i = 0;
     while (i < xs.length()) {
@@ -304,11 +304,11 @@ def test_call_composition():
     }
     return s;
 }
-func in_assign(const Vec<u64>& xs) -> u64! {
+func in_assign(const vector<u64>& xs) -> u64! {
     u64 t = inner(xs);
     return t;
 }
-func middle(const Vec<u64>& xs) -> u64! {
+func middle(const vector<u64>& xs) -> u64! {
     u64 t = 0;
     u64 j = 0;
     while (j < xs.length()) {
@@ -317,7 +317,7 @@ func middle(const Vec<u64>& xs) -> u64! {
     }
     return t;
 }
-func nested(const Vec<u64>& xs) -> u64! {
+func nested(const vector<u64>& xs) -> u64! {
     u64 u = 0;
     u64 k = 0;
     while (k < xs.length()) {
@@ -355,7 +355,7 @@ def test_guard_fact():
     from parser import parse_source as _ps
     from cost_interp import CostInterp as _CI
 
-    tri = """func tri(const Vec<u64>& xs) -> u64! {
+    tri = """func tri(const vector<u64>& xs) -> u64! {
         u64 s = 0; const u64 n = xs.length(); u64 i = 0;
         while (i < n) { u64 j = 0; while (j < i) { s = s + xs.at(j); j = j + 1; } i = i + 1; }
         return s;
@@ -365,7 +365,7 @@ def test_guard_fact():
     check(k.count("n(xs)") >= 2, "嵌套依赖界：出现两次 n(xs)（O(n²)）", k)
 
     # 单层循环不受影响
-    one = """func one(const Vec<u64>& xs) -> u64! {
+    one = """func one(const vector<u64>& xs) -> u64! {
         u64 s = 0; u64 i = 0;
         while (i < xs.length()) { s = s + 1; i = i + 1; }
         return s;
@@ -374,7 +374,7 @@ def test_guard_fact():
     check(k1.count("n(xs)") == 1, "单层循环：n(xs) 只出现一次", k1)
 
     # 复合条件（and/or）不组合事实，但也不能崩
-    comp = """func comp(const Vec<u64>& xs) -> u64! {
+    comp = """func comp(const vector<u64>& xs) -> u64! {
         u64 s = 0; u64 i = 0;
         while (i < xs.length() && i < 10) { s = s + 1; i = i + 1; }
         return s;
@@ -398,16 +398,16 @@ def test_instance_isolation():
     from cost_interp import CostInterp as _CI
 
     A = """const u64 CAP = 256;
-    func f(const Vec<u64>& xs) -> u64! {
-        const FixedVec<u64, CAP> t = xs;
+    func f(const vector<u64>& xs) -> u64! {
+        const array<u64, CAP> t = xs;
         const u64 m = t.length();
         u64 s = 0; u64 i = 0;
         while (i < m) { s = s + 1; i = i + 1; }
         return s;
     }"""
     B = """const u64 CAP = 8;
-    func f(const Vec<u64>& xs) -> u64! {
-        const FixedVec<u64, CAP> t = xs;
+    func f(const vector<u64>& xs) -> u64! {
+        const array<u64, CAP> t = xs;
         const u64 m = t.length();
         u64 s = 0; u64 i = 0;
         while (i < m) { s = s + 1; i = i + 1; }

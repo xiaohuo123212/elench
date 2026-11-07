@@ -20,8 +20,8 @@ func earlier(Interval a, Interval b) -> bool {
     return a.start < b.start;
 }
 
-pub func merge(Vec<Interval>& xs) -> Vec<Interval>! {
-    Vec<Interval> out = Vec<Interval>::make();
+pub func merge(vector<Interval>& xs) -> vector<Interval>! {
+    vector<Interval> out = vector<Interval>::make();
     const u64 n = xs.length();
     if (n == 0) {
         return out;

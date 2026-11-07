@@ -34,15 +34,47 @@
 from typing import List, Optional, Set, Tuple
 
 import cfg as cfgmod
+from cfg import _base_of
 from ast_util import descendants
 
 
-def _base_name(node) -> Optional[str]:
-    """表达式的"被借对象"：取第一个 path（`xs.at(0)` → `xs`）。"""
+def _first_path(node) -> Optional[str]:
+    """节点自身或其后代里的第一个 path。"""
+    if node is None:
+        return None
+    if getattr(node, "kind", "") == "path" and getattr(node, "name", None):
+        return node.name
     for p in descendants(node, "path"):
         if p.name:
             return p.name
     return None
+
+
+def _base_name(node) -> Optional[str]:
+    """表达式的"被借对象"。
+
+    **三种形状要分开**（2026-11-06 修）：
+
+    | 表达式 | 被借对象 | 以前 |
+    |---|---|---|
+    | `xs.at(0)` | `xs`（接收者） | ✅ 对 |
+    | `head_ref(v)` | `v`（实参） | ❌ **取成 `head_ref`**——被调函数名也是个 path！ |
+    | `v` | `v` | ✅ |
+
+    以前的实现一律"取第一个 path"，于是 `head_ref(v)` 被记成借了
+    `head_ref` —— 一个永远不被修改的名字，**借用检查彻底失效**（BR-3 的洞）。
+    """
+    k = getattr(node, "kind", "")
+    if k == "method-call":
+        # 接收者在 children[0]（`xs.at(0)` → path xs）
+        return _first_path(node.children[0] if node.children else None)
+    if k == "call":
+        # **跳过被调名**，只看实参：`head_ref(v)` → v
+        for c in (node.children or []):
+            if getattr(c, "kind", "") == "args":
+                return _first_path(c)
+        return None
+    return _first_path(node)
 
 
 def _check_struct_refs(tu_mod, out) -> None:
@@ -65,7 +97,33 @@ def _fn_body(fn):
     return next((c for c in fn.children if getattr(c, "kind", None) == "block"), None)
 
 
-def _check_fn(fn, out) -> None:
+
+def _mutable_ref_params(mod) -> dict:
+    """`函数名 → 可变引用参数的下标集合`。
+
+    **`const` 记在 `param` 节点上**（不是 type-ref）——查错节点会得出
+    "两种写法一模一样"的错误结论。
+    `const T&` 只读；`T&` 可写，被调方可能改它，于是调用处要算一次"修改"。
+    """
+    out = {}
+    if mod is None:
+        return out
+    for fn in descendants(mod, "fn"):
+        params = next((c for c in (fn.children or []) if c.kind == "params"), None)
+        idx = set()
+        for i, prm in enumerate(params.children if params else []):
+            ty = prm.children[0] if prm.children else None
+            if getattr(ty, "kind", "") != "type-ref":
+                continue
+            if (prm.value or {}).get("const"):
+                continue                      # const T& 只读
+            idx.add(i)
+        if idx and fn.name:
+            out[fn.name] = idx
+    return out
+
+
+def _check_fn(fn, out, mut_params=None) -> None:
     body = _fn_body(fn)
     if body is None:
         return
@@ -75,8 +133,30 @@ def _check_fn(fn, out) -> None:
     # 语句 → 节点（简单语句一一对应；控制流节点的 st 是 if/while 本身）
     node_of = {id(n.st): n for n in g.nodes.values() if n.st is not None}
 
+    # **传可变引用 = 可能被改**：`take(xs)` 里 `xs` 对应 `vector<u64>&` 形参，
+    # 被调方可以改它；以前这种调用**完全不算修改**，于是借用还活着也能传出去。
+    if mut_params:
+        for n in g.nodes.values():
+            if n.st is None:
+                continue
+            for call in descendants(n.st, "call"):
+                idx = mut_params.get(call.name or "")
+                if not idx:
+                    continue
+                args = next((c for c in (call.children or []) if c.kind == "args"), None)
+                for i in idx:
+                    if args is None or i >= len(args.children):
+                        continue
+                    base = _base_of(args.children[i])
+                    if base:
+                        n.muts.add(base)
+                        n.uses.add(base)
+
     borrows: List[Tuple[str, str, object]] = []      # (被借对象, 引用变量, 声明语句)
-    for st in descendants(body, "const-decl"):
+    # **可变引用也算借用**（2026-11-06 修）：以前只扫 `const-decl`，
+    # 于是 `u64& q = xs.at(0); xs.push(9); return q;` **完全不被检查**——
+    # 而可变引用比只读引用更危险（调用方能写穿它）。
+    for st in descendants(body, "const-decl") + descendants(body, "var-decl"):
         if not st.children or st.name is None:
             continue
         ty = st.children[0]
@@ -125,8 +205,9 @@ def check_borrows(tu_mod, ch_mod) -> List[Tuple[str, str, int, int]]:
     out = []
     _check_struct_refs(tu_mod, out)
     if ch_mod is not None:
+        mut_params = _mutable_ref_params(ch_mod)
         for fn in descendants(ch_mod, "fn"):
-            _check_fn(fn, out)
+            _check_fn(fn, out, mut_params)
         _check_ambiguous_returns(ch_mod, out)
     return out
 

@@ -16,7 +16,7 @@ from contract_metric import (DEFAULT_FLOOR, is_vacuous,  # noqa: E402
                              sensitivity)
 from cost_check import compare  # noqa: E402
 
-DIRS = ("文档/设计/目前设计/样例", "文档/入门/例子", "demo/repair/v1", "demo/repair/v2")
+DIRS = ("文档/样例", "文档/入门/例子", "demo/repair/v1", "demo/repair/v2")
 
 
 def collect():
@@ -83,7 +83,7 @@ print(f"\n真空契约（κ/target < {DEFAULT_FLOOR}）：{len(vac)} 个")
 for r in vac:
     print(f"  {r['module']}.{r['function']}  ratio={r['ratio']:.3g}")
 
-out = os.path.join("文档", "实验", "契约指标分布.json")
+out = os.path.join("文档", "设计", "归档", "实验-2026-11", "契约指标分布.json")
 os.makedirs(os.path.dirname(out), exist_ok=True)
 with open(out, "w", encoding="utf-8") as fh:
     json.dump({"rows": rows, "sensitivity": sensitivity(rows),

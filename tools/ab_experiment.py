@@ -5,7 +5,7 @@
 
 ## 为什么现在才做
 
-`文档/实验/AB实验.md` 与 `实测题目.md` 写着"设计完成，**未执行**"。
+`文档/设计/归档/实验-2026-11/AB实验.md` 与 `实测题目.md` 写着"设计完成，**未执行**"。
 设计再细，没有执行器就永远是零。这个脚本把三件事接起来：
 
 1. **题目**（五道，来自 `实测题目.md`）——已按**当前语法**重写（`func`/`const`/`var`/`{}`）；
@@ -32,7 +32,7 @@ python tools/ab_experiment.py --stub --arm strict
 
 ## 结果去哪
 
-`文档/实验/raw/ab-<时间>.csv`（逐条）+ `ab-<时间>.md`（汇总）。
+`文档/设计/归档/实验-2026-11/raw/ab-<时间>.csv`（逐条）+ `ab-<时间>.md`（汇总）。
 """
 import argparse
 import csv
@@ -46,7 +46,7 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
-OUT_DIR = os.path.join(ROOT, "文档", "实验", "raw")
+OUT_DIR = os.path.join(ROOT, "文档", "设计", "归档", "实验-2026-11", "raw")
 
 sys.path.insert(0, os.path.join(ROOT, "src"))
 

@@ -30,7 +30,7 @@ import subprocess
 import sys
 import tempfile
 
-SAMPLE = os.path.join(ROOT, "文档", "设计", "目前设计", "样例")
+SAMPLE = os.path.join(ROOT, "文档", "样例")
 DSH = os.path.join(HERE, "dsh.py")
 
 _passed = 0

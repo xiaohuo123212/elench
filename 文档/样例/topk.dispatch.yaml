@@ -1,0 +1,6 @@
+# 由 `elench measure` 生成；MUST NOT 手改。
+module: topk
+label: topk_kernel
+segments:
+  - {lo: 1, hi: 31, candidate: topk_select}
+  - {lo: 32, hi: 1024, candidate: topk_heap}

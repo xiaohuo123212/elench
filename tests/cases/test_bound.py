@@ -81,11 +81,11 @@ def upper(src, label=None):
 
 def test_size_compare():
     print("[1] 来源①：尺寸比较")
-    r = upper("func f(const Vec<u64>& xs) -> u64 { u64 i = 0; "
+    r = upper("func f(const vector<u64>& xs) -> u64 { u64 i = 0; "
               "while (i < xs.length()) { i = i + 1; } return i; }")
     check(r[0][0] == "xs.length()", "i < xs.length() → xs.length()", str(r))
 
-    r = upper("func f(const Vec<u64>& xs) -> u64 { const u64 n = xs.length(); u64 i = 0; "
+    r = upper("func f(const vector<u64>& xs) -> u64 { const u64 n = xs.length(); u64 i = 0; "
               "while (i < n) { i = i + 1; } return i; }")
     check(r[0][0] == "xs.length()",
           "i < n（const 绑定）→ 展开回 xs.length()（报告里不该出现局部变量名）", str(r))
@@ -93,33 +93,33 @@ def test_size_compare():
 
 def test_zero_init():
     print("[2] 计数器初值为 0 → 不再写 e - i")
-    r = upper("func f(const Vec<u64>& xs) -> u64 { u64 i = 0; "
+    r = upper("func f(const vector<u64>& xs) -> u64 { u64 i = 0; "
               "while (i < 10) { i = i + 1; } return i; }")
     check(r[0][0] == "10", "i 从 0 起 → 上界 10（不是 10 - i）", str(r))
 
     # 初值不是 0 时保留减法
-    r = upper("func f(const Vec<u64>& xs) -> u64 { u64 i = 5; "
+    r = upper("func f(const vector<u64>& xs) -> u64 { u64 i = 5; "
               "while (i < xs.length()) { i = i + 1; } return i; }")
     check(r[0][0] == "(xs.length() - i)", "i 从 5 起 → xs.length() - i", str(r))
 
 
 def test_and():
     print("[3] and 组合取 min")
-    r = upper("func f(const Vec<u64>& xs) -> u64 { const u64 n = xs.length(); u64 i = 0; "
+    r = upper("func f(const vector<u64>& xs) -> u64 { const u64 n = xs.length(); u64 i = 0; "
               "while (i < n and i < xs.length()) { i = i + 1; } return i; }")
     check("min(" in r[0][0], "and → min", str(r))
 
 
 def test_predicate():
     print("[4] 来源②：谓词的 repeats")
-    r = upper("func g(const Vec<u64>& xs) -> u64 { u64 lo = 0; u64 hi = xs.length(); "
+    r = upper("func g(const vector<u64>& xs) -> u64 { u64 lo = 0; u64 hi = xs.length(); "
               "while (in_range(lo, hi)) { lo = lo + 1; } return lo; }")
     check(r[0][0] == "log2((hi - lo))", "谓词 repeats 代入", str(r))
 
 
 def test_unprovable():
     print("[5] 来源③：抽不出时明确返回 None")
-    r = upper("func f(const Vec<u64>& xs) -> u64 { u64 i = 0; "
+    r = upper("func f(const vector<u64>& xs) -> u64 { u64 i = 0; "
               "while (i < unknown_pred(i)) { i = i + 1; } return i; }")
     check(r[0][0] == "⊤", "抽不出 → ⊤（绝不静默猜）", str(r))
     check("repeats" in r[0][1], "原因里指出 repeats 这条出路", str(r[0][1]))
@@ -132,7 +132,7 @@ def test_no_silence():
         "while (a * b < 10) { a = a + 1; }",
     ]
     for c in cases:
-        r = upper("func f(const Vec<u64>& xs) -> u64 { u64 i = 0; u64 a = 0; u64 b = 0; "
+        r = upper("func f(const vector<u64>& xs) -> u64 { u64 i = 0; u64 a = 0; u64 b = 0; "
                   + c + " return i; }")
         b, why = r[0]
         check(b == "⊤" and bool(why), f"抽不出有原因：{c[:20]}", f"{b} / {why}")
@@ -153,7 +153,7 @@ def test_loop_progresses():
         return progresses(ws[0])
 
     def fn(body):
-        return ("func f(u64 n, const Vec<u64>& q) -> u64! {\n"
+        return ("func f(u64 n, const vector<u64>& q) -> u64! {\n"
                 "    u64 s = 0;\n    " + body + "\n    return s;\n}")
 
     cases = [

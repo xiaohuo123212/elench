@@ -192,7 +192,75 @@ def compare_exact(impl: Optional[Cost], target: Optional[Cost]) -> Verdict:
     return compare(impl, target)
 
 
-def compare(impl: Optional[Cost], target: Optional[Cost]) -> Verdict:
+def _has_sym(c) -> bool:
+    """成本式里有没有**未解释的符号**（`sym`，例如 `k(f)`）。"""
+    if c is None:
+        return False
+    if c.kind == "sym":
+        return True
+    for a in (getattr(c, "args", None) or []):
+        if _has_sym(a):
+            return True
+    if c.kind == "piece":
+        _v = c.value
+        if isinstance(_v, tuple) and len(_v) == 2:
+            for _lo, _hi, sub in _v[1]:
+                if _has_sym(sub):
+                    return True
+    return False
+
+
+def _sym_of(node):
+    """把 `hi` 或 `xs.length()` 翻成一个尺寸符号名。"""
+    if node is None:
+        return None
+    if getattr(node, "kind", "") == "path":
+        return node.name
+    if getattr(node, "kind", "") in ("method-call", "call") and \
+            (getattr(node, "name", "") or "").split(".")[-1] in ("length", "size", "len"):
+        recv = node.children[0] if getattr(node, "children", None) else None
+        if getattr(recv, "kind", "") == "path":
+            return recv.name
+    return None
+
+
+def facts_of_spec(spec) -> dict:
+    """从 spec 的 `requires` 里提取 `A <= B` 事实 → {A: {B, …}}。
+
+    **这就是"声明的假设"的载体**（A1，2026-11-06）：
+    只有写进 `requires` 的才作数，**不从用法推断**（`xs[hi]` 不能推出 `hi < len`）。
+    """
+    out = {}
+    if spec is None:
+        return out
+    body = next((c for c in (getattr(spec, "children", None) or [])
+                 if getattr(c, "kind", "") == "spec-body"), None)
+    for c in (getattr(body, "children", None) or []):
+        if getattr(c, "kind", "") != "clause" or getattr(c, "name", "") != "requires":
+            continue
+        for k in (getattr(c, "children", None) or []):
+            if getattr(k, "kind", "") != "binary" or (getattr(k, "value", "") or "") not in ("<", "<="):
+                continue
+            a, b = (k.children + [None, None])[:2]
+            x, y = _sym_of(a), _sym_of(b)
+            if x and y and x != y:
+                out.setdefault(x, set()).add(y)
+    return out
+
+
+def _rename_cost(c, mapping):
+    """把 Cost 里的 `size(小符号)` 换成 `size(大符号)`。"""
+    if c is None:
+        return c
+    if getattr(c, "kind", "") == "size" and c.value in mapping:
+        return type(c).size(mapping[c.value])
+    args = getattr(c, "args", ())
+    if args:
+        return type(c)(c.kind, c.value, [_rename_cost(a, mapping) for a in args])
+    return c
+
+
+def compare(impl: Optional[Cost], target: Optional[Cost], facts: Optional[dict] = None) -> Verdict:
     """把 κ_impl 与 κ_target 按 **big-O** 比。"""
     if impl is None:
         return Verdict("unknown", note="没有算出 κ_impl")
@@ -216,10 +284,37 @@ def compare(impl: Optional[Cost], target: Optional[Cost]) -> Verdict:
     # κ 不含任何尺寸量 ⇒ 它是**常数**，big-O 意义下任何阶的 target 都满足。
     # （E22 之后 `calculator.evaluate` 就是这种：定容容器把成本压成了常数。）
     if not ci:
+        # **G1**：κ 里没有尺寸量**不等于**它是常数——可能是 `k(f)` 这种
+        # 未解释的符号（被调函数是谁要看调用点）。实测 `apply(xs, sq)`
+        # （sq 是 O(x²)）以前走到这里被判「κ 是常数，任何阶都满足」→ 假的 ✓。
+        if _has_sym(impl):
+            return Verdict("unknown",
+                           note="κ 含未解释的符号（如 k(f)）：被调函数多大要看调用点，"
+                                "这里判不了阶，不给你一个假的上界")
         a = evaluate(impl, {})
         b = evaluate(target, {}) if ct else None
         return Verdict("ok", ratio=(a / b) if b else None,
                        note="κ 是常数（不含尺寸量），任何阶的 target 都满足")
+    if ci != ct and facts:
+        # **A1（2026-11-06）：用声明的 requires 把 κ 的符号弱化到 target 的符号上。**
+        # 例：`requires hi <= xs.length()` ⇒ `n(hi)` 可以按 `n(xs)` 计。
+        # **只认 facts**（来自 requires），不推断；弱化不动 target。
+        _m = {}
+        for _s in ci:
+            if _s in ct:
+                continue
+            _cand = (facts.get(_s) or set()) & ct
+            if not _cand:
+                _m = None
+                break
+            _m[_s] = sorted(_cand)[0]
+        if _m:
+            _w = _rename_cost(impl, _m)
+            _v = compare(_w, target, None)
+            _used = ", ".join(f"{a}≤{b}" for a, b in sorted(_m.items()))
+            _n = f"（按 requires 弱化：{_used}）"
+            return Verdict(_v.kind, ratio=_v.ratio, multi=_v.multi,
+                           note=(_v.note or "") + _n)
     if ci != ct:
         # **H3（2026-11-02）**：target 写成常数（O(1)）而 κ 含尺寸量时，
         # 过去一律判 unknown —— 于是"声明 O(1)、实现 O(n)"**必然判不出**。

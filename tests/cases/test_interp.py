@@ -33,7 +33,7 @@ from bench import measure, read_benchmodel
 from interp import Err, Interp, Ok
 from parser import parse_source
 
-SAMPLE = os.path.join(HERE, "..", "文档", "设计", "目前设计", "样例")
+SAMPLE = os.path.join(HERE, "..", "文档", "样例")
 
 _passed = 0
 _failed = []
@@ -155,9 +155,11 @@ func h(u64 a) -> u64 {
     M = 1 << 64
     check(it.call("f", [M - 1, 1]) == 0, "u64 最大值 + 1 → 回绕到 0",
           str(it.call("f", [M - 1, 1])))
-    check(it.call("g", [M - 1, 2]) == M - 2, "u64 最大值 × 2 → 回绕",
+    # 值层是**二进制补码**：同一个位模式按有符号读是 -2。
+    # `u64` 的转回无符号发生在**打印**（`_print_typed`），不在值层。
+    check(it.call("g", [M - 1, 2]) == -2, "u64 最大值 × 2 → 补码 -2",
           str(it.call("g", [M - 1, 2])))
-    check(it.call("h", [3]) == M - 3, "0 - 3 → 回绕", str(it.call("h", [3])))
+    check(it.call("h", [3]) == -3, "0 - 3 → 补码 -3", str(it.call("h", [3])))
 
 
 # ---------------------------------------------------------------- 死循环保护
@@ -240,21 +242,11 @@ _XFAIL = []
 _XPASS = []
 
 
-def xcheck(actual, expected, name, why, since, blocker):
-    """预期失败的断言。
-
-    actual/expected：实际值与应有的值
-    why            ：为什么现在错
-    since          ：记录时间（YYYY-MM-DD HH:MM）
-    blocker        ：等谁修（如 "E4"）
-    """
-    if actual == expected:
-        _XPASS.append(f"{name}  （{blocker} 似乎已修好，请删掉这条 xfail）")
-        print(f"  XPASS  {name}  → 意外通过，{blocker} 可能已经修了")
-        return
-    _XFAIL.append(f"{name}  期望 {expected}，实际 {actual}  记录于 {since}，等 {blocker}")
-    print(f"  xfail  {name}  → 实际 {actual}（期望 {expected}），等 {blocker}")
-
+def xcheck(actual, expected, name, why=None, since=None, blocker=None):
+    """**2026-11-05 起这些不再是"预期失败"**：`_wrap` 改成二进制补码后，
+    `i64` 的减法/取负/全负数相加/calculator 求值全部正确。
+    保留函数名与参数，是为了让调用点一行都不用改。"""
+    check(actual, expected, name)
 
 def test_negative_numbers_xfail():
     print("[7] 负数：预期失败（E8，等 E4）")

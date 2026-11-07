@@ -41,13 +41,13 @@ from parser import parse_source          # noqa: E402
 
 FAILED = []
 
-TU = """spec f(const Vec<u64>& xs) -> u64 {
+TU = """spec f(const vector<u64>& xs) -> u64 {
     effects {};
     target { time: { max: O(xs.length()) }, allocation: { max: 0 }, };
 }
 """
 
-CH = """func f(const Vec<u64>& xs) -> u64 {
+CH = """func f(const vector<u64>& xs) -> u64 {
     u64 a = 0;
     u64 b = 0;
     parallel {
@@ -58,7 +58,7 @@ CH = """func f(const Vec<u64>& xs) -> u64 {
 }
 """
 
-CH_NESTED = """func f(const Vec<u64>& xs) -> u64 {
+CH_NESTED = """func f(const vector<u64>& xs) -> u64 {
     u64 a = 0;
     u64 b = 0;
     u64 c = 0;

@@ -5,7 +5,7 @@
 
 ## 跑什么
 
-对 `文档/设计/目前设计/样例/` 里的每个程序：
+对 `文档/样例/` 里的每个程序：
 
 1. `check` —— 语法 / 类型 / 契约 / 债务
 2. `cost`  —— κ 与 target 比对
@@ -27,7 +27,7 @@ import sys
 
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(R, "src")
-SAMPLES = os.path.join(R, "文档", "设计", "目前设计", "样例")
+SAMPLES = os.path.join(R, "文档", "样例")
 
 
 def run(args):

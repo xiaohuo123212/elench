@@ -31,11 +31,32 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 SRC = os.path.join(ROOT, "src")
-for _p in (SRC, HERE):
+# **顺序要紧**（2026-11-06 修）：`insert(0, …)` 是前插，所以后处理的那个排最前。
+# 以前写成 `(SRC, HERE)`，结果 `tools/` 排在 `src/` 之前，于是
+# `import kappa_vs_measured` 拿到的是 `tools/kappa_vs_measured.py` 那个**转发壳**——
+# 它没有 `measure_one`，`worst_for()` 每次都抛 AttributeError 被 `except: continue` 吞掉，
+# **整份"最坏实测"报告因此产出 0 行**。
+for _p in (HERE, SRC):        # SRC 后插入 → 排在最前
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-import kappa_vs_measured as K  # noqa: E402
+# **按文件路径加载真模块**（2026-11-06）：`tools/` 里有个同名**转发壳**
+# `kappa_vs_measured.py`，靠 sys.path 顺序抢不到——壳没有 `measure_one`，
+# 于是 `worst_for()` 每次都抛 AttributeError 被 `except: continue` 吞掉，
+# **整份"最坏实测"报告产出 0 行**。按路径加载后不再看 sys.path 脸色。
+import importlib.util as _ilu  # noqa: E402
+_spec = _ilu.spec_from_file_location(
+    "_kvm_real", os.path.join(SRC, "kappa_vs_measured.py"))
+K = _ilu.module_from_spec(_spec)
+_spec.loader.exec_module(K)
+
+# **样例目录**：`kappa_vs_measured` 早先导出过 `SAMPLES` 常量，重构后删了，
+# 于是 worstcase 一跑就 `AttributeError`（或静默 0 行）。这里自己算。
+_CANDIDATES = [
+    os.path.join(ROOT, "文档", "样例"),
+    os.path.join(ROOT, "文档", "样例"),
+]
+SAMPLES = next((d for d in _CANDIDATES if os.path.isdir(d)), _CANDIDATES[0])
 from bench import random_u64s as _r64  # noqa: E402
 
 
@@ -98,7 +119,7 @@ def main() -> int:
 
     progs = [p for p in args.programs.split(",") if p.strip()] or \
         sorted(set(os.path.basename(p).rsplit(".", 1)[0]
-                   for p in os.listdir(K.SAMPLES) if p.endswith(".tu")))
+                   for p in os.listdir(SAMPLES) if p.endswith(".tu")))
 
     out = {}
     for prog in progs:
@@ -109,7 +130,7 @@ def main() -> int:
         try:
             from bench import read_benchmodel
             from parser import parse_source
-            _tu = os.path.join(K.SAMPLES, prog + ".tu")
+            _tu = os.path.join(SAMPLES, prog + ".tu")
             if os.path.exists(_tu):
                 _m = parse_source(io.open(_tu, encoding="utf-8").read(),
                                   prog + ".tu").module
@@ -129,6 +150,13 @@ def main() -> int:
         json.dumps(out, ensure_ascii=False, indent=2))
     total = sum(len(v) for v in out.values())
     print(f"已写出：{args.out}（{len(out)} 个程序，{total} 行）")
+    # **0 行不算成功**：静默产出空表比报错更糟——2026-11-05 就是这样骗过人
+    # （它退出 0，于是"最坏实测"的数字没人发现已经不可复现）。
+    if total == 0:
+        print("✗ 没有产生任何行；样例目录：%s\n"
+              "  多半是 `worst_for()` 返回空（见 归档/未做-原始/B-工具与验证.md）" % SAMPLES,
+              file=sys.stderr)
+        return 1
     return 0
 
 

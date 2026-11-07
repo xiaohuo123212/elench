@@ -6,17 +6,17 @@
 //   ""          → 1（空串视为匹配）
 //   "(()"       → Err(Unclosed)
 //   ")("        → Err(Unmatched)
-//   65 层深      → Err(TooDeep)  ← FixedVec 容量 64，这是定长数组的边界
+//   65 层深      → Err(TooDeep)  ← array 容量 64，这是定长数组的边界
 //
-// 栈用 `FixedVec<u64, STACK_CAP>`：**push 超过 64 会被解释器拒绝**，
+// 栈用 `array<u64, STACK_CAP>`：**push 超过 64 会被解释器拒绝**，
 // 所以程序 MUST 自己先用 `length() >= STACK_CAP` 挡住——
 // 这就是「定长数组」逼作者显式处理容量的地方。
 
 // #region fn
 pub func paren(
-               const Vec<u8>& text) -> u64! {
-    FixedVec<u64,
-    STACK_CAP> stack = FixedVec<u64,
+               const vector<u8>& text) -> u64! {
+    array<u64,
+    STACK_CAP> stack = array<u64,
     STACK_CAP>::make();
     u64 i = 0;
     const u64 n = text.length();

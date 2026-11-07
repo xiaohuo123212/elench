@@ -11,7 +11,7 @@
 //
 // 填充方式：人写签名与 target，AI 补 effects / requires / model，人读一遍认账；cost 由编译器算。
 
-// v0.68：容器已在语言内建（Vec / FixedVec），不再需要外部 use；
+// v0.68：容器已在语言内建（vector / array），不再需要外部 use；
 // 这一行保留，用于演示 `use` 的写法与检查。
 use core.mem.alloc;
 
@@ -60,7 +60,7 @@ error CalcError;
 // ─────────────────────────────────────────────────────────────
 
 spec evaluate(
-              const Vec<u8>& text) -> i64! {
+              const vector<u8>& text) -> i64! {
     effects { alloc };
     requires text.length() <= MAX_TOKENS;
 
@@ -76,21 +76,21 @@ spec evaluate(
 // ─────────────────────────────────────────────────────────────
 
 spec tokenize(
-              const Vec<u8>& text) -> FixedVec<Token, MAX_TOKENS>! {
+              const vector<u8>& text) -> array<Token, MAX_TOKENS>! {
     effects { alloc };
 }
 
 spec read_number(
-                 const Vec<u8>& text, u64 start) -> (i64, u64)! {
+                 const vector<u8>& text, u64 start) -> (i64, u64)! {
     effects { };
 }
 
 spec reduce(
-            const FixedVec<Token, MAX_TOKENS>& tokens) -> i64! {
+            const array<Token, MAX_TOKENS>& tokens) -> i64! {
     effects { };
 }
 
-spec pop_until_open(FixedVec<i64, MAX_DEPTH>& values, FixedVec<Token,
+spec pop_until_open(array<i64, MAX_DEPTH>& values, array<Token,
                     MAX_DEPTH>& operators) -> bool! {
     effects { };
 }
@@ -98,7 +98,7 @@ spec pop_until_open(FixedVec<i64, MAX_DEPTH>& values, FixedVec<Token,
 // 这个函数的 spec 多一条 repeats：
 // 它被用作 while 条件，上界由 repeats 提供（规格 T13 情形二）。
 spec should_reduce(
-                   const FixedVec<Token, MAX_DEPTH>& operators, Token next) -> bool {
+                   const array<Token, MAX_DEPTH>& operators, Token next) -> bool {
     effects { };
     repeats operators.length();
 }
@@ -107,7 +107,7 @@ spec precedence(Token token) -> u64 {
     effects { };
 }
 
-spec apply_top(FixedVec<i64, MAX_DEPTH>& values, FixedVec<Token,
+spec apply_top(array<i64, MAX_DEPTH>& values, array<Token,
                MAX_DEPTH>& operators) -> i64! {
     effects { };
 }

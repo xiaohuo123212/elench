@@ -32,7 +32,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
 SRC = os.path.join(ROOT, "src")
-SAMPLES = os.path.join(ROOT, "文档", "设计", "目前设计", "样例")
+SAMPLES = os.path.join(ROOT, "文档", "样例")
 ELENCH = os.path.join(SRC, "elench.py")
 
 #: 带 `?!` 的样例：(模块, 函数, 尺寸变量)

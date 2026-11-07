@@ -451,7 +451,16 @@ def _rank(c: Cost) -> Optional[int]:
         return 0
     if c.kind == "log2":
         return 1
-    if c.kind in ("size", "ext", "sym"):
+    if c.kind in ("size", "ext"):
+        return 2
+    if c.kind == "sym":
+        # **`k(f)` 不是尺寸，是「某个函数的成本」**——它有多大完全取决于
+        # 调用点传进来的是谁（可能是 O(1)，也可能是 O(n²)）。按线性算就是
+        # 给了一个**假上界**：实测 `apply(xs, sq)`（sq 是 O(x²)）判 ✓ 达成。
+        # 其余 `sym`（如 `external { read_file: O(F) }` 里的 F）是作者声明的
+        # 尺寸类量，仍按线性处理。
+        if str(c.value or "").startswith("k("):
+            return None
         return 2
     if c.kind == "mul":
         return 3

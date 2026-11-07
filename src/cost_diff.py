@@ -166,8 +166,16 @@ def classify(old_vals: List[float], new_vals: List[float]) -> str:
         return "不变"
     lo, hi = min(ratios), max(ratios)
     # 比值随规模漂移 ⇒ 增长阶不同；否则只是整体乘了一个常数
-    return "不变" if abs(hi - lo) < 1e-6 and abs(hi - 1) < 1e-9 else (
-        "L3" if abs(hi - lo) < 1e-3 else "L1")
+    if abs(hi - lo) < 1e-6 and abs(hi - 1) < 1e-9:
+        return "不变"
+    if abs(hi - lo) < 1e-3:
+        return "L3"                     # 比值恒定：整体乘了一个常数
+    # **L2（L-09，2026-11-06）**：比值**不是完全恒定**但漂移很小（≤5%），
+    # 例如 2n+3 改成 2n+5、或 n 改成 1.02n。以前这类直接落进 L1（"阶变了"）——
+    # **那是误报**：把"系数动了"说成"复杂度变了"。
+    if lo > 1e-9 and (hi / lo) <= 1.05:
+        return "L2"
+    return "L1"
 
 
 def _verdict(ci, fn: str) -> str:

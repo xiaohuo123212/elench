@@ -12,7 +12,7 @@ error StatsError;
 
 struct Summary { mean: u64, variance: u64, min_value: u64, max_value: u64, }
 spec summarize(
-               const Vec<u64>& xs) -> Summary! {
+               const vector<u64>& xs) -> Summary! {
     effects { alloc };
 
     benchmodel {
@@ -30,7 +30,7 @@ spec summarize(
     // #region choose
     // 两候选同阶（都是 O(n)），只在遍历方向上不同——
     // 这正是「成本模型分不出高下，只能靠测量分档」的场景。
-    choose sum_kernel(const Vec<u64>& xs) -> u64! {
+    choose sum_kernel(const vector<u64>& xs) -> u64! {
         over {
             sum_forward,
             sum_backward

@@ -41,7 +41,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 from interp import Err, Interp, Ok
 from parser import parse_source
 
-SAMPLE = os.path.join(HERE, "..", "文档", "设计", "目前设计", "样例")
+SAMPLE = os.path.join(HERE, "..", "文档", "样例")
 
 _passed = 0
 _failed = []
@@ -126,7 +126,7 @@ def test_matmul():
 # ---------------------------------------------------------------- 程序 5：merge
 
 def test_merge():
-    print("[5] merge —— Vec<struct> + 原地写 + 边界")
+    print("[5] merge —— vector<struct> + 原地写 + 边界")
     from interp import StructVal
     it = load("merge")
 
@@ -156,7 +156,7 @@ def test_merge():
 # ---------------------------------------------------------------- 程序 6：paren
 
 def test_paren():
-    print("[6] paren —— FixedVec 当栈 + 容量边界")
+    print("[6] paren —— array 当栈 + 容量边界")
     it = load("paren")
 
     def run(b):
@@ -185,7 +185,7 @@ def test_paren():
     # 定长数组本身的边界：push 超过 N 必须抛（不是静默扩容）
     from interp import Interp
     src = """func f(u64 k) -> u64! {
-    FixedVec<u64, 3> s = FixedVec<u64, 3>::make();
+    array<u64, 3> s = array<u64, 3>::make();
     u64 i = 0;
     while (i < k) {
         s.push(i);
@@ -194,10 +194,10 @@ def test_paren():
     return s.length();
 }"""
     it2 = Interp(parse_source(src, "fx.eln").module, None)
-    check(it2.call("f", [3]) == Ok(3), "FixedVec<u64,3> 装 3 个 → 正常")
+    check(it2.call("f", [3]) == Ok(3), "array<u64,3> 装 3 个 → 正常")
     try:
         it2.call("f", [4])
-        check(False, "FixedVec<u64,3> 装第 4 个应报错")
+        check(False, "array<u64,3> 装第 4 个应报错")
     except Exception as e:                      # noqa: BLE001
         check("容量溢出" in str(e), "超容量报「容量溢出」", str(e)[:50])
 

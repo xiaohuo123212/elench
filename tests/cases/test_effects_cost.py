@@ -44,25 +44,25 @@ def check(ok, label, detail=""):
 
 
 TU = """
-extern read_file(const Vec<u8>& p) -> u64 from "ucrtbase" effects { fs, io };
+extern read_file(const vector<u8>& p) -> u64 from "ucrtbase" effects { fs, io };
 
-spec load(const Vec<u8>& p) -> u64 {
+spec load(const vector<u8>& p) -> u64 {
     effects { fs };
     target { time: { max: O(p.length()) } };
 }
 
-spec pure_one(const Vec<u64>& xs) -> u64 {
+spec pure_one(const vector<u64>& xs) -> u64 {
     effects {};
     target { time: { max: O(xs.length()) } };
 }
 """
 
 ELN = """
-func load(const Vec<u8>& p) -> u64 {
+func load(const vector<u8>& p) -> u64 {
     return read_file(p) + read_file(p);
 }
 
-func pure_one(const Vec<u64>& xs) -> u64 {
+func pure_one(const vector<u64>& xs) -> u64 {
     return xs.length();
 }
 """

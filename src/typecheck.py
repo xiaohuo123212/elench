@@ -16,7 +16,8 @@
 所以本检查器有 `UNKNOWN` 类型，它与任何类型都可兼容。**只有当两边都确定且不兼容时才报错。**
 
 这样：
-- **样例全部能过**（泛型、trait、闭包等处一律 UNKNOWN）
+- **样例全部能过**（泛型、闭包等处一律 UNKNOWN）
+  **E12 的精度边界就在这里**：UNKNOWN 保证「不误报」，代价是「会漏报」。
 - **确凿的错误照样抓住**（返回 `u64` 的函数 `return true;`）
 
 ## 已实现的检查
@@ -39,6 +40,7 @@ import stdlib
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from parser import Node
+from typenames import canon
 
 # ---------------------------------------------------------------- 类型
 
@@ -83,8 +85,14 @@ TY_UNKNOWN = Ty("unknown")
 TY_BOOL = Ty("name", "bool")
 TY_U64 = Ty("name", "u64")
 TY_I64 = Ty("name", "i64")
+TY_F64 = Ty("name", "f64")
 TY_VOID = Ty("name", "void")
 
+
+
+def _is_float(t) -> bool:
+    """是不是浮点类型（`f32`/`f64`）。"""
+    return getattr(t, "kind", "") == "name" and t.name in FLOATS
 
 def compatible(a: Ty, b: Ty) -> bool:
     """a 能不能赋给 b。UNKNOWN 与任何类型兼容。"""
@@ -97,20 +105,32 @@ def compatible(a: Ty, b: Ty) -> bool:
     if a.kind != b.kind:
         return False
     if a.kind == "fn":
-        # **函数类型**：slice 1 只比对**参数个数**。
-        # 深度比对签名要处理"调用方把 `fn` 当值传"的递归，先记成待办；
-        # 这里放行不会制造假上界（κ 由 `k(f)` 表达，签名错是另一个问题）。
-        return len(a.args) == len(b.args)
+        # **函数类型逐项比对**（L-06，2026-11-06）：以前只比参数个数，
+        # 于是 `fn(u64) -> u64` 与 `fn(bool) -> u64` 被判成兼容——
+        # 调用点会把 `n` 传进一个要 `bool` 的函数，静态检查却放行。
+        # `Ty("fn").args` 是「参数…, 返回」的平铺列表，所以逐项比对
+        # 顺带把返回值也比了。`compatible` 对嵌套 `fn` 递归，结构有限必终止。
+        return (len(a.args) == len(b.args)
+                and all(compatible(x, y) for x, y in zip(a.args, b.args)))
     if a.kind == "tuple":
         return (len(a.args) == len(b.args)
                 and all(compatible(x, y) for x, y in zip(a.args, b.args)))
     if a.kind == "name":
-        if a.name == b.name:
+        # **过 canon**：`Vec` 与 `vector` 是同一个类型（改名期两套写法都要能用）。
+        # 只改构造侧（内建返回类型）而不改比较侧，会让 read_stdin 这类
+        # "内建返回 vs 声明"的比较失败。
+        if canon(a.name) == canon(b.name):
             return (len(a.args) == len(b.args)
                     and all(compatible(x, y) for x, y in zip(a.args, b.args)))
         # 数值类型之间一律按 UNKNOWN 处理（N2 禁止隐式转换，这里不代替 N2，
         # 只是不制造误报；真正的 N2 检查由 checker 的字面量规则负责）
         if a.name in NUMERIC and b.name in NUMERIC:
+            return True
+        # **浮点之间可赋值**：`f32 → f64` 无损；反方向按 C++ 允许（收窄是 N2 的事）。
+        if a.name in FLOATS and b.name in FLOATS:
+            return True
+        # 整数 ↔ 浮点（`f64 x = 3;`）也放行，理由同上。
+        if (a.name in NUMERIC and b.name in FLOATS) or (a.name in FLOATS and b.name in NUMERIC):
             return True
         return False
     return False
@@ -141,7 +161,7 @@ def ty_of_node(n: Optional[Node]) -> Ty:
     if k == "type-tuple":
         return Ty("tuple", args=[ty_of_node(c) for c in n.children])
     if k == "type-slice":
-        return Ty("name", "Vec", [ty_of_node(n.children[0])] if n.children else [TY_UNKNOWN])
+        return Ty("name", "vector", [ty_of_node(n.children[0])] if n.children else [TY_UNKNOWN])
     return TY_UNKNOWN
 
 
@@ -220,9 +240,15 @@ class TypeChecker:
         }
         self.enum_payload: Dict[Tuple[str, str], Ty] = {}
         self.open_errors: Set[str] = set()
+        self.error_types: Set[str] = set()
         self.funcs: Dict[str, Node] = {}
         self.specs: Dict[str, Node] = {}
         self._collect()
+
+    def _novariant(self, ty_name: str, variant: str) -> str:
+        """变体不存在的提示：错误类型和枚举说清楚是哪一个（E3）。"""
+        kind = "错误类型" if ty_name in self.error_types else "枚举"
+        return "%s %s 没有变体 %s" % (kind, ty_name, variant)
 
     # ---------- 收集
     def _collect(self) -> None:
@@ -230,7 +256,7 @@ class TypeChecker:
             if mod is None:
                 continue
             for it in mod.children:
-                if it.kind in ("struct", "enum", "trait"):
+                if it.kind in ("struct", "enum"):
                     self.types[it.name] = it
                     self.globals.declare(Sym(it.name, "type", Ty("name", it.name), it))
                     if it.kind == "enum":
@@ -245,10 +271,14 @@ class TypeChecker:
                         self.enums[it.name] = vs
                 elif it.kind == "error-decl":
                     self.globals.declare(Sym(it.name, "error", TY_UNKNOWN, it))
-                    # ⚠ 已知缺口（记为 E3）：`error X;` 只声明类型名，
-                    # **变体从未被声明**，却在使用处出现。所以这里把 error 类型
-                    # 记为"开放"：任何变体都接受，不做存在性校验。
-                    self.open_errors.add(it.name)
+                    # **E3**：写了变体就是封闭（可校验），没写仍然开放（老行为）。
+                    _vs = {v.name for v in (it.children or []) if getattr(v, 'name', None)}
+                    if _vs:
+                        self.enums[it.name] = _vs
+                        self.error_types.add(it.name)
+                    else:
+                        self.open_errors.add(it.name)
+                    continue
                 elif it.kind == "const":
                     ty = ty_of_node(it.children[0]) if it.children else TY_UNKNOWN
                     self.globals.declare(Sym(it.name, "const", ty, it))
@@ -257,6 +287,12 @@ class TypeChecker:
                     self.globals.declare(Sym(it.name, "func", self._fn_type(it), it))
                 elif it.kind == "spec":
                     self.specs[it.name] = it
+                    self.globals.declare(Sym(it.name, "func", self._spec_type(it), it))
+                elif it.kind == "extern":
+                    # **`extern` 也是可调用的函数**，但以前**根本没进符号表**——
+                    # 于是调外部函数的程序一律报 `E-Name-Undefined`，
+                    # 而消息还在说"请在 .tu 的 extern 块登记"（已经登记了）。
+                    # 现在按 spec 的方式收进来：签名一样，只是没有实现体。
                     self.globals.declare(Sym(it.name, "func", self._spec_type(it), it))
 
     def _params_of(self, n: Node) -> List[Tuple[str, Ty]]:
@@ -415,6 +451,11 @@ class TypeChecker:
             for c in st.children:
                 if c.kind == "block":
                     inner = Scope(sc)
+                    # **带下标的 for**：`for (i, x in xs)` —— 下标是 u64，
+                    # 由语言维护（下标名存在 `st.value`，见 parser.parse_for）。
+                    _ix = getattr(st, "value", None)
+                    if _ix:
+                        self._decl(inner, Sym(_ix, "var", TY_U64, st))
                     if st.name:
                         self._decl(inner, Sym(st.name, "var", TY_UNKNOWN, st))
                     self._block(c, inner, ret, fallible)
@@ -463,7 +504,7 @@ class TypeChecker:
                     if (ty_name in self.enums and ty_name not in self.open_errors
                             and variant not in self.enums[ty_name]):
                         self._err("E-Variant-Unknown",
-                                  f"枚举 {ty_name} 没有变体 {variant}", pat)
+                                  self._novariant(ty_name, variant), pat)
             inner = Scope(sc)
             # `Token::Number(n)` —— 绑定名是 **pattern 的子节点**，不是 arm 的直接子节点。
             # 不在这里声明，`return n` 就会报 `E-Name-Undefined`（速查里最常用的
@@ -497,10 +538,14 @@ class TypeChecker:
             return TY_UNKNOWN
         k = n.kind
 
+        if k == "lit-float":
+            # **浮点字面量默认 `f64`**（C++ 里 `1.5` 是 `double`）。
+            # 以前没有这个分支，`1.0 / 3.0` 被当整数除 → `Result<u64, Arithmetic>`。
+            return TY_F64
         if k == "lit-int":
             return TY_I64
         if k == "lit-string":
-            return Ty("name", "Vec", [Ty("name", "u8")])
+            return Ty("name", "vector", [Ty("name", "u8")])
 
         if k == "lit-char":
             return TY_U64
@@ -545,7 +590,7 @@ class TypeChecker:
                 if (ty_name in self.enums and ty_name not in self.open_errors
                         and variant not in self.enums[ty_name]):
                     self._err("E-Variant-Unknown",
-                              f"枚举 {ty_name} 没有变体 {variant}", n)
+                              self._novariant(ty_name, variant), n)
                 return self.enum_payload.get((ty_name, variant),
                                              Ty("name", ty_name))
             s = sc.lookup(name)
@@ -578,6 +623,11 @@ class TypeChecker:
             if op in ("<", "<=", ">", ">=", "==", "!="):
                 return TY_BOOL
             if op in ("/", "%"):
+                # **浮点除法不失败**（2026-11-05）：IEEE 754 里 `1.0/0.0 = inf`、
+                # `0.0/0.0 = nan`，是**有定义的值**，不是错误。所以浮点走原类型，
+                # 只有整数除法才返回 `Result<_, Arithmetic>`（除零要 `requires`）。
+                if _is_float(a) or _is_float(b):
+                    return a if _is_float(a) else b
                 return Ty("name", "Result", [a if a.kind != "unknown" else TY_U64,
                                              Ty("name", "Arithmetic")])
             return a if a.kind != "unknown" else b
@@ -596,10 +646,19 @@ class TypeChecker:
                 if (ty_name in self.enums and ty_name not in self.open_errors
                         and variant not in self.enums[ty_name]):
                     self._err("E-Variant-Unknown",
-                              f"枚举 {ty_name} 没有变体 {variant}", n)
+                              self._novariant(ty_name, variant), n)
                 return Ty("name", ty_name)
             if name in ("Ok", "Err"):
                 return Ty("name", "Result", args[:1] or [TY_UNKNOWN])
+            if name in ("push_heap", "pop_heap"):
+                # 堆原语（对齐 std::push_heap / std::pop_heap）：返回 u64。
+                return TY_U64
+            if name == "swap":
+                # 原地交换（B3）：3 个实参，返回 u64（0）。
+                if len(args) != 3:
+                    self._err("E-Type-ArgCount",
+                              f"swap 要 3 个实参（容器, i, j），给了 {len(args)}", n)
+                return TY_U64
             if name in ("sort", "sort_by"):
                 # 原地排序，返回元素个数（u64）。比较器是**名字**，不是值。
                 return TY_U64
@@ -624,31 +683,31 @@ class TypeChecker:
                     return TY_UNKNOWN
                 # **高阶内建**（v0.71）：参数是具名函数，返回容器或 u64
                 if name in ("map", "filter"):
-                    return Ty("name", "Vec", [TY_U64])
+                    return Ty("name", "vector", [TY_U64])
                 if name in ("fold", "count_if"):
                     return TY_U64
                 _rk = stdlib.ret_kind(name)
                 if _rk == "i64":
                     return TY_I64
                 if _rk == "vec-vec-u8":
-                    return Ty("name", "Vec", [Ty("name", "Vec", [Ty("name", "u8")])])
+                    return Ty("name", "vector", [Ty("name", "vector", [Ty("name", "u8")])])
                 if _rk == "vec-u8":
-                    return Ty("name", "Vec", [Ty("name", "u8")])
+                    return Ty("name", "vector", [Ty("name", "u8")])
                 if _rk == "any":
                     return TY_UNKNOWN
                 if _rk == "result-vec-u64":
-                    return Ty("name", "Result", [Ty("name", "Vec", [TY_U64])])
+                    return Ty("name", "Result", [Ty("name", "vector", [TY_U64])])
                 if _rk == "result-u64":
                     return Ty("name", "Result", [TY_U64])
                 if _rk == "option-vec-u8":
-                    return Ty("name", "Option", [Ty("name", "Vec", [Ty("name", "u8")])])
+                    return Ty("name", "Option", [Ty("name", "vector", [Ty("name", "u8")])])
                 if _rk == "result-vec-u8":
-                    return Ty("name", "Result", [Ty("name", "Vec", [Ty("name", "u8")])])
+                    return Ty("name", "Result", [Ty("name", "vector", [Ty("name", "u8")])])
                 return TY_U64
             if name in ("map", "filter", "fold", "count_if"):
                 # 这些是**解释器直接实现**的（不在 stdlib 注册表里），单独处理
                 if name in ("map", "filter"):
-                    return Ty("name", "Vec", [TY_U64])
+                    return Ty("name", "vector", [TY_U64])
                 return TY_U64
 
             if name == "print":
@@ -681,8 +740,26 @@ class TypeChecker:
             callee = self.funcs.get(name) or self._find_decl(name)
             if callee is not None:
                 want = self._params_of(callee)
+                # **类型参数当通配符**（泛型最小切片）：形参类型若是被调函数的
+                # 类型参数（`func pick<T>(T a, ...)`），任何实参都算匹配。
+                # 完整做法要做统一（unification），这里只到"能写、能检查、能跑"。
+                _tps = {getattr(c, "name", "") for c in
+                        next((x for x in getattr(callee, "children", [])
+                              if getattr(x, "kind", "") == "type-params"), Node("x")).children}
                 if len(want) == len(args):
+                    _bound = {}     # 类型参数 → 首次绑定的类型（统一）
                     for (pn, pt), at in zip(want, args):
+                        if getattr(pt, "kind", "") == "name" and pt.name in _tps:
+                            _prev = _bound.get(pt.name)
+                            if _prev is None:
+                                _bound[pt.name] = at
+                            elif not compatible(at, _prev):
+                                # **统一失败**：`T` 不能同时是两种类型。
+                                self._err(
+                                    "E-Type-ArgMismatch",
+                                    f"调用 {name}：类型参数 {pt.name} 同时被绑成 "
+                                    f"{_prev.render()} 和 {at.render()}", n)
+                            continue
                         if not compatible(at, pt):
                             self._err("E-Type-ArgMismatch",
                                       f"调用 {name}：形参 `{pn}` 是 {pt.render()}，"

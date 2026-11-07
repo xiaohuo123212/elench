@@ -75,7 +75,7 @@ def unwrap(v):
 def test_sort_basic():
     print("[1] sort：基本情形")
     SRC = """func run(u64 k) -> u64! {
-    Vec<u64> xs = Vec<u64>::make();
+    vector<u64> xs = vector<u64>::make();
     if (k == 0) { }
     if (k == 1) { xs.push(7); }
     if (k == 2) { xs.push(1); xs.push(2); xs.push(3); }
@@ -120,7 +120,7 @@ func by_key(Pair a, Pair b) -> bool {
     return a.key < b.key;
 }
 func run() -> u64! {
-    Vec<Pair> xs = Vec<Pair>::make();
+    vector<Pair> xs = vector<Pair>::make();
     xs.push(Pair { key: 1, tag: 11 });
     xs.push(Pair { key: 0, tag: 20 });
     xs.push(Pair { key: 1, tag: 12 });
@@ -146,7 +146,7 @@ func asc(u64 a, u64 b) -> bool {
     return a < b;
 }
 func run(u64 which) -> u64! {
-    Vec<u64> xs = Vec<u64>::make();
+    vector<u64> xs = vector<u64>::make();
     xs.push(5);
     xs.push(1);
     xs.push(9);
@@ -166,8 +166,8 @@ func run(u64 which) -> u64! {
 
 def test_reject():
     print("[4] 比较器不合规 MUST 报错")
-    TU = "spec run(Vec<u64>& xs) -> u64 {\n    effects { alloc };\n}\n"
-    bad_name = check_module(TU, """func run(Vec<u64>& xs) -> u64 {
+    TU = "spec run(vector<u64>& xs) -> u64 {\n    effects { alloc };\n}\n"
+    bad_name = check_module(TU, """func run(vector<u64>& xs) -> u64 {
     sort_by(xs, nope);
     return 0;
 }""", "m")
@@ -178,7 +178,7 @@ def test_reject():
 spec bad(u64 a) -> bool {
     effects {};
 }
-func run(Vec<u64>& xs) -> u64 {
+func run(vector<u64>& xs) -> u64 {
     sort_by(xs, bad);
     return 0;
 }""", "m")
@@ -186,7 +186,7 @@ func run(Vec<u64>& xs) -> u64 {
           "比较器形参不是 2 个 → E-Sort-BadComparator",
           str([d.code for d in bad_arity.diagnostics]))
 
-    bad_args = check_module(TU, """func run(Vec<u64>& xs) -> u64 {
+    bad_args = check_module(TU, """func run(vector<u64>& xs) -> u64 {
     sort(xs, xs);
     return 0;
 }""", "m")
@@ -195,7 +195,7 @@ func run(Vec<u64>& xs) -> u64 {
 
     # 运行时：比较器名不是本模块函数
     it = interp_of("""func run() -> u64! {
-    Vec<u64> xs = Vec<u64>::make();
+    vector<u64> xs = vector<u64>::make();
     xs.push(1);
     sort_by(xs, ghost);
     return 0;
@@ -214,11 +214,11 @@ def test_cost():
     SRC = """func asc(u64 a, u64 b) -> bool {
     return a < b;
 }
-func run(Vec<u64>& xs) -> u64! {
+func run(vector<u64>& xs) -> u64! {
     sort(xs);
     return xs.at(0);
 }
-func run2(Vec<u64>& xs) -> u64! {
+func run2(vector<u64>& xs) -> u64! {
     sort_by(xs, asc);
     return xs.at(0);
 }"""

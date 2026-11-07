@@ -35,13 +35,13 @@ import sys
 import tempfile
 
 
-TU = """spec f(const Vec<u64>& xs) -> u64 {
+TU = """spec f(const vector<u64>& xs) -> u64 {
     effects { io };
     target { time: { max: O(xs.length()) }, allocation: { max: 0 }, };
 }
 """
 
-CH = """func f(const Vec<u64>& xs) -> u64 {
+CH = """func f(const vector<u64>& xs) -> u64 {
     const u64 s = sum_of(xs);
     print("s =", s);
     print("again");

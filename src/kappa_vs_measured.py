@@ -44,7 +44,7 @@ ROOT = os.path.abspath(os.path.join(HERE, ".."))
 SRC = os.path.join(ROOT, "src")
 # **样例目录要按落点找**：`文档/设计/` 是本机内部目录（.gitignore 排除），
 # 公开仓库和任何安装产物里都没有它。早先只认那一个绝对路径，于是
-# `tightness` / `export --full` / 按名字跑的 `bench` 一装好就找不到模块。
+# `export --full` / 按名字跑的 `bench` 一装好就找不到模块。
 # 顺序：环境变量 → 内部样例 → **公开例子** → 包内 `示例/` → 当前目录 `示例/`。
 def _pick_samples() -> str:
     cands = []
@@ -52,7 +52,7 @@ def _pick_samples() -> str:
     if env:
         cands.append(env)
     cands += [
-        os.path.join(ROOT, "文档", "设计", "目前设计", "样例"),
+        os.path.join(ROOT, "文档", "样例"),
         os.path.join(ROOT, "文档", "入门", "例子"),
         os.path.join(ROOT, "示例"),
         os.path.join(os.getcwd(), "示例"),
@@ -187,7 +187,10 @@ def measure_one(prog, n, runs, args_override=None):
                 else:
                     args.append(max(2, n // 4))
             try:
-                it = Interp(ch, tu)
+                # **运行期必须用同一份分档表**：承诺（κ）是按表分段的，
+                # 实测若不给表，两边算的就不是同一个量——`search` 的
+                # 12.73× 里有一半来自这个不对称（2026-11-07 查出）。
+                it = Interp(ch, tu, table_path=(_tbl if os.path.exists(_tbl) else None))
                 try:
                     it.call(fn, args)
                 except Exception as _exc:                 # noqa: BLE001
@@ -196,7 +199,7 @@ def measure_one(prog, n, runs, args_override=None):
                     if "requires" not in str(_exc):
                         raise
                     fixed = [sorted(a) if isinstance(a, list) else a for a in args]
-                    it = Interp(ch, tu)
+                    it = Interp(ch, tu, table_path=(_tbl if os.path.exists(_tbl) else None))
                     it.call(fn, fixed)
                 acts.append(it.counters()["evaluation_steps"])
                 ops_seen.append(it.counters().get("operations", 0))

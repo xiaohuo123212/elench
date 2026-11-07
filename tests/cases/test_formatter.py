@@ -36,7 +36,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 from formatter import MAX_LINE, format_source
 from lexer import Kind, Lexer
 
-SAMPLE = os.path.join(HERE, "..", "文档", "设计", "目前设计", "样例")
+SAMPLE = os.path.join(HERE, "..", "文档", "样例")
 
 _passed = 0
 _failed = []
@@ -131,7 +131,7 @@ def test_layout():
     cases = [
         ("a = xs.at(0);", "xs.at(0)", "方法调用不拆开"),
         ("if (not ok) { return 1; }", "not ok", "not 后有空格"),
-        ("const Vec<u64> a = b;", "Vec<u64>", "泛型不拆开"),
+        ("const vector<u64> a = b;", "vector<u64>", "泛型不拆开"),
         ("a = b?;", "b?", "`?` 紧贴表达式"),
         ("a = (b + c) / 2;", "(b + c) / 2", "括号内正常空格"),
         ("a = v;", "v", "普通语句"),
@@ -154,7 +154,7 @@ def test_layout():
          "if (x == 0) {", "if 条件保留括号"),
         ("func t(x: u64) -> u64 { while (x < 9) { x = x + 1; } return x; }",
          "while (x < 9) {", "while 条件保留括号"),
-        ("func t(xs: Vec<u64>) -> u64 { for (v in xs) { return 1; } return 0; }",
+        ("func t(xs: vector<u64>) -> u64 { for (v in xs) { return 1; } return 0; }",
          "for (v in xs) {", "for 迭代对象保留括号"),
     ]:
         o = format_source(src5)
@@ -197,7 +197,7 @@ def test_edges():
 def test_dispatch_indent():
     print("[6] `?!` 独占行 MUST 缩进恰好一级（规格 C13 第 7 条）")
     # 故意写成 8 空格；格式化后必须回到 4 空格（一级）
-    src = """func f(const Vec<u64>& xs, u64 k) -> u64! {
+    src = """func f(const vector<u64>& xs, u64 k) -> u64! {
     const u64 n = xs.length();
         ?!search_impl(xs, k);
     return 0;

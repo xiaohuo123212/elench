@@ -63,7 +63,7 @@ def main():
                 changed.append(os.path.relpath(p, ROOT))
 
     # 样例文件改名
-    sample = os.path.join(ROOT, "文档", "设计", "目前设计", "样例")
+    sample = os.path.join(ROOT, "文档", "样例")
     for f in sorted(os.listdir(sample)):
         if f.endswith(".eln"):
             src = os.path.join(sample, f)

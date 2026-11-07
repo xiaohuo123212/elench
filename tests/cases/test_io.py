@@ -5,7 +5,7 @@
 
 ## 三条必须锁住的性质
 
-1. **能读**：`read_file(path)` 返回 `Vec<u8>`，内容与文件一致；
+1. **能读**：`read_file(path)` 返回 `vector<u8>`，内容与文件一致；
 2. **效果必须声明**：用 `read_file` 而不写 `effects { fs }` → `E-Effect-Missing`；
 3. **成本是 ⊤**：I/O 的时间成本静态不可知，所以调用它的函数 `cost` 判"无法判定"
    （要可判必须 `external` 登记，该机制尚未实现）。
@@ -45,14 +45,14 @@ from parser import parse_source           # noqa: E402
 FAILED = []
 T = "target { time: { max: O(n) }, allocation: { max: 0 }, };\n"
 
-TU = f"""spec main(const Vec<u8>& path) -> u64 {{
+TU = f"""spec main(const vector<u8>& path) -> u64 {{
     effects {{ fs }};
     {T}
 }}
 """
 
-CH = """func main(const Vec<u8>& path) -> u64 {
-    const Vec<u8> data = read_file(path);
+CH = """func main(const vector<u8>& path) -> u64 {
+    const vector<u8> data = read_file(path);
     return data.length();
 }
 """
@@ -85,13 +85,13 @@ def main() -> int:
           str(run_program(TU, CH, [path_bytes])))
 
     check("读到的内容正确（第 1 个字节是 'h'）",
-          run_program(TU, """func main(const Vec<u8>& path) -> u64 {
-    const Vec<u8> data = read_file(path);
+          run_program(TU, """func main(const vector<u8>& path) -> u64 {
+    const vector<u8> data = read_file(path);
     return data[0];
 }""", [path_bytes]) == ord("h"))
 
     print("=== 效果必须声明 ===")
-    tu_bad = f"""spec main(const Vec<u8>& path) -> u64 {{
+    tu_bad = f"""spec main(const vector<u8>& path) -> u64 {{
     effects {{}};
     {T}
 }}
@@ -110,7 +110,7 @@ def main() -> int:
 
     print("=== external 登记：ext 被替换成具体值 ===")
     tu_ext = f"""external {{ read_file: O(1); }}
-spec main(const Vec<u8>& path) -> u64 {{
+spec main(const vector<u8>& path) -> u64 {{
     effects {{ fs }};
     {T}
 }}
@@ -123,13 +123,13 @@ spec main(const Vec<u8>& path) -> u64 {{
     print("=== 写文件 ===")
     out_path = os.path.join(d, "out.bin")
     tu_w = f"""external {{ write_file: O(1); }}
-spec main(const Vec<u8>& dst) -> u64 {{
+spec main(const vector<u8>& dst) -> u64 {{
     effects {{ fs }};
     {T}
 }}
 """
-    ch_w = """func main(const Vec<u8>& dst) -> u64 {
-    const Vec<u8> data = write_file(dst, dst);
+    ch_w = """func main(const vector<u8>& dst) -> u64 {
+    const vector<u8> data = write_file(dst, dst);
     return data;
 }
 """
@@ -141,18 +141,18 @@ spec main(const Vec<u8>& dst) -> u64 {{
     print("=== Result 版：失败是值，不是中止 ===")
     tu_r = f"""error Io;
 external {{ try_read_file: O(1); file_exists: O(1); }}
-spec main(const Vec<u8>& path) -> Vec<u8>! {{
+spec main(const vector<u8>& path) -> vector<u8>! {{
     effects {{ fs }};
     {T}
 }}
 """
-    ch_r = """func main(const Vec<u8>& path) -> Vec<u8>! {
-    const Vec<u8> data = try_read_file(path)?;
+    ch_r = """func main(const vector<u8>& path) -> vector<u8>! {
+    const vector<u8> data = try_read_file(path)?;
     return data;
 }
 """
     ok = run_program(tu_r, ch_r, [path_bytes])
-    check("存在 → 返回 Vec（长度正确）",
+    check("存在 → 返回 vector（长度正确）",
           getattr(ok, "v", None) is not None and len(ok.v) == len(payload), repr(ok))
 
     miss = run_program(tu_r, ch_r, [list((d + "/nope.bin").encode("utf-8"))])
@@ -161,12 +161,12 @@ spec main(const Vec<u8>& path) -> Vec<u8>! {{
           repr(miss))
 
     tu_e = f"""external {{ file_exists: O(1); }}
-spec main(const Vec<u8>& path) -> u64 {{
+spec main(const vector<u8>& path) -> u64 {{
     effects {{ fs }};
     {T}
 }}
 """
-    ch_e = """func main(const Vec<u8>& path) -> u64 {
+    ch_e = """func main(const vector<u8>& path) -> u64 {
     return file_exists(path);
 }
 """
@@ -176,12 +176,12 @@ spec main(const Vec<u8>& path) -> u64 {{
 
     print("=== 内置错误枚举 ===")
     tu_b = f"""error Arithmetic;
-spec main(const Vec<u8>& a) -> u64! {{
+spec main(const vector<u8>& a) -> u64! {{
     effects {{}};
     {T}
 }}
 """
-    ch_b = """func main(const Vec<u8>& a) -> u64! {
+    ch_b = """func main(const vector<u8>& a) -> u64! {
     return Err(Arithmetic::DivisionByZero);
 }
 """
@@ -190,7 +190,7 @@ spec main(const Vec<u8>& a) -> u64! {{
           "E-Variant-Unknown" not in codes_b, str(codes_b))
 
     print("=== match on Ok / Err ===")
-    ch_m = """func main(const Vec<u8>& a, const Vec<u8>& b) -> u64! {
+    ch_m = """func main(const vector<u8>& a, const vector<u8>& b) -> u64! {
     match (try_read_file(a)) {
         Ok(d) => { return d.length(); }
         Err(e) => { return 0; }
@@ -200,7 +200,7 @@ spec main(const Vec<u8>& a) -> u64! {{
 """
     tu_m = f"""error Io;
 external {{ try_read_file: O(1); }}
-spec main(const Vec<u8>& a, const Vec<u8>& b) -> u64! {{
+spec main(const vector<u8>& a, const vector<u8>& b) -> u64! {{
     effects {{ fs }};
     {T}
 }}
@@ -213,12 +213,12 @@ spec main(const Vec<u8>& a, const Vec<u8>& b) -> u64! {{
     print("=== 追加与大小 ===")
     ap = os.path.join(d, "ap.bin")
     tu_ap = f"""external {{ append_file: O(1); file_size: O(1); }}
-spec main(const Vec<u8>& path) -> u64! {{
+spec main(const vector<u8>& path) -> u64! {{
     effects {{ fs }};
     {T}
 }}
 """
-    ch_ap = """func main(const Vec<u8>& path) -> u64! {
+    ch_ap = """func main(const vector<u8>& path) -> u64! {
     append_file(path, path);
     append_file(path, path);
     return file_size(path)?;
@@ -235,7 +235,7 @@ spec main(const Vec<u8>& path) -> u64! {{
 }}
 """
     ch_in = """func main() -> u64 {
-    const Vec<u8> data = read_stdin();
+    const vector<u8> data = read_stdin();
     return data.length();
 }
 """

@@ -48,7 +48,7 @@ def check(ok, label, detail=""):
         print(f"  FAIL {label}   {detail}")
 
 
-TU = "spec f(const Vec<u64>& xs) -> u64 { effects {}; }"
+TU = "spec f(const vector<u64>& xs) -> u64 { effects {}; }"
 
 
 def diags(code, tu=TU):
@@ -62,7 +62,7 @@ def has(ds, code):
 
 def main() -> int:
     print("[1] 改完还读 → 报 E-Borrow-Conflict（真 UB）")
-    d = diags("""func f(const Vec<u64>& xs) -> u64! {
+    d = diags("""func f(const vector<u64>& xs) -> u64! {
     const u64& r = xs.at(0);
     xs.push(1);
     return r;
@@ -70,7 +70,7 @@ def main() -> int:
     check(has(d, "E-Borrow-Conflict"), "借用期间 push 被拦下", str(d))
 
     print("[2] 先读后改 → 不报（NLL：借用已经结束）")
-    d = diags("""func f(const Vec<u64>& xs) -> u64! {
+    d = diags("""func f(const vector<u64>& xs) -> u64! {
     const u64& r = xs.at(0);
     const u64 a = r;
     xs.push(1);
@@ -81,18 +81,18 @@ def main() -> int:
     print("[3] 结构体字段是引用 → 报 E-Borrow-StructRef（BR-5）")
     # 先看语法能不能写出引用字段：三种写法都试一遍。
     forms = [
-        "struct Holder { xs: const Vec<u64>& }",
-        "struct Holder { xs: &Vec<u64> }",
-        "struct Holder { xs: Vec<u64>& }",
+        "struct Holder { xs: const vector<u64>& }",
+        "struct Holder { xs: &vector<u64> }",
+        "struct Holder { xs: vector<u64>& }",
     ]
     reported, expressible = False, False
     for form in forms:
-        r = parse_source(form + "\nspec f(const Vec<u64>& xs) -> u64 { effects {}; }", "a.tu")
+        r = parse_source(form + "\nspec f(const vector<u64>& xs) -> u64 { effects {}; }", "a.tu")
         if r.diagnostics:
             continue
         expressible = True
-        d = diags("func f(const Vec<u64>& xs) -> u64! { return 0; }",
-                  tu=form + "\nspec f(const Vec<u64>& xs) -> u64 { effects {}; }")
+        d = diags("func f(const vector<u64>& xs) -> u64! { return 0; }",
+                  tu=form + "\nspec f(const vector<u64>& xs) -> u64 { effects {}; }")
         reported = reported or has(d, "E-Borrow-StructRef")
     if expressible:
         check(reported, "结构体存引用被拦下")
@@ -103,7 +103,7 @@ def main() -> int:
 
     print("[4] 十个真实样例 → 0 条借用诊断（不许误报）")
     root = ROOT
-    S = os.path.join(root, "文档", "设计", "目前设计", "样例")
+    S = os.path.join(root, "文档", "样例")
     total = 0
     for b in ["calculator", "search", "sum", "stats", "merge",
               "paren", "count", "matmul", "lcs", "topk"]:
@@ -114,7 +114,7 @@ def main() -> int:
 
 
     print("[5] 跨块/跨循环：借用在外层，循环体里改 → 报错（BR-2 近似）")
-    d = diags("""func f(Vec<u64>& xs) -> u64! {
+    d = diags("""func f(vector<u64>& xs) -> u64! {
     const u64& r = xs.at(0);
     u64 i = 0;
     while (i < 3) {
@@ -126,13 +126,13 @@ def main() -> int:
     check(has(d, "E-Borrow-Conflict"), "循环体里的可变操作被拦下", str(d))
 
     print("[6] BR-4：返回引用但有 2 个引用参数 → 报 E-Borrow-Ambiguous")
-    d = diags("""func pick(const Vec<u64>& a, const Vec<u64>& b) -> u64&! {
+    d = diags("""func pick(const vector<u64>& a, const vector<u64>& b) -> u64&! {
     return a.at(0);
 }""")
     check(has(d, "E-Borrow-Ambiguous"), "归属不明的引用返回被拒", str(d))
 
     print("[7] BR-4 反例：只有一个引用参数 → 不报（归属唯一）")
-    d = diags("""func first(const Vec<u64>& a) -> u64&! {
+    d = diags("""func first(const vector<u64>& a) -> u64&! {
     return a.at(0);
 }""")
     check(not any(c == "E-Borrow-Ambiguous" for c, _, _, _ in d), "单引用参数不误报", str(d))

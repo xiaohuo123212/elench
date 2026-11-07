@@ -32,8 +32,8 @@ import subprocess
 import sys
 
 FAILED = []
-SAMPLE_TU = os.path.join(HERE, "..", "文档", "设计", "目前设计", "样例", "count.tu")
-SAMPLE_ELN = os.path.join(HERE, "..", "文档", "设计", "目前设计", "样例", "count.eln")
+SAMPLE_TU = os.path.join(HERE, "..", "文档", "样例", "count.tu")
+SAMPLE_ELN = os.path.join(HERE, "..", "文档", "样例", "count.eln")
 
 
 def check(name, cond, detail=""):

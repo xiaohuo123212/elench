@@ -7,8 +7,8 @@
 
 | 内建 | 决定 | 为什么 |
 |---|---|---|
-| `args()` | 返回**容器**（`args_len` / `args_get`），不是 `Vec<Vec<u8>>` | 嵌套泛型还没做 |
-| `env_get(name)` | **`Option`**（不存在 → `Option::None`），**不是空串** | 空串是**合法值**（环境变量可以是空的），拿空串当"没有"会撞 |
+| `args()` | 返回**容器**（`args_len` / `args_get`），不是 `vector<vector<u8>>` | 嵌套泛型还没做 |
+| `env_get(name)` | **`optional`**（不存在 → `optional::None`），**不是空串** | 空串是**合法值**（环境变量可以是空的），拿空串当"没有"会撞 |
 | `exit(code)` | **控制流**，不是失败；**不影响成本上界** | 没执行的代码本来就不贡献承诺 |
 """
 import os as _os
@@ -51,19 +51,19 @@ def run(tu, ch, fn="f", args=None):
     return Interp(ch_m, tu_m).call(fn, args or [[1]])
 
 
-TU = "spec f(const Vec<u64>& xs) -> u64 { effects { env, io }; }\n"
+TU = "spec f(const vector<u64>& xs) -> u64 { effects { env, io }; }\n"
 
 
 def main() -> int:
     print("=== args ===")
     stdlib.set_prog_args(["foo", "bar"])
-    got = run(TU, """func f(const Vec<u64>& xs) -> u64 {
+    got = run(TU, """func f(const vector<u64>& xs) -> u64 {
     Args a = args();
     return args_len(a);
 }
 """)
     check("args_len 读到 2", got == 2, str(got))
-    first = run(TU, """func f(const Vec<u64>& xs) -> u64 {
+    first = run(TU, """func f(const vector<u64>& xs) -> u64 {
     Args a = args();
     return args_get(a, 0).length();
 }
@@ -73,27 +73,27 @@ def main() -> int:
 
     print("=== env_get：找不到是 None，不是空串 ===")
     os.environ["ELENCH_T"] = "hello"
-    hit = run(TU, """func f(const Vec<u64>& xs) -> u64 {
+    hit = run(TU, """func f(const vector<u64>& xs) -> u64 {
     match (env_get("ELENCH_T")) {
-        Option::Some(v) => { return v.length(); }
-        Option::None => { return 0; }
+        optional::Some(v) => { return v.length(); }
+        optional::None => { return 0; }
         _ => { return 0; }
     }
 }
 """)
     check("命中 → 长度 5", hit == 5, str(hit))
-    miss = run(TU, """func f(const Vec<u64>& xs) -> u64 {
+    miss = run(TU, """func f(const vector<u64>& xs) -> u64 {
     match (env_get("ELENCH_NOPE_XYZ")) {
-        Option::Some(v) => { return 1; }
-        Option::None => { return 2; }
+        optional::Some(v) => { return 1; }
+        optional::None => { return 2; }
         _ => { return 3; }
     }
 }
 """)
-    check("未命中 → Option::None 分支（不是空串命中）", miss == 2, str(miss))
+    check("未命中 → optional::None 分支（不是空串命中）", miss == 2, str(miss))
 
     print("=== cwd ===")
-    n = run(TU, """func f(const Vec<u64>& xs) -> u64 {
+    n = run(TU, """func f(const vector<u64>& xs) -> u64 {
     return cwd().length();
 }
 """)
@@ -101,7 +101,7 @@ def main() -> int:
 
     print("=== exit：控制流 ===")
     try:
-        run(TU, """func f(const Vec<u64>& xs) -> u64 {
+        run(TU, """func f(const vector<u64>& xs) -> u64 {
     exit(7);
     return 1;
 }

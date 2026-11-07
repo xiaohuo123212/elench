@@ -110,7 +110,7 @@ def test_inline_statements():
                 continue
             total += 1
             body = t.replace("…", "").replace("...", "")
-            src = ("func _t(const Vec<u64>& xs) -> u64 {\n    "
+            src = ("func _t(const vector<u64>& xs) -> u64 {\n    "
                    + body + "\n    return 0;\n}\n")
             errs = errs_of(src)
             if errs:
@@ -122,14 +122,14 @@ def test_inline_statements():
 def test_regressions_are_named():
     print("[3] 把踩过的两个坑写成断言（这两个写法**必须**编译失败）")
     for label, src in (
-        ("`for (u64 x : xs)` 不是合法遍历", "func f(const Vec<u64>& xs) -> u64 {\n"
+        ("`for (u64 x : xs)` 不是合法遍历", "func f(const vector<u64>& xs) -> u64 {\n"
                                             "    for (u64 x : xs) { }\n    return 0;\n}\n"),
         ("`val` 是退役关键字", "func f() -> u64 {\n    val x = 1;\n    return x;\n}\n"),
     ):
         errs = errs_of(src)
         check(bool(errs), f"{label} → 必须报 E-", str([d.code for d in errs]))
 
-    ok_src = "func f(const Vec<u64>& xs) -> u64 {\n    for (x in xs) { }\n    return 0;\n}\n"
+    ok_src = "func f(const vector<u64>& xs) -> u64 {\n    for (x in xs) { }\n    return 0;\n}\n"
     check(not errs_of(ok_src), "`for (x in xs)` 是合法写法（对照）")
 
 

@@ -44,7 +44,7 @@ import tempfile
 from interp import Interp, load_dispatch_table
 from parser import parse_source
 
-SAMPLES = os.path.join(ROOT, "文档", "设计", "目前设计", "样例")
+SAMPLES = os.path.join(ROOT, "文档", "样例")
 
 _passed = 0
 _failed = []

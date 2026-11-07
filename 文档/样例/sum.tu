@@ -8,7 +8,7 @@
 error CalcError;
 
 spec average(
-             const Vec<u8>& scores) -> u64! {
+             const vector<u8>& scores) -> u64! {
     effects { alloc };
 
     benchmodel {
@@ -24,7 +24,7 @@ spec average(
     target { time: { max: O(scores.length()) }, allocation: { max: 0 }, };
 
     // #region choose
-    choose sum_kernel(const Vec<u8>& scores) -> u64! {
+    choose sum_kernel(const vector<u8>& scores) -> u64! {
         over {
             sum_by_index,
             sum_by_iter

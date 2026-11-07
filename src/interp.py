@@ -4,6 +4,7 @@
 
 # -*- coding: utf-8 -*-
 
+from typenames import canon, display
 import stdlib
 import sys
 
@@ -46,6 +47,8 @@ import re
 from typing import Any, Dict, List, Optional
 
 from parser import Node
+from ast_util import arms_of, arm_pattern, arm_block, arm_single_stmts
+from ast_util import stmt_body, stmt_else, while_cond, for_iterable
 from ast_util import descendants as _descendants
 from kinds import INTERP_EXPR, INTERP_STMT
 
@@ -298,6 +301,112 @@ class Text(list):
         return bytes(self).decode("utf-8", "replace")
 
 
+class SetVal:
+    """`Set<T>` 的值：**有序集合**（元素序，确定可复现）。
+
+    和 `MapVal` 同一条理由：哈希的查找最坏 O(n)、顺序不可复现，
+    而契约要的是确定上界。集合的成本是 **O(log n)**，顺序是**元素序**。
+    """
+
+    __slots__ = ("data",)
+
+    def __init__(self, items=None):
+        self.data = set(items or [])
+
+    def sorted_items(self):
+        return sorted(self.data)
+
+    def __len__(self):
+        return len(self.data)
+
+    def __repr__(self):
+        return f"set[{len(self.data)}]"
+
+
+class UnorderedMapVal:
+    """`unordered_map<K,V>`：**承诺最坏 O(n)** 的键值容器。
+
+    **迭代顺序未指定**——不要依赖它，也不要把 `map` 的"键序、可复现"套过来。
+    它存在的意义是"和 C++ 对齐"，在我们的成本模型里**每一项都比 `map` 差**
+    （O(n) vs O(log n)）。这一点在语法清单里明写。
+    """
+
+    __slots__ = ("data",)
+
+    def __init__(self):
+        self.data = {}
+
+    def __len__(self):
+        return len(self.data)
+
+    def __repr__(self):
+        return f"unordered_map[{len(self.data)}]"
+
+
+class UnorderedSetVal:
+    """`unordered_set<T>`：同上，**顺序未指定**，成本 O(n)。"""
+
+    __slots__ = ("data",)
+
+    def __init__(self):
+        self.data = set()
+
+    def __len__(self):
+        return len(self.data)
+
+    def __repr__(self):
+        return f"unordered_set[{len(self.data)}]"
+
+
+class StackVal(list):
+    """`stack<T>`：**LIFO 薄封装**，底层就是普通向量。
+
+    C++ 的 `std::stack` 同样是**容器适配器**（默认包 `std::deque`），不是容器。
+    成本全部 O(1)，没有新的内存语义。
+    """
+
+    __slots__ = ()
+
+    def __repr__(self):
+        return f"stack[{len(self)}]"
+
+
+class QueueVal(list):
+    """`queue<T>`：**FIFO 薄封装**，底层是向量 + 读游标（摊销 O(1)）。"""
+
+    __slots__ = ()
+
+    def __repr__(self):
+        return f"queue[{len(self)}]"
+
+
+class MapVal:
+    """`Map<K, V>` 的值：**有序映射**（键序，确定可复现）。
+
+    为什么不是哈希表：哈希的查找是「最坏 O(n)、平均 O(1)」，而契约要的是**上界**；
+    顺序也不可复现。有序映射的成本是 **O(log n) 确定**，顺序是**键序**，
+    键只需要全序——和这门语言的立论一致。
+    """
+
+    __slots__ = ("data",)
+
+    def __init__(self, items=None):
+        self.data = dict(items or {})
+
+    def key_at(self, i: int):
+        """按键序取第 i 个键。"""
+        return sorted(self.data)[i]
+
+    def keys_sorted(self):
+        return sorted(self.data)
+
+    def __len__(self):
+        return len(self.data)
+
+    def __repr__(self):
+        return f"map[{len(self.data)}]"
+
+
 class FixedList(list):
     """`FixedVec<T, N>` 的值：**定长数组**，push 超过 N 必须报错。
 
@@ -517,6 +626,8 @@ class Interp:
         self.method_calls = 0
         self._cap: Dict[int, int] = {}      # 容器 id → 当前容量（模拟扩容）
         self.fns: Dict[str, Node] = {}
+        # 声明类型（变量名 → 类型名）：打印时据此决定有/无符号
+        self.vty: Dict[str, str] = {}
         self.kernels: Dict[str, Node] = {}
         self.over: Dict[str, List[str]] = {}
         # **spec 索引**：`requires` 断言要在入口找到对应 spec。
@@ -635,7 +746,7 @@ class Interp:
         # 不成立就立刻失败——**而不是让函数带着坏输入继续算**。
         self._check_requires(fn, env, force)
 
-        block = next((c for c in fn.children if c.kind == "block"), None)
+        block = stmt_body(fn)
         if block is None:
             raise InterpError(f"{fn.name} 没有函数体（可能还是 pending）")
         fallible = bool((fn.value or {}).get("fallible"))
@@ -753,6 +864,18 @@ class Interp:
         elif not _fallible and isinstance(_v, Err):
             raise InterpError(f"{st.name} 的初值是 Err({_v.e})，但类型声明为不可失败")
         env[st.name] = _v
+        # 类型节点**本身就是** `type-name`（`var-decl.children[0]` 直接是它），
+        # 不是容器——第一版取 `.children[0]` 拿到 None，于是类型表一直是空的。
+        _tn = _ty if getattr(_ty, "kind", "") == "type-name" else (
+            _ty.children[0] if (_ty is not None and _ty.children) else None)
+        if _tn is not None and getattr(_tn, "kind", "") == "type-name":
+            _tyname = _tn.name or ""
+            self.vty[st.name] = _tyname
+            # **`f32` 必须真按 32 位舍入**：否则解释器算的是 double，
+            # 生成的后端是 float，两边对不上（"同一程序两个答案"）。
+            if _tyname == "f32" and isinstance(_v, float):
+                _v = _round_f32(_v)
+                env[st.name] = _v
         return
     def _k_stmt_assign(self, st, env, force):
         val = self._eval(st.children[1], env, force)
@@ -782,7 +905,7 @@ class Interp:
             return
         return
     def _k_stmt_parallel(self, st, env, force):
-        body = next((c for c in st.children if c.kind == "block"), None)
+        body = stmt_body(st)
         if body is None:
             return
         tasks = [c for c in body.children if c.kind == "block"]
@@ -846,9 +969,9 @@ class Interp:
         raise _Continue()
 
     def _k_stmt_for(self, st, env, force):
-        body = next((c for c in st.children if c.kind == "block"), None)
+        body = stmt_body(st)
         var = st.name
-        base = next((c for c in st.children if c.kind != "block"), None)
+        base = for_iterable(st)
         # **区间 `for (i in a..b)`**（v0.72）：半开 `[a, b)`。
         # 以前这里只找 `kind=="path"`，区间是 `binary("..")`，于是**静默 0 次**。
         if base is not None and getattr(base, "kind", "") == "binary" \
@@ -860,9 +983,12 @@ class Interp:
             seq = self._eval(base, env, force) if base is not None else []
             if not isinstance(seq, list):
                 seq = list(seq) if seq is not None else []
-        for item in seq:
+        _idx_var = getattr(st, "value", None) or None
+        for _n, item in enumerate(seq):
             self._tick()
             self.iters += 1
+            if _idx_var:
+                env[_idx_var] = _n
             env[var] = item
             if body is not None:
                 try:
@@ -907,15 +1033,12 @@ class Interp:
 
     def _match(self, st: Node, env, force) -> None:
         val = self._eval(st.children[0], env, force)
-        arms = [c for c in st.children[1:] if c.kind == "arm"]
+        arms = arms_of(st)
         for arm in arms:
-            pat = next((c for c in arm.children if c.kind in
-                        ("pattern", "pattern-wildcard", "pattern-literal")), None)
+            pat = arm_pattern(arm)
             # 臂的体：可能是 block，也可能是一条单语句（`Pat => return 1,`）
-            body = next((c for c in arm.children if c.kind == "block"), None)
-            single = [c for c in arm.children
-                      if c.kind not in ("pattern", "pattern-wildcard",
-                                        "pattern-literal", "block")]
+            body = arm_block(arm)
+            single = arm_single_stmts(arm)
             if pat is None:
                 continue
             hit = False
@@ -1100,7 +1223,12 @@ class Interp:
             # **除零由 `requires b != 0` 负责**（规格），不是让 `/` 返回 Result。
             # 以前返回 `Ok(q)`，于是 `return a/b` 得到 `Ok(3)`、`a%2==0` 恒假。
             if b == 0:
+                # **浮点除零是 IEEE 有定义的结果**（inf/nan），不是错误。
+                if isinstance(a, float) or isinstance(b, float):
+                    return _ieee_div(a, b)
                 raise InterpError("E-Arith-DivZero：除数为 0（请用 `requires b != 0;` 约束）")
+            if isinstance(a, float) or isinstance(b, float):
+                return a / b
             q = abs(a) // abs(b)
             return q if (a >= 0) == (b >= 0) else -q
         if op == "%":
@@ -1156,12 +1284,12 @@ class Interp:
             ts = ""
             if ty is not None:
                 nm = getattr(ty, "name", None) or (ty.children[0].name if ty.children else "")
-                if nm == "Vec":
+                if canon(nm) == "vector":
                     ts = "Vec"
                 else:
                     ts = nm
             from ffi_c import argtype_for
-            argtypes.append(argtype_for("Vec" if ts == "Vec" else ts))
+            argtypes.append(argtype_for("vector" if canon(ts) == "vector" else ts))
         fn.argtypes = argtypes or None
         rt = next((c for c in decl.children if c.kind in ("type-ref", "type-name")), None)
         rts = ""
@@ -1226,7 +1354,43 @@ class Interp:
         from ffi_c import to_native
         return fn(*to_native(args))
 
+    _UNSIGNED_TY = ("u8", "u16", "u32", "u64")
+
+    def _print_typed(self, n: Node, env, force) -> Any:
+        """`print` 的**类型定向**求值：`u64` 的负值（补码）转回无符号再打。"""
+        _an = next((c for c in n.children if c.kind == "args"), None)
+        _vals = []
+        for _a in (_an.children if _an is not None else []):
+            _v = self._eval(_a, env, force)
+            _tn = self.vty.get(_a.name) if getattr(_a, "kind", "") == "path" else None
+            if _tn in self._UNSIGNED_TY and isinstance(_v, int) and not isinstance(_v, bool) and _v < 0:
+                _v += 1 << 64
+            _vals.append(_v)
+        # **计数必须和常规内建一致**：以前这里直接返回，`_bump()` 与
+        # `builtin_calls` 都没记，ops 少 1（test_kappa_gaps 实测 6 → 5）。
+        self.builtin_calls["print"] = self.builtin_calls.get("print", 0) + 1
+        if _COUNT:
+            _bump()
+        return _builtin_print(_vals)
+
     def _call(self, n: Node, env, force) -> Any:
+        # **`swap(xs, i, j)`**：原地交换两个元素（B3）。
+        # 先有实现再登记 —— 上一次把顺序做反，结果 check 通过、run 崩。
+        if (n.name or "").split(".")[-1] == "swap":
+            _an = next((c for c in n.children if c.kind == "args"), None)
+            _vs = [self._eval(a, env, force) for a in (_an.children if _an is not None else [])]
+            if len(_vs) != 3:
+                raise InterpError("swap 要 3 个实参（容器, i, j）")
+            _seq, _i, _j = _vs[0], int(_vs[1]), int(_vs[2])
+            if not isinstance(_seq, list):
+                raise InterpError(f"swap 的第 1 个实参不是容器：{type(_seq).__name__}")
+            if not (0 <= _i < len(_seq)) or not (0 <= _j < len(_seq)):
+                raise InterpError(f"swap 下标越界：{_i}, {_j}（长度 {len(_seq)}）")
+            _seq[_i], _seq[_j] = _seq[_j], _seq[_i]
+            return 0
+        if (n.name or "").split(".")[-1] == "print":
+            return self._print_typed(n, env, force)
+
         # **调用函数值**：`g(1, 2)`，其中 `g` 是 `func(...)->R` 形参。
         # 必须放在最前面：否则会走"未定义的函数 g"。
         if n.children and n.children[0].kind == "path":
@@ -1261,7 +1425,7 @@ class Interp:
             args = self._args(n, env, force)
             if callee_node.kind == "field" and callee_node.children \
                     and callee_node.children[0].kind == "type-name" \
-                    and callee_node.name in ("make", "filled"):
+                    and callee_node.name in ("make", "filled", "new"):
                 tn = callee_node.children[0]
                 cap = _fixed_capacity(tn, self.globals)
 
@@ -1270,16 +1434,37 @@ class Interp:
                 #
                 # 两个构造子对应两种意图。只给 make 的话，
                 # 「建一张表」就得先写 push 循环——而 C 的 `u64 dp[N]` 是直接建好的。
-                if tn.name == "FixedVec" and cap is not None:
+                if canon(tn.name) == "map":
+                    return MapVal()
+                if canon(tn.name) == "stack":
+                    return StackVal()
+                if canon(tn.name) == "unordered_map":
+                    return UnorderedMapVal()
+                if canon(tn.name) == "unordered_set":
+                    return UnorderedSetVal()
+                if canon(tn.name) == "queue":
+                    return QueueVal()
+                if canon(tn.name) == "set":
+                    return SetVal()
+                if canon(tn.name) == "array" and cap is not None:
                     if callee_node.name == "filled":
                         fill = args[0] if args else 0
                         return FixedList(cap, [fill] * cap)
                     return FixedList(cap)
-                if callee_node.name == "filled":
-                    fill = args[0] if args else 0
-                    n = args[1] if len(args) > 1 else 0
-                    return [fill] * int(n)
-                return []
+                if canon(tn.name) == "vector":
+                    if callee_node.name == "filled":
+                        fill = args[0] if args else 0
+                        n = args[1] if len(args) > 1 else 0
+                        return [fill] * int(n)
+                    return []
+                # **未知容器不许被静默建成空壳**（2026-11-06）：
+                # 以前任何类型名都落到 `return []`，于是
+                # `deque<u64> q = deque<u64>::new(); q.length()` **返回 0**——
+                # 检查说没问题、运行给假答案，比报错危险得多。
+                raise InterpError(
+                    f"未知容器类型 `{tn.name}`：`{tn.name}<…>::{callee_node.name}()` 没有实现。"
+                    f"已实现：vector / array / map / set / unordered_map / unordered_set / "
+                    f"stack / queue。若要两端增删，用 vector + 头尾索引。")
             # `Token.Number(1)` 这类：callee 不是 path，而是 field（枚举变体）
             callee = self._eval(callee_node, env, force)
             args = self._args(n, env, force)
@@ -1341,6 +1526,45 @@ class Interp:
             _args_node = next((c for c in n.children if c.kind == "args"), None)
             _vals = [self._eval(a, env, force) for a in (_args_node.children if _args_node else [])]
             return self._call_ffi_spec(name or "", _vals)
+
+        # **堆原语**（对齐 `std::push_heap` / `std::pop_heap`）：大顶堆固定。
+        # 不给自定义比较器——比较器是任意代码，成本不可静态界定。
+        # `xs` 就是普通向量，**没有新内存语义**。
+        if name in ("push_heap", "pop_heap"):
+            _an = next((c for c in n.children if c.kind == "args"), None)
+            _av = [self._eval(a, env, force) for a in (_an.children if _an is not None else [])]
+            _seq = _av[0] if _av else None
+            if not isinstance(_seq, list):
+                raise InterpError(f"{name} 的第 1 个实参不是容器")
+            if name == "push_heap":
+                if len(_av) != 2:
+                    raise InterpError("push_heap 要 2 个实参（容器, 值）")
+                _seq.append(_av[1])
+                _i = len(_seq) - 1
+                while _i > 0:
+                    _par = (_i - 1) // 2
+                    if _seq[_par] >= _seq[_i]:
+                        break
+                    _seq[_par], _seq[_i] = _seq[_i], _seq[_par]
+                    _i = _par
+                return 0
+            if not _seq:
+                raise InterpError("pop_heap：空堆")
+            _n = len(_seq)
+            _seq[0], _seq[_n - 1] = _seq[_n - 1], _seq[0]
+            _i = 0
+            while True:
+                _l = 2 * _i + 1
+                if _l >= _n - 1:
+                    break
+                _c = _l
+                if _l + 1 < _n - 1 and _seq[_l + 1] > _seq[_l]:
+                    _c = _l + 1
+                if _seq[_i] >= _seq[_c]:
+                    break
+                _seq[_i], _seq[_c] = _seq[_c], _seq[_i]
+                _i = _c
+            return 1
 
         if name in ("sort", "sort_by"):
             if _COUNT:
@@ -1555,6 +1779,96 @@ class Interp:
         name = n.name or ""
         recv_node = n.children[0]
         recv = self._eval(recv_node, env, force)
+        # **有序映射的方法**（Map<K,V>）：键序确定，成本 O(log n)。
+        # **有序集合的方法**（Set<T>）：元素序确定。
+        # **stack / queue 的方法**：全部 O(1)（queue 的 pop 用读游标摊销）。
+        # **unordered_map / unordered_set**：语义同 map/set，但**顺序未指定**。
+        if isinstance(recv, (UnorderedMapVal, UnorderedSetVal)):
+            _m = (n.name or "").split(".")[-1]
+            _an = next((c for c in n.children if c.kind == "args"), None)
+            _av = [self._eval(a, env, force) for a in (_an.children if _an is not None else [])]
+            _is_map = isinstance(recv, UnorderedMapVal)
+            if _m == "insert" and _is_map:
+                recv.data[_av[0]] = _av[1] if len(_av) > 1 else 0
+                return 0
+            if _m == "insert":
+                recv.data.add(_av[0])
+                return 0
+            if _m == "get":
+                if _av[0] not in recv.data:
+                    raise InterpError("unordered_map.get：键不存在（先用 contains 判断）")
+                return recv.data[_av[0]]
+            if _m == "contains":
+                return 1 if _av[0] in recv.data else 0
+            if _m == "remove":
+                if _av[0] in recv.data:
+                    recv.data.discard(_av[0]) if not _is_map else recv.data.pop(_av[0], None)
+                    return 1
+                return 0
+            if _m == "length":
+                return len(recv.data)
+            if _m in ("keys", "values"):
+                # **顺序未指定**：这里返回插入序，但契约不保证——文档已写明。
+                return list(recv.data.keys()) if _is_map else list(recv.data)
+            raise InterpError(f"unordered 容器没有方法 {_m}")
+        if isinstance(recv, (StackVal, QueueVal)):
+            _m = (n.name or "").split(".")[-1]
+            _an = next((c for c in n.children if c.kind == "args"), None)
+            _av = [self._eval(a, env, force) for a in (_an.children if _an is not None else [])]
+            _is_stack = isinstance(recv, StackVal)
+            if _m in ("push", "enqueue"):
+                recv.append(_av[0])
+                return 0
+            if _m in ("pop", "dequeue"):
+                if not recv:
+                    raise InterpError(f"{'stack' if _is_stack else 'queue'} 是空的，不能 pop")
+                return recv.pop() if _is_stack else recv.pop(0)
+            if _m in ("top", "peek", "front"):
+                if not recv:
+                    raise InterpError(f"{'stack' if _is_stack else 'queue'} 是空的，没有堆顶/队首")
+                return recv[-1] if _is_stack else recv[0]
+            if _m == "length":
+                return len(recv)
+            raise InterpError(f"{'stack' if _is_stack else 'queue'} 没有方法 {_m}")
+        if isinstance(recv, SetVal):
+            _s = (n.name or "").split(".")[-1]
+            _san = next((c for c in n.children if c.kind == "args"), None)
+            _sav = [self._eval(a, env, force) for a in (_san.children if _san is not None else [])]
+            if _s == "insert":
+                recv.data.add(_sav[0])
+                return 0
+            if _s == "contains":
+                return 1 if _sav[0] in recv.data else 0
+            if _s == "remove":
+                if _sav[0] in recv.data:
+                    recv.data.discard(_sav[0])
+                    return 1
+                return 0
+            if _s == "length":
+                return len(recv.data)
+            if _s == "values":
+                return sorted(recv.data)
+            raise InterpError(f"set 没有方法 {_s}")
+        if isinstance(recv, MapVal):
+            _m = (n.name or "").split(".")[-1]
+            _an = next((c for c in n.children if c.kind == "args"), None)
+            _av = [self._eval(a, env, force) for a in (_an.children if _an is not None else [])]
+            if _m == "insert":
+                recv.data[_av[0]] = _av[1] if len(_av) > 1 else 0
+                return 0
+            if _m == "get":
+                if _av[0] not in recv.data:
+                    raise InterpError(f"map.get：键 {_av[0]!r} 不存在（先用 contains 判断）")
+                return recv.data[_av[0]]
+            if _m == "contains":
+                return 1 if _av[0] in recv.data else 0
+            if _m == "remove":
+                return 1 if recv.data.pop(_av[0], None) is not None else 0
+            if _m == "length":
+                return len(recv.data)
+            if _m == "keys":
+                return sorted(recv.data)
+            raise InterpError(f"map 没有方法 {_m}")
         args = []
         for c in n.children[1:]:
             if c.kind == "args":
@@ -1687,7 +2001,7 @@ class Interp:
         pnames = [c.name for c in (params.children if params else [])]
         for nm, v in zip(pnames, args):
             cenv[nm] = v
-        body = next((c for c in cand.children if c.kind == "block"), None)
+        body = stmt_body(cand)
         try:
             self._block(body, cenv, force)
             return None
@@ -1784,4 +2098,22 @@ def _wrap(v: int, width: int = DEFAULT_WIDTH) -> int:
     if not isinstance(v, int) or isinstance(v, bool):
         return v
     m = 1 << width
-    return v % m
+    v %= m
+    # **存二进制补码的值本身**（2026-11-05）：`2 - 3` 得 -1，不是 2^64-1。
+    half = m >> 1
+    return v - m if v >= half else v
+
+def _ieee_div(a, b) -> float:
+    """`x/0.0` 的 IEEE 结果：非零/±0 → ±inf；0/0 → nan。"""
+    import math
+    a = float(a)
+    b = float(b)
+    if a == 0.0:
+        return math.nan
+    sign = -1.0 if (math.copysign(1.0, a) * math.copysign(1.0, b)) < 0 else 1.0
+    return sign * math.inf
+
+def _round_f32(v: float) -> float:
+    """把 Python 的 double 舍入到 IEEE 754 单精度（`f32`）。"""
+    import struct
+    return struct.unpack("f", struct.pack("f", v))[0]

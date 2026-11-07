@@ -5,7 +5,7 @@
 
 ## 它做什么
 
-把**一小类**程序翻译成 C++：标量循环 + `Vec<u64>` + 少量内建。
+把**一小类**程序翻译成 C++：标量循环 + `vector<u64>` + 少量内建。
 **目的不是覆盖全语言**，是**先打通一条窄路**（E37 的第一块）。
 
 ## 对拍：`--run`
@@ -42,12 +42,12 @@ import tempfile
 
 FAILED = []
 
-TU = """spec sum(const Vec<u64>& xs) -> u64 {
+TU = """spec sum(const vector<u64>& xs) -> u64 {
     effects {};
     target { time: { max: O(xs.length()) }, allocation: { max: 0 }, };
 }
 """
-ELN = """func sum(const Vec<u64>& xs) -> u64 {
+ELN = """func sum(const vector<u64>& xs) -> u64 {
     u64 s = 0;
     u64 i = 0;
     while (i < xs.length()) {

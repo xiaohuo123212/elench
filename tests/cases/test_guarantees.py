@@ -51,14 +51,14 @@ def spec_of(tu_src):
 
 
 TU_SORTED = """
-spec f(const Vec<u64>& xs) -> u64 {
+spec f(const vector<u64>& xs) -> u64 {
     effects {};
     guarantees is_sorted(xs);
 }
 """
 
 TU_BAD = """
-spec f(const Vec<u64>& xs) -> u64 {
+spec f(const vector<u64>& xs) -> u64 {
     effects {};
     guarantees looks_good(xs);
 }
@@ -119,19 +119,19 @@ def test_runtime():
         return it.call("f", args)
 
     TU = """
-spec f(const Vec<u64>& xs) -> u64 {
+spec f(const vector<u64>& xs) -> u64 {
     effects {};
     guarantees is_sorted(xs);
 }
 """
     GOOD = """
-func f(const Vec<u64>& xs) -> u64 {
+func f(const vector<u64>& xs) -> u64 {
     sort(xs);
     return 0;
 }
 """
     BAD = """
-func f(const Vec<u64>& xs) -> u64 {
+func f(const vector<u64>& xs) -> u64 {
     return 0;
 }
 """

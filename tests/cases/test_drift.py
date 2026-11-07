@@ -178,13 +178,13 @@ def test_fix_evidence():
     print("[4] 修复的行为证据：κ ≥ ops，且不再抛「未实现」")
 
     src = """
-func t(const Vec<u64>& xs) -> (u64, u64) { return (xs.length(), 1); }
+func t(const vector<u64>& xs) -> (u64, u64) { return (xs.length(), 1); }
 """
     k, o = run_eln(src, "t", [[0, 1, 2, 3]])
     check(o <= k, f"元组构造：ops {o} ≤ κ {k:g}（修前 tuple 落兜底）", f"{o}/{k}")
 
     src = """
-func t(const Vec<u64>& xs) -> u64 { return xs.length(); }
+func t(const vector<u64>& xs) -> u64 { return xs.length(); }
 """
     k, o = run_eln(src, "t", [[0, 1, 2, 3]])
     check(o <= k, f"对照组（无元组）：ops {o} ≤ κ {k:g}", f"{o}/{k}")

@@ -1,19 +1,28 @@
 {
   "name": "elench",
   "displayName": "Elench",
-  "description": "Elench（.eln / .tu）：语法高亮 + 内置解释器。拖进 VS Code 即可检查、算成本、跑门禁、直接运行；带环境诊断。",
-  "version": "0.6.40",
-  "publisher": "elench",
+  "description": "Elench（Elenchus）语法高亮：成本契约语言 .tu / .eln。命令 `elench` 由 elench-lang 提供。",
+  "version": "0.7.0",
+  "publisher": "xiaohuo123212",
   "license": "Apache-2.0",
+  "icon": "./icon.png",
   "engines": {
     "vscode": "^1.70.0"
   },
   "categories": [
     "Programming Languages"
   ],
+  "keywords": [
+    "elench",
+    "elenchus",
+    "cost",
+    "complexity",
+    "contract",
+    "elench-lang"
+  ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/xiaohuo123212/ai-lang-design"
+    "url": "https://github.com/elench-lang/elench.git"
   },
   "contributes": {
     "languages": [
@@ -37,79 +46,12 @@
         "path": "./syntaxes/eln.tmLanguage.json"
       }
     ],
-    "commands": [
+    "iconThemes": [
       {
-        "command": "elench.run",
-        "title": "Elench: 运行当前程序"
-      },
-      {
-        "command": "elench.check",
-        "title": "Elench: 检查当前文件"
-      },
-      {
-        "command": "elench.cost",
-        "title": "Elench: 显示成本上界"
-      },
-      {
-        "command": "elench.build",
-        "title": "Elench: 构建（门禁）"
-      },
-      {
-        "command": "elench.diagnose",
-        "title": "Elench: 环境诊断"
-      },
-      {
-        "command": "elench.installCli",
-        "title": "Elench: 安装命令行（加入 PATH）"
-      },
-      {
-        "command": "elench.verifyCli",
-        "title": "Elench: 验证命令行"
+        "id": "elench-file-icons",
+        "label": "Elench 文件图标",
+        "path": "./fileicons/elench-icon-theme.json"
       }
-    ],
-    "menus": {
-      "editor/context": [
-        {
-          "command": "elench.run",
-          "when": "resourceExtname == .eln || resourceExtname == .tu",
-          "group": "navigation@1"
-        },
-        {
-          "command": "elench.check",
-          "when": "resourceExtname == .eln || resourceExtname == .tu",
-          "group": "navigation@2"
-        },
-        {
-          "command": "elench.diagnose",
-          "when": "resourceExtname == .eln || resourceExtname == .tu",
-          "group": "navigation@3"
-        }
-      ]
-    },
-    "configuration": {
-      "title": "Elench",
-      "properties": {
-        "elench.pythonPath": {
-          "type": "string",
-          "default": "",
-          "description": "运行内置解释器用的 Python（3.10+）。**留空自动探测** python / python3 / py；填了就用填的值（例：py、python3、C:\\Python312\\python.exe）"
-        },
-        "elench.dshPath": {
-          "type": "string",
-          "default": "",
-          "description": "elench.py 的路径；留空则依次找工作区 src/ 与扩展自带的 python/"
-        },
-        "elench.checkOnSave": {
-          "type": "boolean",
-          "default": true,
-          "description": "保存时自动运行 dsh check 并把诊断写进 Problems"
-        }
-      }
-    }
-  },
-  "main": "./extension.js",
-  "activationEvents": [
-    "onLanguage:elench",
-    "onCommand:elench.run"
-  ]
+    ]
+  }
 }

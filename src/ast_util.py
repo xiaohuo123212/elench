@@ -42,3 +42,70 @@ def const_int_value(c: Optional[Any]) -> Optional[int]:
             except (TypeError, ValueError):
                 return None
     return None
+
+
+def arms_of(st) -> list:
+    """`match` 的所有臂（`arm` 节点）。"""
+    return [c for c in (getattr(st, "children", []) or []) if c.kind == "arm"]
+
+
+def match_scrutinee(st):
+    """`match` 的被匹配表达式（第一个非 arm 子节点）。"""
+    for c in (getattr(st, "children", []) or []):
+        if c.kind != "arm":
+            return c
+    return None
+
+
+def arm_pattern(arm):
+    """臂的模式节点（`pattern` / `pattern-wildcard` / `pattern-literal`）。"""
+    for c in (getattr(arm, "children", []) or []):
+        if c.kind in ("pattern", "pattern-wildcard", "pattern-literal"):
+            return c
+    return None
+
+
+def arm_block(arm):
+    """臂的 block（`Pat => { ... }`）；单语句臂返回 None。"""
+    for c in (getattr(arm, "children", []) or []):
+        if c.kind == "block":
+            return c
+    return None
+
+
+def arm_single_stmts(arm) -> list:
+    """臂的单语句部分（`0 => return 1,` 里的 `return 1`）。"""
+    return [c for c in (getattr(arm, "children", []) or [])
+            if c.kind not in ("pattern", "pattern-wildcard", "pattern-literal", "block")]
+
+
+def stmt_body(st):
+    """语句的块体（`if`/`while`/`for`/`block` 都取第一个 `block`）。"""
+    for c in (getattr(st, "children", []) or []):
+        if c.kind == "block":
+            return c
+    return None
+
+
+def stmt_else(st):
+    """`if` 的 else 子节点；没有则 None。"""
+    for c in (getattr(st, "children", []) or []):
+        if c.kind == "else":
+            return c
+    return None
+
+
+def while_cond(st):
+    """`while` 的条件（第一个非 block 子节点）。"""
+    for c in (getattr(st, "children", []) or []):
+        if c.kind != "block":
+            return c
+    return None
+
+
+def for_iterable(st):
+    """`for` 的被迭代表达式（跳过 block 与 param）。"""
+    for c in (getattr(st, "children", []) or []):
+        if c.kind not in ("block", "param"):
+            return c
+    return None

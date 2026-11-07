@@ -47,8 +47,14 @@ class CfgNode:
         return f"<{self.id} {self.kind} {getattr(self.st, 'kind', '')}>"
 
 
+#: 会**改容器内容**的方法。漏一个，借用检查就在那个方法上失效
+#: （2026-11-06 补：`fill` / `extend` / `enqueue` / `dequeue` 都曾漏掉）。
 MUT_METHODS = {"push", "pop", "clear", "set", "sort", "sort_by",
-               "reverse", "resize", "insert", "remove"}
+               "reverse", "resize", "insert", "remove",
+               "fill", "extend", "enqueue", "dequeue"}
+
+#: 会改**第一个实参**的内建函数（不是方法，所以方法扫描抓不到）。
+MUT_FUNCS = {"swap"}
 
 
 def _paths(node) -> Set[str]:
@@ -157,10 +163,28 @@ class Cfg:
         else:
             n.uses |= _paths(st)
             for mc in descendants(st, "method-call"):
-                if mc.children and getattr(mc.children[0], "kind", None) == "path":
-                    if (mc.name or "") in MUT_METHODS:
-                        n.muts.add(mc.children[0].name)
-                        n.uses.add(mc.children[0].name)
+                if (mc.name or "") not in MUT_METHODS or not mc.children:
+                    continue
+                # **变异归到根变量**（2026-11-06 修）：以前只认 `children[0]` 是 path，
+                # 于是 `s.items.push(9)` 记不上——接收者是 `field` 节点，条件不成立，
+                # **整个字段上的写入都被漏掉**。用 `_base_of` 取根（`s.items` → `s`），
+                # 方向保守：改字段就算改结构体。
+                base = _base_of(mc.children[0])
+                if base:
+                    n.muts.add(base)
+                    n.uses.add(base)
+            # **内建函数也会改第一个实参**（`swap(xs, i, j)`）——方法扫描抓不到它，
+            # 于是"借用还活着就换元素"以前是漏报的。
+            for call in descendants(st, "call"):
+                if (call.name or "") not in MUT_FUNCS:
+                    continue
+                args = next((c for c in (call.children or []) if c.kind == "args"), None)
+                if args is None or not args.children:
+                    continue
+                base = _base_of(args.children[0])
+                if base:
+                    n.muts.add(base)
+                    n.uses.add(base)
         self.link(n.id, succ)
         return n.id
 

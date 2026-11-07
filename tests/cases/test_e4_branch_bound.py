@@ -44,13 +44,13 @@ def check(name, cond, detail=""):
         print(f"  FAIL {name}   {detail}")
 
 
-TU = """spec f(const Vec<u64>& xs) -> u64 {
+TU = """spec f(const vector<u64>& xs) -> u64 {
     effects {};
     target { time: { max: O(xs.length()) }, allocation: { max: 0 }, };
 }
 """
 
-CH = """func f(const Vec<u64>& xs) -> u64 {
+CH = """func f(const vector<u64>& xs) -> u64 {
     u64 i = 0;
     if (xs.length() > 0) {
         i = xs.length();

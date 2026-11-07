@@ -56,10 +56,9 @@ def main() -> int:
     check("映射都带 cost_note", not no_note, str(no_note))
 
     print("=== 关键类型映射 ===")
-    for elench, cxx in (("HashMap<K,V>", "std::unordered_map"),
-                        ("Set<T>", "std::unordered_set"),
-                        ("Deque<T>", "std::deque"),
-                        ("Vec<u8>", "std::vector")):
+    for elench, cxx in (("map<K,V>", "std::map"),
+                        ("set<T>", "std::set"),
+                        ("vector<u8>", "std::vector")):
         check(f"{elench} → {cxx}", cxx in cxx_map.cxx_type(elench), cxx_map.cxx_type(elench))
 
     print("=== 平均 O(1) 与上界不同的地方必须写明 ===")

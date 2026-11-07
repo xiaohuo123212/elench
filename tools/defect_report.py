@@ -25,6 +25,10 @@ import sys
 
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(R, "src"))
+# **`test_invalid` 住在 tests/cases/，不在 src/**（2026-11-06 修）：
+# 以前只把 src 加进 sys.path，于是 `import test_invalid` 直接 ModuleNotFoundError，
+# 整份"缺陷检出率"报告不可复现。
+sys.path.insert(0, os.path.join(R, "tests", "cases"))
 
 import test_invalid                        # noqa: E402
 from checker import check_module           # noqa: E402

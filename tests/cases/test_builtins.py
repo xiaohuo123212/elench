@@ -160,7 +160,7 @@ def test_cost():
     from cost_interp import CostInterp
     from symbolic import Cost
 
-    ch = parse_source("""func f(Vec<u64>& xs) -> u64! {
+    ch = parse_source("""func f(vector<u64>& xs) -> u64! {
     u64 best = 0;
     u64 i = 0;
     while (i < xs.length()) {

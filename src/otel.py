@@ -568,7 +568,7 @@ if __name__ == "__main__":
 
     sys.stdout.reconfigure(encoding="utf-8")
     HERE = os.path.dirname(os.path.abspath(__file__))
-    S = os.path.join(HERE, "..", "文档", "设计", "目前设计", "样例")
+    S = os.path.join(HERE, "..", "文档", "样例")
     tu = parse_source(open(os.path.join(S, "search.tu"), encoding="utf-8").read(), "t").module
     ch = parse_source(open(os.path.join(S, "search.eln"), encoding="utf-8").read(), "c").module
     ci = CostInterp(ch, tu)

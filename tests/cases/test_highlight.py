@@ -35,7 +35,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 from highlight import highlight, strip_ansi, tokens_of
 
-SAMPLE = os.path.join(HERE, "..", "文档", "设计", "目前设计", "样例")
+SAMPLE = os.path.join(HERE, "..", "文档", "样例")
 
 _passed = 0
 _failed = []

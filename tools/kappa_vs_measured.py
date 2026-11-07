@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """kappa_vs_measured —— **兼容入口**，实现已移到 `src/kappa_vs_measured.py`。
 
-为什么搬：`src/dsh.py` 的 `tightness` 与 `export --full` 在**运行期** import 这个模块。
+为什么搬：`src/dsh.py` 的 `export --full` 在**运行期** import 这个模块。
 它原本在 `tools/` 下，而 `tools/` 不进任何安装产物（wheel / .pyz / vsix / 便携包），
 于是那些命令在装好的包里一跑就 `ModuleNotFoundError: No module named 'kappa_vs_measured'`。
 模块本身只依赖 `src/` 里的东西（`bound` / `interp` / `bench` / `cost_interp` / `parser`），

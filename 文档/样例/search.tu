@@ -15,7 +15,7 @@ spec in_range(u64 lo, u64 hi) -> bool {
 }
 
 spec binary_search(
-                   const Vec<u64>& xs, u64 key) -> u64! {
+                   const vector<u64>& xs, u64 key) -> u64! {
     effects { alloc };
     requires is_sorted(xs);
 
@@ -37,7 +37,7 @@ spec binary_search(
     ;
 
     // #region choose
-    choose search_impl(const Vec<u64>& xs, u64 key) -> u64! {
+    choose search_impl(const vector<u64>& xs, u64 key) -> u64! {
         over {
             search_linear,
             search_binary,

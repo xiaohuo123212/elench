@@ -46,7 +46,7 @@ from parser import parse_source       # noqa: E402
 FAILED = []
 LIB = "ucrtbase" if sys.platform == "win32" else "libc"
 
-TU = """spec f(const Vec<u64>& xs) -> u64 {
+TU = """spec f(const vector<u64>& xs) -> u64 {
     effects {};
     target { time: { max: O(xs.length()) }, allocation: { max: 0 }, };
 }
@@ -54,9 +54,9 @@ TU = """spec f(const Vec<u64>& xs) -> u64 {
 
 
 def ch(effects="effects {}", extra_effects=""):
-    return f'''extern strlen(const Vec<u8>& s) -> u64 from "{LIB}" {effects};
+    return f'''extern strlen(const vector<u8>& s) -> u64 from "{LIB}" {effects};
 
-func f(const Vec<u64>& xs) -> u64 {{
+func f(const vector<u64>& xs) -> u64 {{
     return strlen("hello"){extra_effects};
 }}
 '''
@@ -78,12 +78,12 @@ def main() -> int:
           str(Interp(eln, tu).call("f", [[1]])))
 
     print("=== 写法二：extern 写成 spec（推荐） ===")
-    tu_ext = f"""spec strlen(const Vec<u8>& s) -> u64 {{
+    tu_ext = f"""spec strlen(const vector<u8>& s) -> u64 {{
     external "{LIB}";
     effects {{}};
     target {{ time: {{ max: O(1) }}, allocation: {{ max: 0 }}, }};
 }}
-spec f(const Vec<u64>& xs) -> u64 {{
+spec f(const vector<u64>& xs) -> u64 {{
     effects {{}};
     target {{ time: {{ max: O(xs.length()) }}, allocation: {{ max: 0 }}, }};
 }}
@@ -91,7 +91,7 @@ spec f(const Vec<u64>& xs) -> u64 {{
     r2 = parse_source(tu_ext, "m.tu")
     check("spec 里的 external \"lib\" 能解析", [d.code for d in r2.diagnostics] == [],
           str([d.code for d in r2.diagnostics][:2]))
-    ch2 = """func f(const Vec<u64>& xs) -> u64 {
+    ch2 = """func f(const vector<u64>& xs) -> u64 {
     return strlen("hello");
 }
 """
@@ -105,11 +105,11 @@ spec f(const Vec<u64>& xs) -> u64 {{
     print("=== 写法三：module link + 无体 spec（推荐） ===")
     tu_link = f"""link "{LIB}";
 
-spec strlen(const Vec<u8>& s) -> u64 {{
+spec strlen(const vector<u8>& s) -> u64 {{
     effects {{}};
     target {{ time: {{ max: O(1) }}, allocation: {{ max: 0 }}, }};
 }}
-spec f(const Vec<u64>& xs) -> u64 {{
+spec f(const vector<u64>& xs) -> u64 {{
     effects {{}};
     target {{ time: {{ max: O(xs.length()) }}, allocation: {{ max: 0 }}, }};
 }}
@@ -117,7 +117,7 @@ spec f(const Vec<u64>& xs) -> u64 {{
     r3 = parse_source(tu_link, "m.tu")
     check("link \"lib\" 能解析", [d.code for d in r3.diagnostics] == [],
           str([d.code for d in r3.diagnostics][:2]))
-    ch3 = 'func f(const Vec<u64>& xs) -> u64 { return strlen("hello"); }\n'
+    ch3 = 'func f(const vector<u64>& xs) -> u64 { return strlen("hello"); }\n'
     got3 = Interp(parse_source(ch3, "m.eln").module, r3.module).call("f", [[1]])
     check("无体 spec 自动当外部函数（5）", got3 == 5, str(got3))
 

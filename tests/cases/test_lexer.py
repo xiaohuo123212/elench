@@ -30,7 +30,7 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from lexer import Kind, lex
 
-SAMPLE_DIR = Path(ROOT) / "文档" / "设计" / "目前设计" / "样例"
+SAMPLE_DIR = Path(ROOT) / "文档" / "样例"
 
 fails = []
 oks = 0

@@ -13,7 +13,7 @@ Elench — 权利归属说明 / Ownership notice
   · src/lexer.py  src/parser.py  src/typecheck.py  src/checker.py
   · src/interp.py  src/symbolic.py  src/cost_interp.py  src/cost_check.py
   · src/stdlib.py  src/jsonval.py  src/fmt.py  src/dsh.py（解释器相关子命令）
-  · src/test_*.py（测试套）
+  · tests/cases/test_*.py（测试套，123 个文件）
   · tools/（检查与复现工具：artifact_check / defect_report / demo_repair 等）
   · 文档/（语言规格、设计文档、样例程序、决策记录）
   · 预印本与演示论文（论文的署名权归作者，单位署名为北京邮电大学）

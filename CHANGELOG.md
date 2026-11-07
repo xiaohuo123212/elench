@@ -15,6 +15,141 @@
 
 ## [Unreleased]
 
+### Changed
+- **`src/_baseline/` 与 `tools/diff_check.py` 退役**（2026-11-07）：它们是「新旧实现逐位对拍」的遗留（主批 B 迁移期用的），而基线副本本身就是第二份实现、会和真实现一起漂移。κ 回归由 `tools/golden_check.py` 承担。
+- **golden 改为与机器无关**：`golden_check` 不再读本地 `.dispatch.yaml`（那份表是测量产物、gitignore，换台机器就没有或不一样），固定 **max 口径**后重新冻结 **21 条**。理由：**只有这台机器能复现的基准不是基准**。分段口径仍由 `test_dispatch_*` 覆盖。
+- **删除迁移遗留模块**：`src/archive_specs.py`、`src/migrate_tests.py`（0 处代码引用），并从 `pyproject.toml` 的 `py-modules` 移除。
+- **`src/` 顶层四个转发 shim 保留**，理由写在 `src/README-兼容层.md`：它们用 `sys.modules[__name__] = _real` 换取**模块身份**，`tests/cases/test_ops.py` 的 monkeypatch 依赖这一点；删它们要改 ~200 处 import，收益 1.4 KB，**不值得**。
+- **样例目录双权威合并**：`文档/样例` 是唯一源，删除内部镜像 `文档/设计/目前设计/样例/`（60 个文件，与公开侧漂移 13 个）。内部独有的 `const_loop`/`scan_until` 移到 `设计/目前设计/样例-补充/`（不属公开语料）。代码里 52 处旧路径已改。
+- **三份 `内建函数.md` 收成一份**：生成器改为直接写公开的 `文档/内建函数.md`，并支持 `--check`；`设计/` 与 `评估/对外文档副本/` 的那两份改成一行指针（此前三份三个大小：6,572 / 6,925 / 7,993）。
+- **内部文档断链 67 → 0**（52 条按新位置重写、8 条去链接留文字，2 条为误报）。
+- **`文档/实验/` 归档**到 `文档/设计/归档/实验-2026-11/`（50 个文件），19 处工具/文档路径同步（`exp_*.py`、`ab_experiment.py`、`sync_public.py`、`AGENTS.md`）。
+- **`cost --explain` 达标时也输出归因**：以前只在超界时给支配项与杠杆占比，
+  于是「这条为什么贵」在达标时看不到。现在两者都出。
+
+### Added
+- **`elench spec <模块>`**：为缺 spec 的函数生成声明草案。`effects` 从实现推，
+  **`target` 只给静态 κ 作参考、不自动生成**（推出来就等于自证）。
+
+### Added
+- **`unordered_map` / `unordered_set`**：按最坏情况**承诺 O(n)**（不承诺 O(1)）；
+  迭代顺序**未指定**。成本模型按接收者声明类型区分：map/set 记 `log2`，unordered 记 `n`。
+
+### Added
+- **`stack<T>` / `queue<T>` 薄封装**：成本全 O(1)，空容器 pop 报错。
+  与 C++ 一样是容器适配器，不是新容器。
+
+### Added
+- **堆原语 `push_heap` / `pop_heap`**：对齐 `std::push_heap` / `std::pop_heap`；
+  成本每秒 **O(log₂ n)**；大顶堆固定；空堆 pop 报错。与 C++ 一样是**原语**不是容器。
+
+### Added
+- **有序 `Map<K,V>` / `Set<T>`**：查找/插入 **O(log n) 确定**，迭代顺序 = 键序/元素序，
+  键只要全序、**不定义哈希函数**。`map.get` 缺键**报错**（不静默给 0）。
+
+### Added
+- **`option_unwrap(o)`**：`None` 时**报错**（不像 `option_unwrap_or` 给默认值）。
+  以前想表达"一定有值"只能 `unwrap_or(o, 0)`，把漏判静默变成 0。
+
+### Added
+- **`swap(xs, i, j)`**：原地交换，O(1)、不分配；下标越界报错。
+  先实现再登记——上一轮顺序做反，导致 check 通过、run 崩。
+
+### Added
+- **带下标的遍历 `for (i, x in xs)`**：`i: u64` 由语言维护，作者不碰边界条件；
+  成本与 `for (x in xs)` 结构相同（`n(容器)` 乘子），`for (i in 0..n)` 不受影响。
+
+### Added
+- **新增对外文档 `文档/可观测-OTel配置.md`**：把 OTel 接入写成用户能照做的步骤（本机 sink / `--push` / 看板 / 环境变量表）。原来它躺在 `文档/设计/未来计划/` 里，而那个目录是 gitignore 的——**用户文档放在用户读不到的地方等于没有**。
+- **`f32` / `f64` 落地**：浮点字面量默认 `f64`；`f32` 真按 32 位舍入；
+  浮点除零按 IEEE 给出 `inf`/`nan`（不是错误，所以浮点除不返回 `Result`）。
+
+### Fixed
+- **公开文档里 17 条链接指向内部目录**（`入门30分钟.md` 9、`内建函数.md` 4、`语法清单.md` 3、`项目介绍.md` 1）：本地能解析、**公开仓库必然 404**，而本地检查器发现不了。已改指公开同源（`语法清单.md`/`内建函数.md`/`入门30分钟.md`），无公开同源的去链接留文字。
+- **删除无用文件**：`文档/入门.zip`（0 引用、3 个成员过期）、`corpus/sum.grammar`（0 引用）、`otel.ndjson`（只在帮助示例里出现）、`artifact-report.md` / `pick-图.svg`（测试产物）、`src/elench.egg-info/`（构建产物）、雏雁材料的同哈希备份 docx 与 Word 锁文件。预印本 v0.1/v0.2 的 docx+pdf 移入 `预印本/历史/`（`文档/其他` 不入库，删了找不回）。
+- **gitignore 补齐**：`otel.ndjson`、`pick-图.svg`、`artifact-report.md` 都是每次跑测试会重写的产物。
+- **新增 \	ools/sync_mirror.py\**：把 \src/\ 镜像到 \editors/vscode/python/\（VS Code 扩展内嵌的解释器）。
+  加 \--check\ 供 CI 用；**比较时忽略 CRLF/LF 差异**（Windows 上字节比会误报）。
+  审计发现：**13 个文件同名但内容不同**（\dsh.py\ 少 19 行、\	ypenames.py\ 多出已删的 \Deque\），
+  说明扩展里的解释器长期比 \src/\ 旧，而**没有任何机制会提醒**。现补 \	ests/cases/test_mirror_in_sync.py\。
+- **删除无用文件**：\corpus/sum.grammar\（0 处引用）、\otel.ndjson\（只在帮助文本示例里出现，可再生成）、
+  \rtifact-report.md\ / \pick-图.svg\（测试产物）、\src/elench.egg-info/\（构建产物）。
+- **`worstcase`：0 行不再算成功**（2026-11-05）。两个问题：① 它依赖 `kappa_vs_measured.SAMPLES`，那个常量已被删 → 一跑就 `AttributeError`；② 更糟的是**产出 0 行也退出 0**，于是「最坏实测」那批数字长期不可复现却没人发现。现在自己算样例目录，且**0 行即 exit 1**（仍待修的是 `worst_for()` 本身）。
+- **`tests/runner.py` 的已知失败登记清空**：`test_dispatch_consistency` / `test_invalid` 已连续通过，按规矩从 `KNOWN_FAIL` 删除。现在 **102 文件 / 102 通过 / 0 意外**。
+- **高阶函数的成本不再给假上界**（G1）：κ 里出现 `k(f)` 这种未解释符号时判
+  `unknown`，不再因为「κ 里没有尺寸量」就当成常数判 ok。
+  被调函数的 target 若建立在 `k(f)` 上，调用方不再信任它，退回内联——
+  内联时形参绑到实参的具名函数，于是 `apply(xs, sq)`（sq 是 O(n²)）
+  真的算出平方项。传 O(1) 的函数则给出常数、判 ok。
+
+### Added
+- **`unsafe` 从装饰变成约束**：有 `unsafe { }` 块则 effects 必须声明 `unsafe`
+  （`E-Unsafe-Undeclared`）；声明了却没有块是虚报（`E-Unsafe-Overdeclared`）。
+- 前置修复：`EFFECT_VOCAB` 补上 `unsafe`，效果名允许关键字——
+  以前 `effects { unsafe }` 直接报「期望效果名」，等于**要求用户做一件做不到的事**。
+
+### Removed
+- **`spawn` / `asm` / `scope` 下线**：三者都「词法认得、EBNF 写着」但用不了或没用。
+  `spawn` 让 κ 依赖核数、`asm` 让操作数不可数（「可验证」降级为「可估算」）、
+  `scope` 只服务于 `spawn` 且关键字一直被丢弃。现在报 `E-Spawn-Removed` /
+  `E-Asm-Removed` / `E-Scope-Removed` 并给改法。`parallel { }` 保留。
+
+### Changed
+- **整数语义写进文档**（G35）：固定位宽 + **回绕**（`0 - 1` 得 u64 最大值），
+  `+ - *` 与一元 `-` 全部 `_wrap`（v0.67 算术全函数化）。
+  所以成本式永远是有限数，不存在「溢出成未知」。
+- **块尾分号说明**（E27）：解析器接受但不强制，`fmt` 统一补上；
+  实测强制的改动面是 9 个测试文件约 30 处内联用例，记为可推后。
+
+### Fixed
+- **测量类命令先看解析诊断**：`measure` / `bench` / `stats` / `dispatch` / `cost`
+  以前不看诊断就往下跑，于是把「`benchmodel` 写错了位置」报成
+  「没有 benchmodel.scale」这种二次错误——作者照它去改，改不对。
+  现在有解析 error 就先原样报出来并退出。
+
+### Changed
+- **类型检查的精度边界写清楚了**（E12）：`UNKNOWN` 与任何类型兼容，
+  只有两边都确定且不兼容才报错。泛型 / 闭包 / 嵌套字段给 UNKNOWN，
+  **宁可漏报不误报**。要更精确需做类型推导，记为有意的边界。
+
+### Changed
+- **`allocation` 的口径写清楚了**（G33）：它计的是**容器增长事件的次数**，不是字节。
+  起始容量 4、之后翻倍，每次记 1；`FixedVec` 恒 0；切片不额外分配。
+  所以 `allocation: { max: 0 }` 是「不让容器增长」，不是「不占内存」。
+  字节级模型是**有意的非目标**——字节随平台变，次数不变。
+
+### Added
+- **`benchmodel.data` 支持 `structs(T)`**（E14）：`pts = structs(Point);` 造 `Vec<Point>`。
+  以前内置生成器只有整数序列，参数是 `Vec<结构体>` 的函数**根本测不了**。
+  **只填整数字段**；字段类型是 `Vec`/字符串/结构体时直接报错——不猜，
+  猜出来的数据会让测量结论失去意义。
+
+### Removed
+- **`trait` / `impl` 下线**（E11）：它们不是「约束没实现」，而是写法本身走不通——
+  参数不许写 `self`、解析器不认 `impl Show for P`、trait 方法要已下线的 `fn`。
+  样例与文档 0 处使用。现在写它们直接报 `E-Trait-Removed` / `E-Impl-Removed`
+  并给出改法（和 `assume` 同一条理由：看起来有用、实则不存在的机制比没有更糟）。
+
+### Fixed
+- **错误类型的变体现在会被校验**（E3）：`error X { A, B };` 可以写了，
+  写错变体报 `E-Variant-Unknown`（措辞是「错误类型」而不是「枚举」）。
+  `error X;` 仍然开放、行为不变。之前 EBNF 写着变体列表，解析器却不收。
+
+### Added
+- **`measure` / `dispatch` 可以只处理一个 `?!`**：`elench measure <模块> <choose名>`。
+  只重测那一段并**按段合并**回表里，其余 label 的段、注释、顺序逐字不变，
+  所以 `git diff` 只显示这一段。表还不存在时报错，提示先跑一次全量。
+
+### Fixed
+- **分档表多 label 静默覆盖**：写入器在每个 label 的循环里 `open(..., "w")`，
+  一个模块有 2 个 `?!` 时后者覆盖前者且不报错。现在一份表装多个 `label:` 段。
+
+### Removed
+- **`tightness` 子命令删除**：测量收拢到 `export --full`。
+  `export --full` 现在按 `--out` 后缀出 `.svg`（曲线）/ `.md`（表）/ `.csv`（数据），
+  不给 `--out` 就在控制台打三节报告（上界 / 超额倍数 / 紧度）。
+  测量入口收敛成一个 `_measure_curve()`，不再有两份实现（默认 runs 曾不一致）。
+
 ### Removed
 - **`assume` 语法移除**：它允许声明无法验证的上界，与「κ 是可验证上界」冲突。
   现在写 `assume` 会在解析阶段报 `E-Assume-Removed` 并给出三条改法。
@@ -489,7 +624,7 @@
 - `editors/vscode/python/`：VS Code 扩展内置解释器（33 个模块），装好即可用，不必先 clone 仓库。
 
 ### Changed
-- 对外仓库**不再包含** `文档/设计/`、`文档/其他/`、`文档/实验/`、`文档/待办.md`（内部规划与申报材料）。
+- 对外仓库**不再包含** `文档/设计/`、`文档/其他/`、`文档/设计/归档/实验-2026-11/`、`文档/待办.md`（内部规划与申报材料）。
 - README 的“从哪里读”与目录结构改为对外布局。
 - 包版本 `0.69.0` → `1.0.0`。
 

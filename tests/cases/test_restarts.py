@@ -43,14 +43,14 @@ def check(ok, label, detail=""):
 
 
 TU_DEBT = """
-spec f(const Vec<u64>& xs) -> u64 {
+spec f(const vector<u64>& xs) -> u64 {
     effects {};
     target { time: { max: O(xs.length()) }, allocation: { max: 0 } };
 }
 """
 
 ELN_DEBT = """
-func f(const Vec<u64>& xs) -> u64 {
+func f(const vector<u64>& xs) -> u64 {
     u64 s = 0;
     u64 i = 0;
     while (i < xs.length()) {
@@ -133,7 +133,7 @@ def test_target_edit_needs_explicit_allow():
 def test_guarantee_restart():
     print("[3] 不可检查的 guarantees 带一条修法")
     tu = """
-spec f(const Vec<u64>& xs) -> u64 {
+spec f(const vector<u64>& xs) -> u64 {
     effects {};
     guarantees looks_good(xs);
 }

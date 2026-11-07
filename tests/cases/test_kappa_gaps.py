@@ -145,23 +145,23 @@ def xs(n: int = 16):
 
 # ---------------------------------------------------------------- ① 递归深度
 RECUR = """
-func down(const Vec<u64>& xs, u64 i) -> u64 {
+func down(const vector<u64>& xs, u64 i) -> u64 {
     if (i == 0) { return xs.length(); }
     return 1 + down(xs, i - 1);
 }
-func main8(const Vec<u64>& xs) -> u64 { return down(xs, 8); }
+func main8(const vector<u64>& xs) -> u64 { return down(xs, 8); }
 """
 
 
 def tu_rec(unbounded: bool = False) -> str:
     """`recursion depth <= N` 是**唯一**的深度声明（规格 C11-b）。"""
     return """
-spec down(const Vec<u64>& xs, u64 i) -> u64 {
+spec down(const vector<u64>& xs, u64 i) -> u64 {
     effects {};
 """ + ("" if unbounded else "    recursion depth <= 8;\n") + """
     target { time: { max: O(xs.length()) }, allocation: { max: 0 }, };
 }
-spec main8(const Vec<u64>& xs) -> u64 {
+spec main8(const vector<u64>& xs) -> u64 {
     effects {};
     target { time: { max: O(xs.length()) }, allocation: { max: 0 }, };
 }
@@ -209,12 +209,12 @@ def test_recursion_depth():
 
 def tu_rec_for(d: int) -> str:
     return """
-spec down(const Vec<u64>& xs, u64 i) -> u64 {
+spec down(const vector<u64>& xs, u64 i) -> u64 {
     effects {};
     recursion depth <= %d;
     target { time: { max: O(xs.length()) }, allocation: { max: 0 }, };
 }
-spec main8(const Vec<u64>& xs) -> u64 {
+spec main8(const vector<u64>& xs) -> u64 {
     effects {};
     target { time: { max: O(xs.length()) }, allocation: { max: 0 }, };
 }
@@ -224,22 +224,22 @@ spec main8(const Vec<u64>& xs) -> u64 {
 # ---------------------------------------------------------------- ② 内建实参
 BUILTINS = """
 func visit(u64 v) -> u64 { return v; }
-func visit2(const Vec<u8>& k, u64 v) -> u64 { return v; }
+func visit2(const vector<u8>& k, u64 v) -> u64 { return v; }
 func keep(u64 v) -> bool { return v > 0; }
 func addv(u64 a, u64 b) -> u64 { return a + b; }
 func cmpv(u64 a, u64 b) -> bool { return a < b; }
 func p1() -> u64 { print("x"); return 0; }
 func p2() -> u64 {
-    HashMap<Vec<u8>, u64> m = map_new();
+    HashMap<vector<u8>, u64> m = map_new();
     map_put(m, "a", 1);
     return for_each(m, visit2);
 }
-func map1(const Vec<u64>& xs) -> Vec<u64> { return map(xs, visit); }
-func filt(const Vec<u64>& xs) -> Vec<u64> { return filter(xs, keep); }
-func fold1(const Vec<u64>& xs) -> u64 { return fold(xs, 0, addv); }
-func cnt(const Vec<u64>& xs) -> u64 { return count_if(xs, keep); }
-func srt(const Vec<u64>& xs) -> Vec<u64> { return sort(xs); }
-func srtb(const Vec<u64>& xs) -> Vec<u64> { return sort_by(xs, cmpv); }
+func map1(const vector<u64>& xs) -> vector<u64> { return map(xs, visit); }
+func filt(const vector<u64>& xs) -> vector<u64> { return filter(xs, keep); }
+func fold1(const vector<u64>& xs) -> u64 { return fold(xs, 0, addv); }
+func cnt(const vector<u64>& xs) -> u64 { return count_if(xs, keep); }
+func srt(const vector<u64>& xs) -> vector<u64> { return sort(xs); }
+func srtb(const vector<u64>& xs) -> vector<u64> { return sort_by(xs, cmpv); }
 """
 
 #: 比较器**不写 target**：`sort_by` 的 `n log n × κ(cmp)` 用**函数体** κ。
@@ -303,41 +303,41 @@ def test_minmax_dispatch():
 
 # ---------------------------------------------------------------- ④ 函数值
 FNVAL = """
-func countf(const Vec<u64>& xs) -> u64 { return xs.length(); }
-func idf(const Vec<u64>& xs) -> Vec<u64> { return xs; }
-func apply_u(const Vec<u64>& xs, func(Vec<u64>) -> u64 g) -> u64 { return g(xs); }
-func apply_v(const Vec<u64>& xs, func(Vec<u64>) -> Vec<u64> g) -> Vec<u64> {
+func countf(const vector<u64>& xs) -> u64 { return xs.length(); }
+func idf(const vector<u64>& xs) -> vector<u64> { return xs; }
+func apply_u(const vector<u64>& xs, func(vector<u64>) -> u64 g) -> u64 { return g(xs); }
+func apply_v(const vector<u64>& xs, func(vector<u64>) -> vector<u64> g) -> vector<u64> {
     return g(xs);
 }
-func apply_vn(const Vec<u64>& xs, func(Vec<u64>) -> Vec<u64> g) -> Vec<u64> {
+func apply_vn(const vector<u64>& xs, func(vector<u64>) -> vector<u64> g) -> vector<u64> {
     return g(idf(xs));
 }
-func host_u(const Vec<u64>& xs) -> u64 { return apply_u(xs, countf); }
-func host_v(const Vec<u64>& xs) -> Vec<u64> { return apply_v(xs, idf); }
-func host_vn(const Vec<u64>& xs) -> Vec<u64> { return apply_vn(xs, idf); }
+func host_u(const vector<u64>& xs) -> u64 { return apply_u(xs, countf); }
+func host_v(const vector<u64>& xs) -> vector<u64> { return apply_v(xs, idf); }
+func host_vn(const vector<u64>& xs) -> vector<u64> { return apply_vn(xs, idf); }
 """
 
 FNVAL_TU = """
-spec countf(const Vec<u64>& xs) -> u64 {
+spec countf(const vector<u64>& xs) -> u64 {
     effects {};
     target { time: { max: O(xs.length()) }, allocation: { max: 0 }, };
 }
-spec apply_u(const Vec<u64>& xs, func(Vec<u64>) -> u64 g) -> u64 { effects {}; }
-spec apply_v(const Vec<u64>& xs, func(Vec<u64>) -> Vec<u64> g) -> Vec<u64> { effects {}; }
+spec apply_u(const vector<u64>& xs, func(vector<u64>) -> u64 g) -> u64 { effects {}; }
+spec apply_v(const vector<u64>& xs, func(vector<u64>) -> vector<u64> g) -> vector<u64> { effects {}; }
 """
 
 #: `for_each` 的 κ 是**符号**（`k(visit2)`）：工具必须打印 inf、跳过该点。
 FGAP = """
-func visit2(const Vec<u8>& k, u64 v) -> u64 { return v; }
-func f(const Vec<u64>& xs) -> u64 {
-    HashMap<Vec<u8>, u64> m = map_new();
+func visit2(const vector<u8>& k, u64 v) -> u64 { return v; }
+func f(const vector<u64>& xs) -> u64 {
+    HashMap<vector<u8>, u64> m = map_new();
     map_put(m, "a", 1);
     return for_each(m, visit2);
 }
 """
 
 FGAP_TU = """
-spec f(const Vec<u64>& xs) -> u64 {
+spec f(const vector<u64>& xs) -> u64 {
     effects {};
     target { time: { max: O(1) }, allocation: { max: 0 }, };
 }

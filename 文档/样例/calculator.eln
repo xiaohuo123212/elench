@@ -7,8 +7,8 @@
 //   T n            可变绑定
 //   条件带括号     if (n == 0) { … }
 //   块只用 }       不写 end
-//   Vec<T>         动态数组（会分配）
-//   FixedVec<T, N> 定容数组（不分配）
+//   vector<T>         动态数组（会分配）
+//   array<T, N> 定容数组（不分配）
 //   T!             可能失败；错误类型取模块的 error 声明
 //   return x       T! 函数里自动成为 Ok(x)——不要写 Ok(...)
 //   调用可能失败   一律写 `?`
@@ -17,16 +17,16 @@
 // ============================================================
 
 pub func evaluate(
-                  const Vec<u8>& text) -> i64! {
-    const FixedVec<Token,
+                  const vector<u8>& text) -> i64! {
+    const array<Token,
     MAX_TOKENS> tokens = tokenize(text)?;
     return reduce(tokens);
 }
 
 func tokenize(
-              const Vec<u8>& text) -> FixedVec<Token, MAX_TOKENS>! {
-    FixedVec<Token,
-    MAX_TOKENS> tokens = FixedVec<Token,
+              const vector<u8>& text) -> array<Token, MAX_TOKENS>! {
+    array<Token,
+    MAX_TOKENS> tokens = array<Token,
     MAX_TOKENS>::make();
     u64 index = 0;
     const u64 total = text.length();
@@ -71,7 +71,7 @@ func tokenize(
 }
 
 func read_number(
-                 const Vec<u8>& text, u64 start) -> (i64, u64)! {
+                 const vector<u8>& text, u64 start) -> (i64, u64)! {
     u64 index = start;
     i64 value = 0;
     u64 digits = 0;
@@ -96,12 +96,12 @@ func read_number(
 }
 
 func reduce(
-            const FixedVec<Token, MAX_TOKENS>& tokens) -> i64! {
-    FixedVec<i64,
-    MAX_DEPTH> values = FixedVec<i64,
+            const array<Token, MAX_TOKENS>& tokens) -> i64! {
+    array<i64,
+    MAX_DEPTH> values = array<i64,
     MAX_DEPTH>::make();
-    FixedVec<Token,
-    MAX_DEPTH> operators = FixedVec<Token,
+    array<Token,
+    MAX_DEPTH> operators = array<Token,
     MAX_DEPTH>::make();
     u64 index = 0;
     const u64 total = tokens.length();
@@ -150,7 +150,7 @@ func reduce(
     return values.at(0);
 }
 
-func pop_until_open(FixedVec<i64, MAX_DEPTH>& values, FixedVec<Token,
+func pop_until_open(array<i64, MAX_DEPTH>& values, array<Token,
                     MAX_DEPTH>& operators) -> bool! {
     while (operators.length() > 0) {
         const Token top = operators.at(operators.length() - 1);
@@ -167,7 +167,7 @@ func pop_until_open(FixedVec<i64, MAX_DEPTH>& values, FixedVec<Token,
 }
 
 func should_reduce(
-                   const FixedVec<Token, MAX_DEPTH>& operators, Token next) -> bool {
+                   const array<Token, MAX_DEPTH>& operators, Token next) -> bool {
     if (operators.length() == 0) {
         return false;
     }
@@ -190,7 +190,7 @@ func precedence(Token token) -> u64 {
     }
 }
 
-func apply_top(FixedVec<i64, MAX_DEPTH>& values, FixedVec<Token,
+func apply_top(array<i64, MAX_DEPTH>& values, array<Token,
                MAX_DEPTH>& operators) -> i64! {
     if (values.length() < 2 or operators.length() < 1) {
         return Err(CalcError::UnbalancedParenthesis);

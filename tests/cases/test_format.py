@@ -7,7 +7,7 @@
 
 ```elench
 print("x = {}, y = {:>3}", x, y);      // 位置参数：第 i 个洞吃第 i 个实参
-const Vec<u8> s = format("v={:x}", 255);
+const vector<u8> s = format("v={:x}", 255);
 ```
 
 | 写法 | 含义 |
@@ -44,7 +44,7 @@ from interp import Interp             # noqa: E402
 from parser import parse_source       # noqa: E402
 
 FAILED = []
-TU = "spec f(const Vec<u64>& xs) -> u64 { effects { io }; }\n"
+TU = "spec f(const vector<u64>& xs) -> u64 { effects { io }; }\n"
 
 
 def check(name, cond, detail=""):
@@ -72,7 +72,7 @@ def main() -> int:
     check("多洞按顺序", fmt("{}-{}-{}", 1, 2, 3) == b"1-2-3")
 
     print("=== print 插值 ===")
-    ch = 'func f(const Vec<u64>& xs) -> u64 { print("a = {}, b = {:>2}", 1, 2); return 0; }'
+    ch = 'func f(const vector<u64>& xs) -> u64 { print("a = {}, b = {:>2}", 1, 2); return 0; }'
     Interp(parse_source(ch, "m.eln").module, parse_source(TU, "m.tu").module).call("f", [[1]])
     check("print 用格式串（输出见上一行）", True)
 
@@ -81,15 +81,15 @@ def main() -> int:
         "洞多": ('print("x = {}, y = {}", 1);', "E-Format-Arity"),
         "洞少": ('print("x = {}", 1, 2);', "E-Format-Arity"),
         "非法说明符": ('print("{:.2}", 1);', "E-Format-BadSpec"),
-        "十六进制给字节串": ('const Vec<u8> s = "a"; print("{:x}", s);', "E-Format-ArgType"),
+        "十六进制给字节串": ('const vector<u8> s = "a"; print("{:x}", s);', "E-Format-ArgType"),
     }
     for name, (body, code) in cases.items():
-        ch = "func f(const Vec<u64>& xs) -> u64 { " + body + " return 0; }"
+        ch = "func f(const vector<u64>& xs) -> u64 { " + body + " return 0; }"
         got = [d.code for d in check_module(TU, ch, "m").diagnostics]
         check(f"{name} → {code}", code in got, str(got))
 
     print("=== 正常的不报错 ===")
-    ok = 'func f(const Vec<u64>& xs) -> u64 { print("x = {}, y = {:>2}", 1, 2); return 0; }'
+    ok = 'func f(const vector<u64>& xs) -> u64 { print("x = {}, y = {:>2}", 1, 2); return 0; }'
     check("合法格式串无诊断", [d.code for d in check_module(TU, ok, "m").diagnostics] == [])
 
     print()

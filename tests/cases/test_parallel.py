@@ -35,16 +35,16 @@ from parser import parse_source                         # noqa: E402
 
 FAILED = []
 
-TU = """spec f(const Vec<u64>& xs) -> u64 {
+TU = """spec f(const vector<u64>& xs) -> u64 {
     effects {};
     target { time: { max: O(xs.length()) }, allocation: { max: 0 }, };
 }
 """
 
-TU_CHOOSE = """spec f(const Vec<u64>& xs) -> u64 {
+TU_CHOOSE = """spec f(const vector<u64>& xs) -> u64 {
     effects {};
     target { time: { max: O(xs.length()) }, allocation: { max: 0 }, };
-    choose kernel(const Vec<u64>& xs) -> u64 {
+    choose kernel(const vector<u64>& xs) -> u64 {
         over { by_a, by_b };
         objective time;
     };
@@ -73,7 +73,7 @@ def codes(code, tu_src=TU):
 def main() -> int:
     print("=== 语义：顺序模拟 ===")
     check("两个任务都执行（各写各的，回来合并）",
-          run("""func f(const Vec<u64>& xs) -> u64 {
+          run("""func f(const vector<u64>& xs) -> u64 {
     u64 a = 0;
     u64 b = 0;
     parallel {
@@ -84,7 +84,7 @@ def main() -> int:
 }""") == 12, "期望 12")
 
     check("嵌套 parallel 也能跑",
-          run("""func f(const Vec<u64>& xs) -> u64 {
+          run("""func f(const vector<u64>& xs) -> u64 {
     u64 a = 0;
     u64 b = 0;
     parallel {
@@ -95,7 +95,7 @@ def main() -> int:
 }""") == 3, "期望 3")
 
     check("每个任务一个花括号（显式任务边界）",
-          run("""func f(const Vec<u64>& xs) -> u64 {
+          run("""func f(const vector<u64>& xs) -> u64 {
     u64 s = 0;
     parallel {
         { s = s + sum_of(xs); }
@@ -106,7 +106,7 @@ def main() -> int:
 
     print("=== 成本：κ = Σ（B-24）===")
     tu = parse_source(TU, "m.tu").module
-    ch = parse_source("""func f(const Vec<u64>& xs) -> u64 {
+    ch = parse_source("""func f(const vector<u64>& xs) -> u64 {
     u64 s = 0;
     parallel {
         s = s + sum_of(xs);
@@ -119,7 +119,7 @@ def main() -> int:
     check("κ 里出现两个 n(xs)（Σ 而不是 max）", k.count("n(xs)") == 2, k)
 
     print("=== ?! 可以进 parallel（成本仍按 Σ 记）===")
-    c = codes("""func f(const Vec<u64>& xs) -> u64! {
+    c = codes("""func f(const vector<u64>& xs) -> u64! {
     u64 s = 0;
     parallel {
         s = s + ?!kernel(xs);
@@ -130,7 +130,7 @@ def main() -> int:
     check("不报 E-Parallel-Dispatch", "E-Parallel-Dispatch" not in c, str(c))
 
     print("=== 允许在任务里打印（改为「不可测量」，不再报错）===")
-    c = codes("""func f(const Vec<u64>& xs) -> u64 {
+    c = codes("""func f(const vector<u64>& xs) -> u64 {
     parallel {
         { print(1); }
         { print(2); }
@@ -142,7 +142,7 @@ def main() -> int:
           "E-Parallel-Effectful" not in c, str(c))
 
     print("=== 任务之间不许共享可变状态（E-Parallel-ShareMut）===")
-    c = codes("""func f(const Vec<u64>& xs) -> u64 {
+    c = codes("""func f(const vector<u64>& xs) -> u64 {
     u64 s = 0;
     parallel {
         { s = s + 1; }
@@ -153,7 +153,7 @@ def main() -> int:
 """)
     check("两个任务都写 s → 报 E-Parallel-ShareMut", "E-Parallel-ShareMut" in c, str(c))
 
-    c = codes("""func f(const Vec<u64>& xs) -> u64 {
+    c = codes("""func f(const vector<u64>& xs) -> u64 {
     u64 a = 0;
     u64 b = 0;
     parallel {
@@ -166,9 +166,9 @@ def main() -> int:
     check("各写各的 → 通过", "E-Parallel-ShareMut" not in c, str(c))
 
     print("=== B-26：候选里不能有 parallel ===")
-    c = codes("""func f(const Vec<u64>& xs) -> u64! {
+    c = codes("""func f(const vector<u64>& xs) -> u64! {
     return ?!kernel(xs);
-} kernels kernel(const Vec<u64>& xs) -> u64! {
+} kernels kernel(const vector<u64>& xs) -> u64! {
     by_a {
         parallel {
             print(1);

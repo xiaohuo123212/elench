@@ -45,7 +45,7 @@ def check(ok, label, detail=""):
 
 
 TU = """
-spec strlen(const Vec<u8>& s) -> u64 {
+spec strlen(const vector<u8>& s) -> u64 {
     effects { fs };
     external "ucrtbase";
 }
@@ -80,7 +80,7 @@ def spec_node(tu, name):
 
 def test_validate_units():
     print("[1] 纯校验器：个数 / 类型 / 取值")
-    params = [("s", "Vec<u8>&")]
+    params = [("s", "vector<u8>&")]
     check(shape.validate("strlen", params, [b"abc"]) == [b"abc"], "bytes 通过")
     check(shape.validate("strlen", params, ["abc"]) == ["abc"], "str 通过（后端会编码）")
     check(shape.validate("strlen", params, [[65, 66]]) == [[65, 66]], "整数列表通过")
@@ -120,7 +120,7 @@ def test_unsupported():
     except shape.UnsupportedError as exc:
         check("E-FFI-Unsupported" in str(exc), "float → E-FFI-Unsupported", str(exc))
     check(ffi_c.argtype_for("u64") is not None, "u64 有映射")
-    check(ffi_c.argtype_for("Vec<u8>&") is not None, "Vec 有映射")
+    check(ffi_c.argtype_for("vector<u8>&") is not None, "vector 有映射")
     check(ffi_c.restype_for("") is None, "空返回类型 = void")
 
 
@@ -128,7 +128,7 @@ def test_interp_gate():
     print("[3] 解释器入口：错误在加载库之前抛出")
     it, tu = make_interp()
     spec = spec_node(tu, "strlen")
-    check(param_list(spec) == [("s", "Vec<u8>&")], "param_list 认得 Vec<u8>&",
+    check(param_list(spec) == [("s", "vector<u8>&")], "param_list 认得 vector<u8>&",
           str(param_list(spec)))
 
     for args, why in ([[1, 2], "个数"], [[123], "类型"]):
@@ -157,6 +157,21 @@ def main() -> int:
         for f in _failed:
             print("  -", f)
         return 1
+    print("[长度] 定容 array<T,N> 查长度；vector<T> 没有声明长度，查不了")
+    import shape as _sh
+
+    def _ok(ty, v):
+        try:
+            _sh.validate("f", [("x", ty)], [v])
+            return True
+        except Exception:                       # noqa: BLE001
+            return False
+
+    check("array<u8,4> 收 4 字节", _ok("array<u8, 4>", b"abcd"))
+    check("array<u8,4> 拒 2 字节", not _ok("array<u8, 4>", b"ab"))
+    check("array<u8,4> 收 4 个整数", _ok("array<u8, 4>", [1, 2, 3, 4]))
+    check("vector<u8> 不查长度（无声明）", _ok("vector<u8>", b"ab"))
+
     print(f"全部通过：{_passed} 项")
     return 0
 

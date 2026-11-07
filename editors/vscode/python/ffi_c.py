@@ -19,10 +19,11 @@
 
 **加一个后端文件，不动校验器**：`ffi_py.py` / `ffi_wasm.py` 各提供同样的
 `argtype_for` / `restype_for` / `to_native`。设计见
-`文档/设计/目前设计/未做/设计-多语言FFI编组.md`。
+`文档/设计/目前设计/未做/挂起/挂起-多语言FFI编组.md`。
 """
 from __future__ import annotations
 
+from typenames import canon, display
 import ctypes
 from typing import Any, List
 
@@ -31,7 +32,8 @@ from shape import UnsupportedError
 
 def argtype_for(ty: str):
     """`.tu` 声明类型 → ctypes 参数类型。"""
-    if ty.startswith("Vec") or ty.startswith("["):
+    _head = (ty or "").split("<")[0].split("&")[0].strip()
+    if canon(_head) in ("vector", "array") or ty.startswith("["):
         return ctypes.c_char_p
     if ty == "i64":
         return ctypes.c_int64

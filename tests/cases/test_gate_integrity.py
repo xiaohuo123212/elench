@@ -107,12 +107,12 @@ def test_match_cost():
 
 def test_alloc_in_loop():
     print("[4] 循环内分配 = 轮数 × 每轮")
-    tu = parse_source('spec f(const Vec<u64>& xs) -> u64 { effects {}; '
+    tu = parse_source('spec f(const vector<u64>& xs) -> u64 { effects {}; '
                       'target { time: { max: O(n) }, allocation: { max: 0 } }; }\n',
                       "m.tu").module
-    eln = parse_source("func f(const Vec<u64>& xs) -> u64 {\n"
+    eln = parse_source("func f(const vector<u64>& xs) -> u64 {\n"
                        "    u64 s = 0;\n"
-                       "    for (x in xs) { Vec<u64> t = [1, 2]; s = s + t.length(); }\n"
+                       "    for (x in xs) { vector<u64> t = [1, 2]; s = s + t.length(); }\n"
                        "    return s;\n}\n", "m.eln").module
     ci = CostInterp(eln, tu)
     a = ci.alloc_of("f").render()

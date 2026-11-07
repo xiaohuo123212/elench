@@ -9,7 +9,7 @@
 
 // #region fn
 pub func average(
-                 const Vec<u8>& scores) -> u64! {
+                 const vector<u8>& scores) -> u64! {
     const u64 n = scores.length();
     if (n == 0) {
         return Err(CalcError::Empty);
@@ -17,7 +17,7 @@ pub func average(
     const u64 total = (?!sum_kernel(scores))?;
     return total / n;
 } kernels sum_kernel(
-                     const Vec<u8>& scores) -> u64! {
+                     const vector<u8>& scores) -> u64! {
     sum_by_index {
         u64 s = 0;
         u64 i = 0;

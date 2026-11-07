@@ -6,7 +6,7 @@
 ## 这一层的特点
 
 - **纯函数**（没有 `effects`），成本全部可静态定界；
-- 文本就是 `Vec<u8>`；**UTF-8 只在"字符数"时才解释**；
+- 文本就是 `vector<u8>`；**UTF-8 只在"字符数"时才解释**；
 - 失败是值：`parse_u64` 返回 `Err(Parse::BadNumber | Overflow)`（内置枚举）。
 """
 import os as _os
@@ -35,7 +35,7 @@ from parser import parse_source          # noqa: E402
 FAILED = []
 T = "target { time: { max: O(a.length()) }, allocation: { max: 0 }, };\n"
 TU = f"""error Parse;
-spec f(const Vec<u8>& a, const Vec<u8>& b) -> u64 {{ effects {{}}; {T} }}
+spec f(const vector<u8>& a, const vector<u8>& b) -> u64 {{ effects {{}}; {T} }}
 """
 
 
@@ -49,7 +49,7 @@ def check(name, cond, detail=""):
 
 def run(body, a, b=None):
     tu = parse_source(TU, "m.tu").module
-    ch = parse_source("func f(const Vec<u8>& a, const Vec<u8>& b) -> u64 {\n" + body + "\n}\n",
+    ch = parse_source("func f(const vector<u8>& a, const vector<u8>& b) -> u64 {\n" + body + "\n}\n",
                       "m.eln").module
     return Interp(ch, tu).call("f", [list(a), list(b if b is not None else b"")])
 
@@ -94,9 +94,9 @@ def main() -> int:
           run("    return text_to_lower(a)[0];", b"AZ") == ord("a"))
 
     print("=== 切分 / 拼接 / 替换 ===")
-    check("text_split 段数", run("    Split<Vec<u8>> sp = text_split(a, b);\n    return split_len(sp);", b"a,b,c", b",") == 3)
-    check("split_get 取第一段", run("    Split<Vec<u8>> sp = text_split(a, b);\n    return split_get(sp, 0).length();", b"a,b,c", b",") == 1)
-    check("text_join 拼回去", run("    Split<Vec<u8>> sp = text_split(a, b);\n    return text_join(sp, b).length();", b"a,b,c", b",") == 5)
+    check("text_split 段数", run("    Split<vector<u8>> sp = text_split(a, b);\n    return split_len(sp);", b"a,b,c", b",") == 3)
+    check("split_get 取第一段", run("    Split<vector<u8>> sp = text_split(a, b);\n    return split_get(sp, 0).length();", b"a,b,c", b",") == 1)
+    check("text_join 拼回去", run("    Split<vector<u8>> sp = text_split(a, b);\n    return text_join(sp, b).length();", b"a,b,c", b",") == 5)
     check("text_replace 全部替换",
           run("    return text_replace(a, b, \"X\").length();", b"a,b,c", b",") == 5)
 
@@ -109,7 +109,7 @@ def main() -> int:
     check("base64_encode 中文a（7 字节 → 12 字符）",
           run("    return base64_encode(a).length();", "中文a".encode()) == 12)
     check("base64 往返还原",
-          run("    const Vec<u8> e = base64_encode(a);\n    const Vec<u8> d = base64_decode(e)?;\n    return d.length();",
+          run("    const vector<u8> e = base64_encode(a);\n    const vector<u8> d = base64_decode(e)?;\n    return d.length();",
               "中文a".encode()) == 7)
 
     print("=== JSON 输出（只输出，不解析）===")
@@ -127,7 +127,7 @@ def main() -> int:
 
     print("=== 成本 ===")
     tu = parse_source(TU, "m.tu").module
-    ch = parse_source("""func f(const Vec<u8>& a, const Vec<u8>& b) -> u64 {
+    ch = parse_source("""func f(const vector<u8>& a, const vector<u8>& b) -> u64 {
     return text_find(a, b);
 }
 """, "m.eln").module

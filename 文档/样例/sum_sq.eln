@@ -1,5 +1,5 @@
 // sum_sq.eln —— 平方和（单循环，两次乘法）
-pub func sum_sq(const Vec<u64>& xs) -> u64 {
+pub func sum_sq(const vector<u64>& xs) -> u64 {
     u64 n = xs.length();
     u64 s = 0;
     u64 i = 0;

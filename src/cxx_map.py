@@ -25,13 +25,28 @@ TYPE_MAP = {
     "i64": "int64_t",
     "u8": "uint8_t",
     "bool": "bool",
+    # **改名期两套写法都要能映射**：语料已翻成 `vector<…>`，
+    # 而旧数据里还有 `Vec<…>`。两条并存的成本是几十字节，
+    # 收益是不会因为"声明用新名"就生成不出 C++。
+    "vector<u8>": "std::vector<uint8_t>",
+    "vector<u64>": "std::vector<uint64_t>",
+    "vector<i64>": "std::vector<int64_t>",
+    "vector<u32>": "std::vector<uint32_t>",
     "Vec<u8>": "std::vector<uint8_t>",
     "Vec<u64>": "std::vector<uint64_t>",
     "Vec<i64>": "std::vector<int64_t>",
     "Vec<u32>": "std::vector<uint32_t>",
-    "HashMap<K,V>": "std::unordered_map<K, V>",
-    "Set<T>": "std::unordered_set<T>",
-    "Deque<T>": "std::deque<T>",
+    # **有序映射/集合**（B2 的口径）：成本 O(log n) 确定、顺序 = 键序。
+    # 以前这里映射到 `std::unordered_map` —— 那是**哈希**，最坏 O(n) 且顺序不可复现，
+    # 和我们的上界承诺冲突（映射表自己都写了这条 cost_note）。
+    "map<K,V>": "std::map<K, V>",
+    "set<T>": "std::set<T>",
+    "Map<K,V>": "std::map<K, V>",
+    "Map<u64,u64>": "std::map<uint64_t, uint64_t>",
+    "Set<T>": "std::set<T>",
+    "Set<u64>": "std::set<uint64_t>",
+    # `Deque<T>` 未实现（语言层没有这个名字的语义），留着映射只会误导。
+
     "Split": "std::vector<std::vector<uint8_t>>",
     "Option": "std::optional<T>",
     "Result": "tl::expected<T, E>",
@@ -43,6 +58,8 @@ BUILTIN_MAP = {
     "max": ("std::max(a, b)", "O(1)"),
     "print": ("std::cout << ...", "O(1) 操作；I/O 时间不在上界里"),
     "sort": ("std::sort(v.begin(), v.end())", "O(n log n)"),
+    "push_heap": ("std::push_heap(v.begin(), v.end())", "O(log n)"),
+    "pop_heap": ("std::pop_heap(v.begin(), v.end()); v.pop_back()", "O(log n)"),
     "sort_by": ("std::sort(v.begin(), v.end(), cmp)", "O(n log n)"),
     "reverse": ("std::reverse(v.begin(), v.end())", "O(n)"),
     "fill": ("std::fill(v.begin(), v.end(), x)", "O(n)"),
@@ -127,6 +144,7 @@ BUILTIN_MAP = {
     "vec_push": ("v.push_back(x)", "摊还 O(1)；分配可能发生"),
     "vec_pop": ("v.back(); v.pop_back()", "O(1)"),
     "option_unwrap_or": ("o.value_or(d)", "O(1)"),
+    "option_unwrap": ("*o /* None 抛异常 */", "O(1)；None 是错误，必须处理"),
     "format": ("/* 逐段拼接 */", "O(1 + sum(实参长度))"),
     "json_parse": ("/* 需递归类型；C++ 侧用 variant + shared_ptr */", "O(n(text))"),
     "json_array": ("/* 拼接 */", "O(n)"),

@@ -61,7 +61,7 @@ def build(tu_src, ch_src):
 
 
 def tu_for(alloc_max: str) -> str:
-    return f"""spec f(const Vec<u64>& xs) -> u64 {{
+    return f"""spec f(const vector<u64>& xs) -> u64 {{
     effects {{}};
     target {{ time: {{ max: O(xs.length()) }}, allocation: {{ max: {alloc_max} }}, }};
 }}
@@ -70,8 +70,8 @@ def tu_for(alloc_max: str) -> str:
 
 def main() -> int:
     print("=== 字面量与纯运算：0 次分配 ===")
-    ci = build(tu_for("0"), """func f(const Vec<u64>& xs) -> u64 {
-    const Vec<u64> s = "hello";
+    ci = build(tu_for("0"), """func f(const vector<u64>& xs) -> u64 {
+    const vector<u64> s = "hello";
     return s.length() + xs.length();
 }
 """)
@@ -80,8 +80,8 @@ def main() -> int:
     check("0 vs target 0 → 达成", compare_exact(a, ci.target_cost("f", "allocation")).kind == "ok")
 
     print("=== 弄成一个分配：1 次 ===")
-    ci = build(tu_for("0"), """func f(const Vec<u64>& xs) -> u64 {
-    const Vec<u64> t = format_u64(42);
+    ci = build(tu_for("0"), """func f(const vector<u64>& xs) -> u64 {
+    const vector<u64> t = format_u64(42);
     return t.length();
 }
 """)
@@ -91,10 +91,10 @@ def main() -> int:
     check("1 次 vs target 0 → **记债**（不是静默放过）", v.kind == "debt", v.render())
 
     print("=== 循环里分配：每轮 1 次 ===")
-    ci = build(tu_for("O(xs.length())"), """func f(const Vec<u64>& xs) -> u64 {
+    ci = build(tu_for("O(xs.length())"), """func f(const vector<u64>& xs) -> u64 {
     u64 i = 0;
     while (i < xs.length()) {
-        const Vec<u64> t = slice(xs, i, i + 1);
+        const vector<u64> t = slice(xs, i, i + 1);
         i = i + 1;
     }
     return i;
@@ -106,7 +106,7 @@ def main() -> int:
           compare_exact(a, ci.target_cost("f", "allocation")).kind == "ok")
 
     print("=== 循环里不分配：与轮数无关 ===")
-    ci = build(tu_for("0"), """func f(const Vec<u64>& xs) -> u64 {
+    ci = build(tu_for("0"), """func f(const vector<u64>& xs) -> u64 {
     u64 i = 0;
     u64 s = 0;
     while (i < xs.length()) {
@@ -120,8 +120,8 @@ def main() -> int:
     check("无分配的循环 = 0 次", a.is_const() and a.value == 0, a.render())
 
     print("=== 一次性 slice：1 次（不论长度） ===")
-    ci = build(tu_for("0"), """func f(const Vec<u64>& xs) -> u64 {
-    const Vec<u64> t = slice(xs, 0, xs.length());
+    ci = build(tu_for("0"), """func f(const vector<u64>& xs) -> u64 {
+    const vector<u64> t = slice(xs, 0, xs.length());
     return t.length();
 }
 """)

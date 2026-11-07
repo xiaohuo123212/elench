@@ -22,7 +22,7 @@ import subprocess
 import sys
 
 # 内部材料：只允许留本地，任何发布路径都不得包含
-INTERNAL_PREFIXES = ("文档/设计/", "文档/实验/", "文档/其他/", "文档/待办")
+INTERNAL_PREFIXES = ("文档/设计/", "文档/设计/归档/实验-2026-11/", "文档/其他/", "文档/待办")
 
 # 明显的脏文件（审稿/打包误入）
 def is_junk(path: str) -> bool:

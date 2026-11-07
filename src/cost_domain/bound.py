@@ -444,6 +444,246 @@ def progresses(wh: Node) -> Tuple[bool, str]:
     return False, f"{what} {name} 在循环体里从未被修改"
 
 
+
+def _temp_halving(body: Node, var: str):
+    """`var = tmp`，且 `tmp` 在循环体里**只定义一次**、形如 `(var ± c) / k`（k≥2）。
+
+    **判据刻意写窄**（宁可判不出，不可判错）：
+      1. `var = tmp` 必须是循环体的**直接子语句**（不在 if 分支里）；
+      2. 循环体里对 `var` 的赋值**只能有这一处**；
+      3. `tmp` 在整个循环体里**只被赋值一次**，且在被用之前；
+      4. `tmp` 的右值是 `/ k`（k≥2），分子里出现 `var`。
+
+    反例为什么会被挡住：`p = i; i = p;` 违反 3（p 赋值两次）；
+    `if (c) i = i/2; else i = i-1;` 违反 1；`i = p` 而 `p` 是参数（没在体内定义）违反 3。
+    """
+    body_children = [c for c in (getattr(body, "children", None) or [])]
+    uses = [st for st in body_children
+            if getattr(st, "kind", "") == "assign"
+            and getattr((st.children or [None])[0], "name", "") == var]
+    if len(uses) != 1:
+        return None
+    st = uses[0]
+    rhs = (st.children + [None, None])[1]
+    if getattr(rhs, "kind", "") != "path" or not getattr(rhs, "name", None):
+        return None
+    tmp = rhs.name
+    defs = []
+    for d in body_children:
+        if getattr(d, "kind", "") in ("var-decl", "const-decl") and getattr(d, "name", "") == tmp:
+            defs.append(d)
+        if getattr(d, "kind", "") == "assign" and getattr((d.children or [None])[0], "name", "") == tmp:
+            defs.append(d)
+    if len(defs) != 1:
+        return None
+    # 定义必须在使用之前
+    idx_def = body_children.index(defs[0])
+    idx_use = body_children.index(st)
+    if idx_def > idx_use:
+        return None
+    expr = defs[0].children[-1]
+    while getattr(expr, "kind", "") == "paren" and getattr(expr, "children", None):
+        expr = expr.children[0]
+    if getattr(expr, "kind", "") != "binary" or (expr.value or "") != "/":
+        return None
+    num, den = (expr.children + [None, None])[:2]
+    if getattr(den, "kind", "") != "lit-int":
+        return None
+    try:
+        if int(den.value) < 2:
+            return None
+    except (TypeError, ValueError):
+        return None
+    names = {getattr(x, "name", None) for x in _descendants(num, "path")}
+    if var not in names:
+        return None
+    return tmp
+
+
+def _log_loop(wh: Node, fn: Node = None):
+    """识别「每轮 ×2 / ÷2」的循环，返回 `(Bound, 说明)` 或 None。
+
+    **为什么需要**（L-01）：`while (i < n) { i = i * 2; }` 以前被算成 `n(n)`——
+    O(n)，带 `O(log n)` target 的**正确程序会被误拒**。
+    减半（`i = i / 2`）更糟：上界成了 `n(i)`，与 target 的 `n` 不是一个量 → **判不了**。
+
+    判定只看**形状**：循环体里对计数器有 `i = i * 常数` 或 `i = i / 常数`。
+    界：`<` 型取守卫另一侧，`>` 型取计数器的初值。
+    """
+    cond = wh.children[0] if (wh.children or []) else None
+    if cond is None or getattr(cond, "kind", "") != "binary":
+        return None
+    op = cond.value or ""
+    if op not in ("<", "<=", ">", ">="):
+        return None
+    left, right = (cond.children + [None, None])[:2]
+    if getattr(left, "kind", "") != "path" or not getattr(left, "name", None):
+        return None
+    var = left.name
+
+    body = next((c for c in wh.children[1:] if getattr(c, "kind", "") == "block"), None)
+    if body is None:
+        return None
+    # 体里必须有 `var = var * k` / `var = var / k`
+    found = None
+    # **只看循环体的直接子语句**（2026-11-06 实测的反例）：以前用 `_descendants`
+    # 会把 `if (c) { i = i / 2; } else { i = i - 1; }` 里的那次减半当成
+    # "每轮都减半"——那是**线性**循环，报 log 就是**假上界**。
+    for st in [c for c in (getattr(body, "children", None) or [])]:
+        lhs, rhs = (st.children + [None, None])[:2]
+        if getattr(lhs, "kind", "") != "path" or getattr(lhs, "name", "") != var:
+            continue
+        if getattr(rhs, "kind", "") != "binary" or (rhs.value or "") not in ("*", "/"):
+            continue
+        a, b = (rhs.children + [None, None])[:2]
+        names = {getattr(a, "name", None), getattr(b, "name", None)}
+        has_var = var in names
+        has_const = any(getattr(x, "kind", "") == "lit-int" for x in (a, b) if x is not None)
+        if has_var and has_const:
+            found = rhs.value
+            break
+    if found is None:
+        # **中转变量**：`i = p` 而 `p = (i - 1) / 2`（上滤/二分/快速幂的常见写法）。
+        # 只走窄规则，见 `_temp_halving` 的四条判据。
+        if _temp_halving(body, var) is not None:
+            found = "/"
+    if found is None:
+        return None
+    # **倍增必须检查初值**（2026-11-06 实测的反例）：`u64 i = 0; i = i * 2;`
+    # 永远不动（0×2=0），是真死循环，可它**形状完全对**——以前被判成
+    # `log2(n)` 并**判为达标**，那是一个假上界。这里只接受字面初值 ≥ 1。
+    if found == "*":
+        _init = None
+        if fn is not None:
+            for d in _descendants(fn, "var-decl"):
+                if getattr(d, "name", "") == var and len(d.children) >= 2:
+                    _init = d.children[-1]
+                    break
+            if _init is None:
+                for d in _descendants(fn, "const-decl"):
+                    if getattr(d, "name", "") == var and len(d.children) >= 2:
+                        _init = d.children[-1]
+                        break
+        if getattr(_init, "kind", "") != "lit-int":
+            return None
+        try:
+            if int(_init.value) < 1:
+                return None
+        except (TypeError, ValueError):
+            return None
+
+    if op in ("<", "<="):
+        b = expr_to_bound(right)
+        why = f"循环变量 {var} 每轮乘除 2，界取自 {var} {op} 的右侧"
+    else:
+        # `i > 1` 型：用计数器的初值（`u64 i = n;` → n）
+        b = None
+        if fn is not None:
+            for d in _descendants(fn, "var-decl"):
+                if getattr(d, "name", "") == var and len(d.children) >= 2:
+                    b = expr_to_bound(d.children[-1])
+                    break
+        if b is None:
+            # 初值不在函数体里（**参数**，如 `heapify_up(vector& h, u64 i)`）：
+            # 递减型循环从 i 减半到 0，界就是 `log2(i)` 本身。
+            # 它与 target 的 `n` 是否同符号，交给 requires 那条线去解决。
+            b = Bound("var", value=var)
+        why = f"循环变量 {var} 每轮除以 2，界取自它的初值（无初值时取它自己）"
+    if b is None:
+        return None
+    return Bound("log2", left=b), why
+
+
+def _gcd_loop(wh: Node, fn: Node = None):
+    """欧几里得算法：`while (b != 0) { t = b; b = a % b; a = t; }` ⇒ 步数 ≤ 2·log2(a)。
+
+    **为什么这条必须靠"认成语"而不是数据流**：圈数来自**数论**（Lamé 定理，1844），
+    不是程序形状——每一步的值是上一次的余数，收敛速度取决于相邻斐波那契数这个最坏情况。
+
+    证明骨架：设 a > b > 0，写 a = q·b + r。
+      · b ≤ a/2 ⇒ r < b ≤ a/2      —— 一步减半
+      · b > a/2 ⇒ q = 1, r = a−b < a/2 —— 两步减半
+    所以每两步规模至少减半 ⇒ 步数 ≤ 2·log2(a)。
+
+    **判据写死**（只认这一个形状，认不出就不给界）：
+      · 守卫是 `b != 0` 或 `b > 0`；
+      · 循环体恰好三条直接语句：`t = b; b = a % b; a = t;`
+    任何一条不符就返回 None——宁可判不出，不可判错。
+    """
+    cond = wh.children[0] if (wh.children or []) else None
+    if cond is None or getattr(cond, "kind", "") != "binary":
+        return None
+    if (cond.value or "") not in ("!=", ">"):
+        return None
+    left, right = (cond.children + [None, None])[:2]
+    if getattr(left, "kind", "") != "path" or not getattr(left, "name", None):
+        return None
+    bvar = left.name
+    body = next((c for c in wh.children[1:] if getattr(c, "kind", "") == "block"), None)
+    if body is None:
+        return None
+    sts = [c for c in (getattr(body, "children", None) or [])]
+    if len(sts) != 3:
+        return None
+    d0, d1, d2 = sts
+    if [getattr(s, "kind", "") for s in (d0, d1, d2)] != ["var-decl", "assign", "assign"]:
+        return None
+    tmp = getattr(d0, "name", "")
+    if len(d0.children) < 2 or getattr(d0.children[-1], "name", "") != bvar:
+        return None
+    lhs1, rhs1 = (d1.children + [None, None])[:2]
+    if getattr(lhs1, "name", "") != bvar:
+        return None
+    if getattr(rhs1, "kind", "") != "binary" or (rhs1.value or "") != "%":
+        return None
+    m1, m2 = (rhs1.children + [None, None])[:2]
+    if getattr(m2, "name", "") != bvar or getattr(m1, "kind", "") != "path":
+        return None
+    avar = m1.name
+    if avar == bvar:
+        return None
+    lhs2, rhs2 = (d2.children + [None, None])[:2]
+    if getattr(lhs2, "name", "") != avar or getattr(rhs2, "name", "") != tmp:
+        return None
+    return Bound("log2", left=Bound("var", value=avar)), \
+        f"欧几里得循环（{avar} % {bvar}）：每两步减半，步数 ≤ 2·log2({avar})"
+
+
+def _cyclic_loop(wh: Node, fn: Node = None):
+    """`i = (i + 1) % LEN` ⇒ 圈数 ≤ LEN（环形计数器）。
+
+    **口径**：κ 是**对终止执行的**上界。这类循环要么在 LEN 步内找到出口，
+    要么走满一圈回到起点、永不终止——后者没有成本。所以不需要终止性前提。
+
+    只认这一个形状：`(i + c) % E`，`E` 能翻译成尺寸量（`X.length()` 或一个名字）。
+    """
+    body = next((c for c in wh.children[1:] if getattr(c, "kind", "") == "block"), None)
+    if body is None:
+        return None
+    for st in _descendants(body, "assign"):
+        lhs, rhs = (st.children + [None, None])[:2]
+        if getattr(lhs, "kind", "") != "path" or not getattr(lhs, "name", None):
+            continue
+        if getattr(rhs, "kind", "") != "binary" or (rhs.value or "") != "%":
+            continue
+        left, right = (rhs.children + [None, None])[:2]
+        # `(i + 1)` 会被解析成 **paren 节点**——先剥括号再判形状。
+        while getattr(left, "kind", "") == "paren" and getattr(left, "children", None):
+            left = left.children[0]
+        if getattr(left, "kind", "") != "binary" or (left.value or "") != "+":
+            continue
+        a, b = (left.children + [None, None])[:2]
+        names = {getattr(a, "name", None), getattr(b, "name", None)}
+        if lhs.name not in names:
+            continue
+        bd = expr_to_bound(right)
+        if bd is None:
+            continue
+        return Bound(bd.kind, value=bd.value, left=bd.left, right=bd.right), \
+            f"环形计数器 {lhs.name} = ({lhs.name} + 1) % …，圈数不超过模数"
+    return None
+
+
 def bound_of_while(wh: Node, repeats_of=None, fn: Node = None):
     """`while` 节点的上界：`(界, 原因)`。
 
@@ -451,6 +691,17 @@ def bound_of_while(wh: Node, repeats_of=None, fn: Node = None):
     """
     cond = wh.children[0] if wh.children else None
     zv = zero_initialised(fn) if fn is not None else frozenset()
+    # **先看是不是"每轮 ×2 / ÷2"**（L-01）：这类循环的对数界要比一般推导优先。
+    lg = _log_loop(wh, fn)
+    if lg is not None:
+        return lg
+    cy = _cyclic_loop(wh, fn)
+    if cy is not None:
+        return cy
+    gd = _gcd_loop(wh, fn)
+    if gd is not None:
+        return gd
+
     ok, prog_why = progresses(wh)
     if not ok:
         return None, f"{prog_why}（循环不会推进 ⇒ 不给上界，E21）"
