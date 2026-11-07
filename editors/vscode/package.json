@@ -22,7 +22,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/elench-lang/elench.git"
+    "url": "https://github.com/xiaohuo123212/elench.git"
   },
   "contributes": {
     "languages": [
