@@ -13,14 +13,14 @@
 // 三层循环的上界都是 `dim`（标量整数形参，T13 认作尺寸）。
 
 // #region fn
-pub func matmul(
+pub vector<u64>! matmul(
                 const vector<u64>& a,
-                    const vector<u64>& b, u64 dim) -> vector<u64>! {
+                    const vector<u64>& b, u64 dim) {
     const u64 need = dim * dim;
-    if (a.length() != need) {
+    if (a.size() != need) {
         return Err(MatError::DimensionMismatch);
     }
-    if (b.length() != need) {
+    if (b.size() != need) {
         return Err(MatError::DimensionMismatch);
     }
 
@@ -35,7 +35,7 @@ pub func matmul(
                 acc = acc + a.at(i * dim + k) * b.at(k * dim + j);
                 k = k + 1;
             }
-            out.push(acc);
+            out.push_back(acc);
             j = j + 1;
         }
         i = i + 1;

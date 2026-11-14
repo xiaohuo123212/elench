@@ -41,7 +41,7 @@ TU = """spec f(const vector<u64>& xs) -> u64 {
 }
 """
 
-CH = """func f(const vector<u64>& xs) -> u64 {
+CH = """u64 f(const vector<u64>& xs) {
     const u64 s = sum_of(xs);
     print("s =", s);
     print("again");

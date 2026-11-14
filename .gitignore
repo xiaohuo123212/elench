@@ -1,4 +1,7 @@
 # 生成物与本地文件，不进版本库
+# *.cost.yaml = `elench cost --out=…` 的**结果文件**（含 provenance：工具/时间/哈希）。
+# 它是生成物：换台机器、换个时间就变了。入库的是**能重算它的输入**（.tu/.eln）
+# 与**要人看一眼的基线**（tests/baselines/cost.json）；它本身不参与任何门禁。
 *.cost.yaml
 *.accept.yaml
 *.dispatch.yaml

@@ -41,8 +41,9 @@ enum Token {
         }
 
 // 注意 Arith(cause: Arithmetic) 这个变体：
-// N4 要求 `?` 注入时，目标枚举里必须恰有一个变体，其载荷类型等于来源错误类型。
-// 旧版把 Overflow 与 DivisionByZero 平铺成两个无载荷变体，导致 (a + b)? 无处可注入。
+// 它把内建错误类型 Arithmetic 原样带进本模块的 CalcError（载荷类型 = 来源错误类型），
+// 显式构造：`return Err(CalcError::Arith(cause = Arithmetic::DivisionByZero));`。
+// 旧版把 Overflow 与 DivisionByZero 平铺成两个无载荷变体，来源错误就无处承载。
 enum CalcError {
     Arith(cause: Arithmetic),
     UnexpectedByte(offset: u64),
@@ -62,11 +63,11 @@ error CalcError;
 spec evaluate(
               const vector<u8>& text) -> i64! {
     effects { alloc };
-    requires text.length() <= MAX_TOKENS;
+    requires text.size() <= MAX_TOKENS;
 
     target {
-        time: { max: O(text.length()) },
-        allocation: { max: O(text.length()) },
+        time: { max: O(text.size()) },
+        allocation: { max: O(text.size()) },
     }
     ;
 }
@@ -100,7 +101,7 @@ spec pop_until_open(array<i64, MAX_DEPTH>& values, array<Token,
 spec should_reduce(
                    const array<Token, MAX_DEPTH>& operators, Token next) -> bool {
     effects { };
-    repeats operators.length();
+    repeats operators.size();
 }
 
 spec precedence(Token token) -> u64 {
@@ -114,9 +115,18 @@ spec apply_top(array<i64, MAX_DEPTH>& values, array<Token,
 
 spec is_digit(u64 byte) -> bool {
     effects { };
-    // 用作 while 条件的一员（`index < total and is_digit(...)`）：
-    // 上界由另一侧的 `index < total` 给出，这里声明"最多数到剩余字节数"。
-    repeats total;
+}
+
+// `read_number` 原来的循环条件是 `index < total && is_digit(text.at(index))`，
+// 现在包成一个**单一谓词**：上界只能声明在一个谓词上（规格 T13 来源②）。
+// 只给 `is_digit` 写 repeats 不够——`&&` 组合的界在成本域里会被取成较松的
+// 一侧（`_min_cost` → `Cost.max`），结果仍是 O(n)。
+spec more_digits(const vector<u8>& text, u64 index) -> bool {
+    effects { };
+    // 循环体首行是 `if (digits >= MAX_DIGITS) return Err(NumberTooLong);`，
+    // 而 `digits` 每轮 +1：前 MAX_DIGITS(=19) 次各吃一个数字，第 20 次进入
+    // 就返回。所以无论 text 多长，这个循环最多转 MAX_DIGITS + 1 = 20 次。
+    repeats 20;
 }
 
 spec digit_value(u64 byte) -> i64 {

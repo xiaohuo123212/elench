@@ -1,4 +1,4 @@
-﻿func partition(vector<u64>& xs, u64 lo, u64 hi) -> u64 {
+﻿u64 partition(vector<u64>& xs, u64 lo, u64 hi) {
     u64 pivot = xs[hi];
     u64 i = lo;
     u64 j = lo;
@@ -16,8 +16,8 @@
     xs[hi] = t2;
     return i;
 }
-func two_pointer_dedup(vector<u64>& xs) -> u64 {
-    u64 n = xs.length();
+u64 two_pointer_dedup(vector<u64>& xs) {
+    u64 n = xs.size();
     if (n == 0) { return 0; }
     u64 w = 1;
     u64 r = 1;
@@ -30,15 +30,15 @@ func two_pointer_dedup(vector<u64>& xs) -> u64 {
     }
     return w;
 }
-func linear_probe(vector<u64>& table, u64 key, u64 cap) -> u64 {
+u64 linear_probe(vector<u64>& table, u64 key, u64 cap) {
     u64 i = key % cap;
     while (table[i] != 0) {
         i = (i + 1) % cap;
     }
     return i;
 }
-func sliding_sum_max(vector<u64>& xs, u64 k) -> u64 {
-    u64 n = xs.length();
+u64 sliding_sum_max(vector<u64>& xs, u64 k) {
+    u64 n = xs.size();
     u64 s = 0;
     u64 i = 0;
     while (i < k) { s = s + xs[i]; i = i + 1; }
@@ -50,7 +50,7 @@ func sliding_sum_max(vector<u64>& xs, u64 k) -> u64 {
     }
     return best;
 }
-func heapify_up(vector<u64>& h, u64 i) -> u64 {
+u64 heapify_up(vector<u64>& h, u64 i) {
     while (i > 0) {
         u64 p = (i - 1) / 2;
         if (h[p] >= h[i]) { return i; }
@@ -61,7 +61,7 @@ func heapify_up(vector<u64>& h, u64 i) -> u64 {
     }
     return 0;
 }
-func gcd_loop(u64 a, u64 b) -> u64 {
+u64 gcd_loop(u64 a, u64 b) {
     while (b != 0) {
         u64 t = b;
         b = a % b;
@@ -72,10 +72,10 @@ func gcd_loop(u64 a, u64 b) -> u64 {
 
 // 环形计数器（2026-11-06 加）：用**容器长度**当模数，尺寸量自然对齐。
 // 原来那版用 `cap` 参数做模数，κ 只能写成 n(cap)，与 target 的 n 对不上。
-func probe_len(vector<u64>& table, u64 key) -> u64 {
-    u64 i = key % table.length();
+u64 probe_len(vector<u64>& table, u64 key) {
+    u64 i = key % table.size();
     while (table[i] != 0) {
-        i = (i + 1) % table.length();
+        i = (i + 1) % table.size();
     }
     return i;
 }

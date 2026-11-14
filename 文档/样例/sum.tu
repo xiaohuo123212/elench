@@ -21,7 +21,7 @@ spec average(
         seed = 1;
     };
 
-    target { time: { max: O(scores.length()) }, allocation: { max: 0 }, };
+    target { time: { max: O(scores.size()) }, allocation: { max: 0 }, };
 
     // #region choose
     choose sum_kernel(const vector<u8>& scores) -> u64! {

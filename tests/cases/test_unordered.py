@@ -40,23 +40,23 @@ spec g() -> u64 { effects {}; target { time: { max: O(1) }, allocation: { max: 1
 spec h() -> u64 { effects {}; target { time: { max: O(1) }, allocation: { max: 1 }, }; }
 """
 
-SRC = """func m() -> u64 {
+SRC = """u64 m() {
     unordered_map<u64, u64> t = unordered_map<u64, u64>::new();
     t.insert(3, 30);
     t.insert(1, 10);
     return t.get(3) + t.length();
 }
-func s() -> u64 {
+u64 s() {
     unordered_set<u64> t = unordered_set<u64>::new();
     t.insert(5);
     t.insert(5);
     return t.contains(5) * 10 + t.length();
 }
-func g() -> u64 {
+u64 g() {
     unordered_map<u64, u64> t = unordered_map<u64, u64>::new();
     return t.get(1);
 }
-func h() -> u64 {
+u64 h() {
     map<u64, u64> t = map<u64, u64>::new();
     return t.get(1);
 }

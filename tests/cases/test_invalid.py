@@ -53,7 +53,7 @@ def case(name, expect=None, strict=False, tu="", ai=None, code=None,
 
 # 一个合法的骨架，供变异使用
 OK_TU = "spec a(x: u64) -> bool { effects {}; }"
-OK_AI = "func a(x: u64) -> bool { return true; }"
+OK_AI = "bool a(x: u64) { return true; }"
 
 
 def bare(spec_body="effects {};", ret="bool"):
@@ -74,7 +74,7 @@ case("A09 未闭合的字符串", "E-", code='const X: u64 = "abc;')
 case("A10 ⊖ 单独出现", "E-", code="spec a() -> u64 { effects {}; } ⊖")
 case("A11 数字后缀写法", "E-", code="const X: u64 = 42u64;")
 case("A12 长写法关键字 function", "E-", code="function a() -> u64 { effects {}; }")
-case("A13 长写法 public", "E-", code="public func a() -> u64 { return 1; }")
+case("A13 长写法 public", "E-", code="public u64 a() { return 1; }")
 case("A14 两个连续字面量", "E-", code="const X: u64 = 1 2;")
 case("A15 反引号字符串", "E-", code="const X: u64 = `abc`;")
 case("A16 spec 后直接分号", "E-", code="spec ;")
@@ -103,7 +103,7 @@ case("B14 choose 用 model（已下线）", "E-Clause-OldModel",
      tu=("spec a(const vector<u64>& x) -> u64 { effects {};\n"
          "    choose L(const vector<u64>& x) -> u64 { over {k}; model {s}; objective time; }\n"
          "}"),
-     ai="func a(const vector<u64>& x) -> u64 { const u64 n = x.length(); return ?!L(x); }")
+     ai="u64 a(const vector<u64>& x) { const u64 n = x.length(); return ?!L(x); }")
 case("B15 枚举变体缺逗号", "E-Parse", code="enum E { A B }")
 case("B16 结构体字段缺冒号", "E-Parse", code="struct S { x u64, } struct")
 case("B17 枚举缺分号", "E-Parse", code="enum E { A, B } enum")
@@ -112,12 +112,12 @@ case("B19 const 缺等号", "E-Parse", code="const X: u64 1;")
 case("B20 const 缺分号", "E-Parse", code="const X: u64 = 1")
 case("B21 func 缺体", "E-Parse", code="func a() -> u64 fn")
 case("B22 用旧关键字 fn", "E-Func-KeywordRemoved", code="fn a() -> u64 { return 1; }")
-case("B23 用旧关键字 val", "E-Decl-OldKeyword", code="func a() -> u64 { val x = 1; return x; }")
-case("B24 用旧关键字 var", "E-Decl-OldKeyword", code="func a() -> u64 { var x = 1; return x; }")
-case("B25 用旧关键字 end", "E-End-Removed", code="func a() -> u64 { return 1; } end fn")
-case("B26 match 臂缺 =>", "E-Parse", code="func a() -> u64 { match 1 { _ { return 1; }, } }")
-case("B27 let 缺等号", "E-Parse", code="func a() -> u64 { val x: u64 1; return x; }")
-case("B28 return 缺分号", "E-Parse", code="func a() -> u64 { return 1 }")
+case("B23 用旧关键字 val", "E-Decl-OldKeyword", code="u64 a() { val x = 1; return x; }")
+case("B24 用旧关键字 var", "E-Decl-OldKeyword", code="u64 a() { var x = 1; return x; }")
+case("B25 用旧关键字 end", "E-End-Removed", code="u64 a() { return 1; } end fn")
+case("B26 match 臂缺 =>", "E-Parse", code="u64 a() { match 1 { _ { return 1; }, } }")
+case("B27 let 缺等号", "E-Parse", code="u64 a() { val x: u64 1; return x; }")
+case("B28 return 缺分号", "E-Parse", code="u64 a() { return 1 }")
 case("B29 元组类型缺右括号", "E-Parse", code="spec a() -> (u64, u64 { effects {}; }")
 case("B30 切片类型缺右方括号", "E-Parse", code="spec a(x: [] -> u64 { effects {}; }")
 case("B31 泛型缺右方括号", "E-Parse", code="spec a(x: V[u64) -> u64 { effects {}; }")
@@ -126,32 +126,32 @@ case("B32 旧写法切片 []T", "E-Type-OldSlice", code="spec a(x: []u8) -> u64 
 # ================================================================ v0.68 专项（12）
 
 case("V01 用旧关键字 fn", "E-Func-KeywordRemoved", code="fn a() -> u64 { return 1; }")
-case("V02 用旧关键字 val", "E-Decl-OldKeyword", code="func a() -> u64 { val x = 1; return x; }")
-case("V03 用旧关键字 var", "E-Decl-OldKeyword", code="func a() -> u64 { var x = 1; return x; }")
-case("V04 用旧写法 end fn", "E-End-Removed", code="func a() -> u64 { return 1; } end fn")
+case("V02 用旧关键字 val", "E-Decl-OldKeyword", code="u64 a() { val x = 1; return x; }")
+case("V03 用旧关键字 var", "E-Decl-OldKeyword", code="u64 a() { var x = 1; return x; }")
+case("V04 用旧写法 end fn", "E-End-Removed", code="u64 a() { return 1; } end fn")
 case("V05 旧写法 &mut T", "E-Ref-OldMut", code="spec a(x: &mut vector<u8>) -> u64 { effects {}; }")
 case("V06 旧写法 []T", "E-Type-OldSlice", code="spec a(x: []u8) -> u64 { effects {}; }")
 case("V07 旧写法 BoundedVector", "E-Type-OldBounded",
      code="spec a(x: BoundedVector[X, Y]) -> u64 { effects {}; }")
 case("V08 条件缺括号（if）", "E-Cond-ParenRequired", tu=OK_TU,
-     ai="func a(x: u64) -> bool { if x == 0 { return true; } return false; }")
+     ai="bool a(x: u64) { if x == 0 { return true; } return false; }")
 case("V09 条件缺括号（while）", "E-Cond-ParenRequired", tu=OK_TU,
-     ai="func a(x: u64) -> bool { while x > 0 { x = x - 1; } return true; }")
+     ai="bool a(x: u64) { while x > 0 { x = x - 1; } return true; }")
 case("V10 T! 里写 return Ok(x)", "E-Return-OkInFallible",
      tu="error E;\nspec a() -> u64! { effects {}; }",
-     ai="func a() -> u64! { return Ok(1); }")
+     ai="u64! a() { return Ok(1); }")
 case("V11 有 ? 但返回类型无 !", "E-Fallible-Missing",
      tu="error E;\nspec a() -> u64 { effects {}; }\nspec b() -> u64! { effects {}; }",
-     ai="func a() -> u64 { return b()?; }\nfunc b() -> u64! { return 1; }")
+     ai="u64 a() { return b()?; }\nfunc b() -> u64! { return 1; }")
 case("V12 用了 T! 但没 error 声明", "E-Error-DeclMissing",
-     tu="spec a() -> u64! { effects {}; }", ai="func a() -> u64! { return 1; }")
+     tu="spec a() -> u64! { effects {}; }", ai="u64! a() { return 1; }")
 
 # ================================================================ v0.68 嵌套撤回（3）
 
 case("V13 kernels 嵌在候选体里", "E-Kernels-Nested",
      tu="spec a(const vector<u64>& x) -> u64 { effects {}; "
         "choose L(const vector<u64>& x) -> u64 { over {k}; objective time; } }",
-     ai="""func a(const vector<u64>& x) -> u64 {
+     ai="""u64 a(const vector<u64>& x) {
     return ?!L(x);
 } kernels L(const vector<u64>& x) -> u64 {
     k {
@@ -174,31 +174,36 @@ spec a(const vector<u64>& xs) -> u64 { effects {}; }"""
 # 原来期望它报警是**假警报**。这条改成"不该报警"的守卫。
 # "推不出"那一支由 V15（谓词没写 repeats）继续覆盖。
 case("V14 常量边界 → 推得出，不该报警", tu=_T13_TU, expect_none=True,
-     ai="func a(const vector<u64>& xs) -> u64 { u64 i = 0; while (i < 10) { i = i + 1; } return i; }")
+     ai="u64 a(const vector<u64>& xs) { u64 i = 0; while (i < 10) { i = i + 1; } return i; }")
 
 case("V15 谓词没写 repeats → 宽松 warn", "E-While-NoBound", tu=_T13_TU,
-     ai="func a(const vector<u64>& xs) -> u64 { u64 i = 0; "
+     ai="u64 a(const vector<u64>& xs) { u64 i = 0; "
         "while (pred2(i, xs.length())) { i = i + 1; } return i; }")
 
 case("V16 枚举成员用 `.`", "E-Member-WrongSep",
      tu="enum Token { Plus }\nspec a(u64 x) -> u64 { effects {}; }",
-     ai="func a(u64 x) -> u64 { const Token t = Token.Plus; return 1; }")
+     ai="u64 a(u64 x) { const Token t = Token.Plus; return 1; }")
 
 case("V17 scale 旧写法 n(xs) =", "E-Bench-OldScale",
      tu="spec f(const vector<u64>& xs) -> u64 {\n  effects {};\n  benchmodel {\n"
         "    data { xs = sorted_u64s(); }\n    scale { n(xs) = range(1, 64, *2); }\n"
         "    seed = 1;\n  }\n}\n",
-     ai="func f(const vector<u64>& xs) -> u64 { return 0; }")
+     ai="u64 f(const vector<u64>& xs) { return 0; }")
 
 # ================================================================ C. 语义检查（38）
 
-case("C01 实现无 spec", "E-Fn-NoSpec", tu="", ai="func b() -> u64 { return 1; }")
+case("C01 实现无 spec（--strict：旧档位仍是 error）", "E-Fn-NoSpec",
+     strict=True, tu="", ai="u64 b() { return 1; }")
+# **2026-11-10：`.tu` 可选**（规格 §8.9）。默认档下"没有 spec"是 **warning**：
+# 仍然产生诊断（这条用不动产断言照样能抓到），但不拦 `run` / `build`。
+case("C01b 实现无 spec（默认档：warning，仍产生诊断）", "E-Fn-NoSpec",
+     tu="", ai="u64 b() { return 1; }")
 case("C02 参数个数不同", "E-Spec-SigMismatch", tu=OK_TU,
-     ai="func a(x: u64, y: u64) -> bool { return true; }")
+     ai="bool a(x: u64, y: u64) { return true; }")
 case("C03 参数类型不同", "E-Spec-SigMismatch", tu=OK_TU,
-     ai="func a(x: i64) -> bool { return true; }")
+     ai="bool a(x: i64) { return true; }")
 case("C04 返回类型不同", "E-Spec-SigMismatch", tu=OK_TU,
-     ai="func a(x: u64) -> u64 { return 1; }")
+     ai="u64 a(x: u64) { return 1; }")
 case("C05 .ai 有 const", "E-Ai-HasDecl", tu=OK_TU, ai=OK_AI + "\nconst X: u64 = 1;")
 case("C06 .ai 有 use", "E-Ai-HasUse", tu=OK_TU, ai="use core.x;\n" + OK_AI)
 case("C07 .ai 有 enum", "E-Ai-HasDecl", tu=OK_TU, ai="enum E { A }\n" + OK_AI)
@@ -215,7 +220,7 @@ CHOOSE_TU = """spec a(const vector<u64>& x) -> u64 {
         objective time;
     };
 }"""
-CHOOSE_AI = """func a(const vector<u64>& x) -> u64 {
+CHOOSE_AI = """u64 a(const vector<u64>& x) {
     const u64 n = x.length();
     if (n == 0) { return 0; }
     return ?!L(x);
@@ -240,7 +245,7 @@ case("C16 旧的 pending 子句", "E-Choose-PendingClause",
      tu=(CHOOSE_TU % "k").replace("objective time", "pending {k};\n        objective time"),
      ai=CHOOSE_AI)
 case("C17 ?! 无对应 choose", "E-Choose-Undeclared", tu=OK_TU,
-     ai="func a(x: u64) -> bool { val n = x; return ?!Nope(x); }")
+     ai="bool a(x: u64) { val n = x; return ?!Nope(x); }")
 case("C18 ?! 跑到别的函数里", "E-Choose-WrongHost",
      tu=CHOOSE_TU % "k" + """
 spec other(x: []u64) -> u64 { effects {}; } end spec""",
@@ -261,7 +266,7 @@ case("C20 ?! 构成整个函数体", "E-Choose-WholeBody",
 } end fn""")
 case("C21 kernels 嵌套（v0.68 已撤回）", "E-Kernels-Nested",
      tu=CHOOSE_TU % "k",
-     ai="""func a(const vector<u64>& x) -> u64 {
+     ai="""u64 a(const vector<u64>& x) {
     const u64 n = x.length();
     if (n == 0) { return 0; }
     return ?!L(x);
@@ -275,13 +280,13 @@ case("C21 kernels 嵌套（v0.68 已撤回）", "E-Kernels-Nested",
 
 # 严格模式
 case("C22 条件缺括号", "E-Cond-ParenRequired", strict=True, tu=OK_TU,
-     ai="func a(x: u64) -> bool { if x == 0 { return true; } return false; }")
+     ai="bool a(x: u64) { if x == 0 { return true; } return false; }")
 case("C23 L4 元组 4 元", "L4-TupleTooLong", strict=True,
      tu="spec a() -> (u64, u64, u64, u64) { effects {}; }", ai="")
 case("C24 L5 行宽超限", "L5-LineTooLong", strict=True,
      tu="// " + "x" * 120 + "\n" + OK_TU, ai="")
 case("C25 L4 表达式元组", "L4-TupleTooLong", strict=True, tu=OK_TU,
-     ai="func a(x: u64) -> bool { val t = (1, 2, 3, 4); return true; }")
+     ai="bool a(x: u64) { val t = (1, 2, 3, 4); return true; }")
 
 # 其余语义/结构
 case("C26 spec 重复定义", "E-", code=OK_TU + "\n" + OK_TU)
@@ -295,10 +300,10 @@ case("C33 requires 缺表达式", "E-Clause-EmptyExpr", code="spec a() -> u64 { 
 case("C34 objective 未知", "E-",
      tu=(CHOOSE_TU % "k").replace("objective time", "objective maximize_fun"), ai=CHOOSE_AI)
 case("C35 ?! 缺括号", "E-Choose-NoLabel", tu=OK_TU,
-     ai="func a(x: u64) -> bool { val n = x; return ?!; }")
+     ai="bool a(x: u64) { val n = x; return ?!; }")
 case("C36 ?! 后无名字", "E-Choose-NoLabel", tu=OK_TU,
-     ai="func a(x: u64) -> bool { val n = x; return ?!(x); }")
-case("C37 赋值给字面量", "E-", tu=OK_TU, ai="func a(x: u64) -> bool { 1 = 2; return true; }")
+     ai="bool a(x: u64) { val n = x; return ?!(x); }")
+case("C37 赋值给字面量", "E-", tu=OK_TU, ai="bool a(x: u64) { 1 = 2; return true; }")
 case("C38 双重 end", "E-Parse", code="spec a() -> u64 { effects {}; } spec")
 
 # ================================================================ D. 边界（10）

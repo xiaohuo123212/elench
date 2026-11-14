@@ -44,10 +44,10 @@ TU = """spec pick<T>(T a, T b) -> T { effects {}; target { time: { max: O(1) }, 
 spec caller() -> u64 { effects {}; target { time: { max: O(1) }, allocation: { max: 0 }, }; }
 """
 
-CH = """func pick<T>(T a, T b) -> T {
+CH = """T pick<T>(T a, T b) {
     return a;
 }
-func caller() -> u64 {
+u64 caller() {
     return pick(3, 4);
 }
 """
@@ -67,10 +67,10 @@ it = Interp(parse_source(CH, "a.eln").module, None)
 check("pick(3, 4) == 3", it.call("caller", []) == 3, it.call("caller", []))
 
 print("[3] 类型变量要统一：`T` 不能同时是两种类型")
-CH_BAD = """func pick<T>(T a, T b) -> T {
+CH_BAD = """T pick<T>(T a, T b) {
     return a;
 }
-func caller() -> u64 {
+u64 caller() {
     return pick(3, "abc");
 }
 """
@@ -83,7 +83,7 @@ print("[4] `T` 不需要单独的成本口径：κ 与类型无关")
 TU2 = """spec gsum<T>(const vector<T>& xs) -> u64 { effects {}; target { time: { max: O(xs.length()) }, allocation: { max: 0 }, }; }
 spec msum(const vector<u64>& xs) -> u64 { effects {}; target { time: { max: O(xs.length()) }, allocation: { max: 0 }, }; }
 """
-CH2 = """func gsum<T>(const vector<T>& xs) -> u64 {
+CH2 = """u64 gsum<T>(const vector<T>& xs) {
     u64 s = 0;
     u64 i = 0;
     while (i < xs.length()) {
@@ -92,7 +92,7 @@ CH2 = """func gsum<T>(const vector<T>& xs) -> u64 {
     }
     return s;
 }
-func msum(const vector<u64>& xs) -> u64 {
+u64 msum(const vector<u64>& xs) {
     u64 s = 0;
     u64 i = 0;
     while (i < xs.length()) {
@@ -116,9 +116,9 @@ check("调用者在模板之后", _cpp.index("T pick(") < _cpp.index("uint64_t c
 
 print("[6] 泛型调泛型也能生成（C++ 隐式实例化，不需要我们推导）")
 _SRC6 = (
-    "func id<T>(T a) -> T { return a; }\n"
-    "func pick<T>(T a, T b) -> T { return a; }\n"
-    "func caller() -> u64 { return pick(id(3), 4); }\n")
+    "T id<T>(T a) { return a; }\n"
+    "T pick<T>(T a, T b) { return a; }\n"
+    "u64 caller() { return pick(id(3), 4); }\n")
 _TU6 = (
     "spec id<T>(T a) -> T { effects { }; target { time: { max: O(1) }, allocation: { max: 0 }, }; }\n"
     "spec pick<T>(T a, T b) -> T { effects { }; target { time: { max: O(1) }, allocation: { max: 0 }, }; }\n"

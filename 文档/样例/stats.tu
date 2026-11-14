@@ -25,7 +25,7 @@ spec summarize(
         seed = 1;
     };
 
-    target { time: { max: O(xs.length()) }, allocation: { max: 0 }, };
+    target { time: { max: O(xs.size()) }, allocation: { max: 0 }, };
 
     // #region choose
     // 两候选同阶（都是 O(n)），只在遍历方向上不同——

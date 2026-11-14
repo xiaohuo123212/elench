@@ -49,7 +49,7 @@ def check(name, cond, detail=""):
 
 def run(body) -> int:
     tu = parse_source(TU, "m.tu").module
-    ch = parse_source("func f(const vector<u64>& xs) -> u64 {\n" + body + "\n}\n", "m.eln").module
+    ch = parse_source("u64 f(const vector<u64>& xs) {\n" + body + "\n}\n", "m.eln").module
     return Interp(ch, tu).call("f", [[1]])
 
 

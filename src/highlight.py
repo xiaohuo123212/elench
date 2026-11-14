@@ -55,7 +55,7 @@ KEYWORD_KINDS = {
 OPERATOR_KINDS = {
     Kind.PIPE_GT, Kind.RANGE, Kind.ARROW, Kind.FATARROW, Kind.LE, Kind.GE,
     Kind.EQEQ, Kind.NE, Kind.PLUS_EQ, Kind.MINUS_EQ, Kind.STAR_EQ,
-    Kind.SLASH_EQ, Kind.PLUS, Kind.MINUS, Kind.STAR, Kind.SLASH,
+    Kind.SLASH_EQ, Kind.PLUS, Kind.MINUS, Kind.STAR, Kind.STAR_STAR, Kind.SLASH,
     Kind.PERCENT, Kind.LT, Kind.GT, Kind.EQ, Kind.AMP, Kind.PIPE,
     Kind.BANG, Kind.QUESTION,
 }

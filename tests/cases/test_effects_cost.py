@@ -58,11 +58,11 @@ spec pure_one(const vector<u64>& xs) -> u64 {
 """
 
 ELN = """
-func load(const vector<u8>& p) -> u64 {
+u64 load(const vector<u8>& p) {
     return read_file(p) + read_file(p);
 }
 
-func pure_one(const vector<u64>& xs) -> u64 {
+u64 pure_one(const vector<u64>& xs) {
     return xs.length();
 }
 """

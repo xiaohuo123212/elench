@@ -8,9 +8,9 @@
 // ============================================================
 
 // #region fn
-pub func average(
-                 const vector<u8>& scores) -> u64! {
-    const u64 n = scores.length();
+pub u64! average(
+                 const vector<u8>& scores) {
+    const u64 n = scores.size();
     if (n == 0) {
         return Err(CalcError::Empty);
     }
@@ -29,7 +29,7 @@ pub func average(
     }
     sum_by_iter {
         u64 s = 0;
-        for (x in scores) {
+        for (auto x : scores) {
             s = s + x;
         }
         return s;

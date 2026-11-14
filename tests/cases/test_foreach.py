@@ -47,9 +47,16 @@ def check(name, cond, detail=""):
 
 
 def run(body: str, xs=(1,)):
-    ch = """func visit(const vector<u8>& k, u64 v) -> u64 { return v; }
-func touch_all(const vector<u64>& xs) -> u64 { return 0; }
-func f(const vector<u64>& xs) -> u64 {
+    ch = """u64 visit(const vector<u8>& k, u64 v) { return v; }
+u64 touch_all(const vector<u64>& xs) { return 0; }
+// 键/值**类型不同**的回调：回调按 `(k, v)` 顺序绑定（k: u64、v: vector<u8>），
+// 顺序或类型错位会在这里直接崩，不需要 assert。
+u64 pair_ty(u64 k, const vector<u8>& v) { return k + v.length(); }
+// 二元回调（`map` / `unordered_map` / `HashMap`）。
+u64 visit2(u64 k, u64 v) { return v; }
+// 一元回调（`set` / `unordered_set`）。
+u64 touch_elem(u64 x) { return x; }
+u64 f(const vector<u64>& xs) {
 """ + body + """
 }
 """
@@ -84,6 +91,39 @@ def main() -> int:
     nv = run("""    vector<u64> v = copy(xs);
     return for_each(v, touch_all);""", xs=(1, 2, 3))
     check("vector 遍历 → 返回元素个数", nv == len([1, 2, 3]), str(nv))
+
+    print("=== ② 语言 map / set / unordered_map 也认（2026-11-10） ===")
+    # 以前只认 `Vec` 与 stdlib 的 `HashMap`：文档《语法清单》写着
+    # 「遍历映射表 | `for_each(m, f);`」，而 `m` 是语言 `map<K,V>` 时**运行期崩**
+    # （`for_each 的第一个实参必须是 Vec 或 HashMap`）——典型的 D 类。
+    lm = run("""    map<u64, u64> m;
+    m.insert(3, 30);
+    m.insert(1, 10);
+    m.insert(2, 20);
+    return for_each(m, visit2);""")
+    check("语言 map：遍历 3 对", lm == 3, str(lm))
+
+    # 键/值顺序：回调形参类型不同（`u64 k` / `const vector<u8>& v`），
+    # 传错位置会在 `_convert` 处崩，所以这一条同时钉住「v 在第二位」。
+    lt = run("""    map<u64, vector<u8>> m;
+    m.insert(7, "seven");
+    m.insert(9, "nine");
+    return for_each(m, pair_ty);""")
+    check("语言 map：`(k, v)` 按位置绑定（键 u64 / 值 Vec<u8>）", lt == 2, str(lt))
+
+    ls = run("""    set<u64> s;
+    s.insert(9);
+    s.insert(7);
+    s.insert(9);
+    return for_each(s, touch_elem);""")
+    check("语言 set：返回元素个数 2（一元回调，重复插入只留一个）",
+          ls == 2, str(ls))
+
+    lu = run("""    unordered_map<u64, u64> um;
+    um.insert(5, 50);
+    um.insert(6, 60);
+    return for_each(um, visit2);""")
+    check("语言 unordered_map：遍历 2 对", lu == 2, str(lu))
 
     print("=== 错误路径 ===")
     try:

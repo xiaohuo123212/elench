@@ -1,9 +1,9 @@
-func total(const vector<u64>& xs) -> u64 {
+u64 total(const vector<u64>& xs) {
     u64 s = 0;
     u64 i = 0;
-    while (i < xs.length()) {
+    while (i < xs.size()) {
         u64 j = 0;
-        while (j < xs.length()) {
+        while (j < xs.size()) {
             s = s + xs.at(j);
             j = j + 1;
         }

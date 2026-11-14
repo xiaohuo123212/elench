@@ -1,6 +1,6 @@
 # 贡献指南（Elench）
 
-> **一句话规矩**：**一个改动 = 一个提交，且四道门必须同时绿。**
+> **一句话规矩**：**一个改动 = 一个提交，且门禁必须同时绿。**
 > 做不到就别提 PR——这不是苛刻，是因为这个项目卖的就是"能被检查"。
 
 ---
@@ -17,23 +17,15 @@ python src/dsh.py cost  文档/样例/sum.tu 文档/样例/sum.eln
 
 ---
 
-## 2. 四道门（提 PR 前必须全绿）
-
-| # | 门 | 命令 | 判据 |
-|---|---|---|---|
-| **1** | 20 套测试 | `cd src && for f in test_*.py; do python $f; done` | 全绿 |
-| **2** | κ 回归 | `python tools/golden_check.py` | **golden 21 / 21 全等** |
-| **3** | κ 冻结基准 | `python tools/golden_check.py` | **21 / 21 全等** |
-| **4** | 文档一致性 | `python src/check_docs.py && python src/sync_docs.py --check` | 两项都 ✓ |
-
-**另外**（改了成本推导时）：
+## 2. 门禁（提 PR 前必须全绿）
 
 ```bash
-python tools/kappa_vs_measured.py --strict
+python -B tools/gates.py --check-env     # 先看本机跑得动几道
+python -B tools/gates.py                 # 跑全部门禁
 ```
 
-> **它的判据是「κ ≥ 最坏实测」**（每程序 20 组输入取 max）。
-> **κ 是上界，所以它必须压过最坏情况——不能只和一次随机输入比。**
+**门的清单只有一处事实来源：`tools/gates.py` 的 `GATES`**（当前 9 道，本文不再抄列表——抄了就会再过期）。
+**本机缺 fixtures 时**（预印本数据、`*.dispatch.yaml` 等）对应的门会**跳过并标出**，`--check-env` 会逐道说明缺什么；**CI 用 `python -B tools/gates.py --strict-env`**，缺依赖即判失败，不允许跳过。
 
 ---
 

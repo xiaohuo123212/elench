@@ -58,7 +58,7 @@ spec total(const vector<u64>& xs) -> u64 {
 }
 """
 SUM_PLAIN = """
-func total(const vector<u64>& xs) -> u64 {
+u64 total(const vector<u64>& xs) {
     u64 s = 0;
     u64 i = 0;
     while (i < xs.length()) {
@@ -70,7 +70,7 @@ func total(const vector<u64>& xs) -> u64 {
 """
 SUM_NOISY = """
 // 文件头注释：if k == "call" { return 1; }
-func total(const vector<u64>& xs) -> u64 {
+u64 total(const vector<u64>& xs) {
     u64 s = 0;                      // 累加器
     /// 文档注释：target { time: O(n^3) }，κ = 999
     u64 i = 0;
@@ -80,6 +80,24 @@ func total(const vector<u64>& xs) -> u64 {
         i = i + 1;
     }
     // return 0;
+    return s;
+}
+"""
+
+#: 块注释版：同一程序 + `/* … */` 噪声（含**跨行**与"看起来像代码"的正文）
+SUM_NOISY_BLOCK = """
+/* 文件头注释：if k == "call" { return 1; }
+   这一行在注释里；跨行不影响行号 */
+u64 total(const vector<u64>& xs) {
+    u64 s = 0;                      /* 累加器 */
+    /// 文档注释：target { time: O(n^3) }，κ = 999
+    u64 i = 0;
+    while (i < xs.length()) {       /* while (true) { }
+                                       跨两行的注释正文 */
+        s = s + xs.at(i);           /* s = s * 1000000; */
+        i = i + 1;
+    }
+    /* return 0; */
     return s;
 }
 """
@@ -95,14 +113,14 @@ spec by_scan(const vector<u64>& xs) -> u64 { effects {}; target { time: { max: O
 spec by_rev(const vector<u64>& xs) -> u64 { effects {}; target { time: { max: O(xs.length()) }, allocation: { max: 0 }, }; }
 """
 DISPATCH_PLAIN = """
-func host(const vector<u64>& xs) -> u64 {
+u64 host(const vector<u64>& xs) {
     if (xs.length() == 0) { return 0; }
     return ?!kernel(xs);
 }
 kernels kernel(const vector<u64>& xs) -> u64 {
     by_scan {
         u64 s = 0;
-        for (x in xs) { s = s + x; }
+        for (auto x : xs) { s = s + x; }
         return s;
     }
     by_rev {
@@ -118,7 +136,7 @@ kernels kernel(const vector<u64>& xs) -> u64 {
 """
 DISPATCH_NOISY = """
 // choose kernel over { 假的, 候选 };
-func host(const vector<u64>& xs) -> u64 {
+u64 host(const vector<u64>& xs) {
     // return ?!kernel(xs);   —— 注释掉的旧写法
     if (xs.length() == 0) { return 0; }   // if (true) { }
     return ?!kernel(xs);
@@ -126,7 +144,7 @@ func host(const vector<u64>& xs) -> u64 {
 kernels kernel(const vector<u64>& xs) -> u64 {
     by_scan {
         u64 s = 0;
-        for (x in xs) {      // for (y in xs) { s = s + 1; }
+        for (auto x : xs) {      // for (auto y : xs) { s = s + 1; }
             s = s + x;
         }
         // return 0;
@@ -153,14 +171,14 @@ spec build(const vector<u64>& xs) -> u64 {
 """
 STRUCT_PLAIN = """
 struct Pair { key: u64, value: u64 }
-func build(const vector<u64>& xs) -> u64 {
+u64 build(const vector<u64>& xs) {
     Pair p = Pair{ key: xs.length(), value: 1 };
     return p.key;
 }
 """
 STRUCT_NOISY = """
 struct Pair { key: u64, value: u64 }   // struct Fake { a: u64 }
-func build(const vector<u64>& xs) -> u64 {
+u64 build(const vector<u64>& xs) {
     // Pair p = Pair{ key: 0, value: 0 };
     Pair p = Pair{ key: xs.length(), value: 1 };
     return p.key;
@@ -197,28 +215,47 @@ def compare(name, plain, noisy, tu, fn):
 def test_cases():
     print("[1] 同一程序 + 噪声注释：κ / ops / 诊断 三项都必须一致")
     compare("while 循环", SUM_PLAIN, SUM_NOISY, SUM_TU, "total")
+    compare("while 循环（块注释）", SUM_PLAIN, SUM_NOISY_BLOCK, SUM_TU, "total")
     compare("?! 派发", DISPATCH_PLAIN, DISPATCH_NOISY, DISPATCH_TU, "host")
     compare("结构体字面量", STRUCT_PLAIN, STRUCT_NOISY, STRUCT_TU, "build")
 
 
 def test_slash_star():
-    print("[2] 已知边界：`/* */` **不是**注释，必须大声失败（不能静默变成语义）")
-    src = "func f() -> u64 {\n    /* 块注释 */\n    return 1;\n}\n"
+    print("[2] `/* */` 块注释（2026-11-13 起支持）：**跳过**，且行号照常推进")
+    src = "u64 f() {\n    /* 块注释 */\n    return 1;\n}\n"
     r = parse_source(src, "f.eln")
     errs = [d.code for d in r.diagnostics if d.code.startswith("E-")]
-    check(bool(errs), "`/* */` 产生 E- 诊断（不是被当成注释吞掉）", str(errs))
+    check(not errs, "`/* */` 零 E- 诊断（是注释，不是错误）", str(errs))
+
+    # **跨行**：块注释占几行，后面的 token 就报第几行（诊断靠行号）
+    src_multi = ("u64 f() {\n"
+                 "    /* 第一行\n"
+                 "       第二行\n"
+                 "       第三行 */\n"
+                 "    u64 y = ;\n"
+                 "}\n")
+    r2 = parse_source(src_multi, "f.eln")
+    line = next((d.line for d in r2.diagnostics if d.code.startswith("E-")), None)
+    check(line == 5, "跨行块注释之后，错误仍报**真实行号** 5", str(line))
+
+    # 未闭合：必须**大声失败**，不许静默吞到文件尾
+    src3 = "u64 f() {\n    /* 没有闭合\n    return 1;\n}\n"
+    r3 = parse_source(src3, "f.eln")
+    codes3 = [d.code for d in r3.diagnostics]
+    check("E-Lex-BlockCommentUnterminated" in codes3,
+          "未闭合的 `/*` 报 E-Lex-BlockCommentUnterminated", str(codes3))
 
     # 反过来：`//` 里的 `/*` 是普通文本
-    src2 = "func f() -> u64 {\n    // 这里写 /* 也不会开始块注释\n    return 1;\n}\n"
-    r2 = parse_source(src2, "f.eln")
-    errs2 = [d.code for d in r2.diagnostics if d.code.startswith("E-")]
-    check(not errs2, "`//` 里的 `/*` 只是文本", str(errs2))
+    src2 = "u64 f() {\n    // 这里写 /* 也不会开始块注释\n    return 1;\n}\n"
+    r4 = parse_source(src2, "f.eln")
+    errs4 = [d.code for d in r4.diagnostics if d.code.startswith("E-")]
+    check(not errs4, "`//` 里的 `/*` 只是文本", str(errs4))
 
 
 def test_lexer_trivia():
     print("[3] 词法层证据：注释进 trivia，不进 token 流")
     from lexer import lex
-    src = "func f() -> u64 {\n    // 噪声\n    return 1;\n}\n"
+    src = "u64 f() {\n    // 噪声\n    return 1;\n}\n"
     r = lex(src)
     kinds = [t.kind for t in r.tokens]
     check(all("COMMENT" not in str(k).upper() for k in kinds),

@@ -1,5 +1,5 @@
-﻿func top(const vector<u64>& xs) -> u64! {
-    if (xs.length() == 0) {
+﻿u64! top(const vector<u64>& xs) {
+    if (xs.size() == 0) {
         return 0;
     }
     return ?!kernel(xs);
@@ -8,7 +8,7 @@
     by_scan_heavy {
         u64 b = 0;
         u64 i = 0;
-        while (i < xs.length()) {
+        while (i < xs.size()) {
             b = max(b, xs.at(i));
             b = max(b, xs.at(i));
             b = max(b, xs.at(i));
@@ -27,7 +27,7 @@
         }
         u64 b = 0;
         u64 i = 0;
-        while (i < xs.length()) {
+        while (i < xs.size()) {
             b = max(b, xs.at(i));
             i = i + 1;
         }

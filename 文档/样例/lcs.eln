@@ -7,9 +7,9 @@
 //   a = ""         b = "ABC"      → 0   （空串的 LCS 是空串）
 //
 // 表格构型：
-//   width = b.length() + 1            （+1 是为了有第 0 列当哨兵）
-//   行数  = a.length() + 1            （第 0 行同理）
-//   总格  = (a.length() + 1) * width
+//   width = b.size() + 1            （+1 是为了有第 0 列当哨兵）
+//   行数  = a.size() + 1            （第 0 行同理）
+//   总格  = (a.size() + 1) * width
 //   dp[i * width + j] = a[0..i) 与 b[0..j) 的 LCS 长度（i、j 从 0 起算的格子号）
 //
 // 为什么要先 push 铺满零：`dp[idx] = v` 是**原地写**，只能写已经存在的格子；
@@ -17,11 +17,11 @@
 // 总格数超过 LCS_CAP 时 MUST 在 push 之前挡住，否则 push 会抛容量溢出。
 
 // #region fn
-pub func lcs(
+pub u64! lcs(
              const vector<u8>& a,
-                 const vector<u8>& b) -> u64! {
-    const u64 width = b.length() + 1;
-    const u64 total = (a.length() + 1) * width;
+                 const vector<u8>& b) {
+    const u64 width = b.size() + 1;
+    const u64 total = (a.size() + 1) * width;
 
     // 定长表的真边界：装不下就说清楚，而不是让 push 抛异常
     if (total > LCS_CAP) {
@@ -32,15 +32,13 @@ pub func lcs(
     // `filled(0)` 一次给足 LCS_CAP 个零——**表是建好才用的**，
     // 不需要 push 循环（那是让作者替语言补实现）。
     // 定长表的容量上界仍是 LCS_CAP，超过就在上面被 Err 挡住。
-    array<u64,
-    LCS_CAP> dp = array<u64,
-    LCS_CAP>::filled(0);
+    array<u64, LCS_CAP> dp = array<u64, LCS_CAP>::filled(0);
 
     // ---- 第二步：两层 DP（原地写 dp[(i+1)*width + (j+1)]）
     u64 i = 0;
-    while (i < a.length()) {
+    while (i < a.size()) {
         u64 j = 0;
-        while (j < b.length()) {
+        while (j < b.size()) {
             const u64 x = a.at(i);
             const u64 y = b.at(j);
             if (x == y) {
@@ -61,6 +59,6 @@ pub func lcs(
         i = i + 1;
     }
 
-    return dp[a.length() * width + b.length()];
+    return dp[a.size() * width + b.size()];
 }
 // #endregion fn

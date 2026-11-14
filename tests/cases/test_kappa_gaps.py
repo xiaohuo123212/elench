@@ -3,7 +3,7 @@
 # Copyright 2026 Elench contributors
 
 # -*- coding: utf-8 -*-
-"""test_kappa_gaps.py —— 四类 κ 缺口的**微例钉子**（①递归 ②内建 ③min/max ④函数值）
+"""test_kappa_gaps.py —— 五类 κ 缺口的**微例钉子**（①递归 ②内建 ③min/max ④函数值 ⑤括号）
 
 ## 这份测试钉什么
 
@@ -13,8 +13,8 @@
 | # | 微例（n=16） | 实测 ops | 修前 κ | 修后 κ | 修前缺口 |
 |---|---|---:|---:|---:|---:|
 | ① | `down(xs, 8)`（无深度声明） | 104 | 33 | 33 | **+71**（未声明 → 修前行为） |
-| ① | `down(xs, 8)`（`recursion depth <= 8`） | 104 | 33 | **153** | 0 |
-| ① | `main8(xs)` 调 `down(xs, 8)` | 108 | 20 | **157** | 0 |
+| ① | `down(xs, 8)`（`recursion depth <= 8`） | 104 | 33 | **160** | 0 |
+| ① | `main8(xs)` 调 `down(xs, 8)` | 108 | 20 | **164** | 0 |
 | ② | `print("x")` | 6 | 5 | **6** | 0 |
 | ② | `map(xs, visit)` | 36 | 66 | 67 | 0（尺寸项本来就在） |
 | ② | `filter(xs, keep)` | 68 | 98 | 99 | 0 |
@@ -28,6 +28,9 @@
 | ④ | `host_v(xs)`（`g = idf` 静态可求） | 8 | 6 | **8** | 0 |
 | ④ | `host_vn(xs)`（`g(idf(xs))`） | 11 | 6 | **11** | 0 |
 | ④ | `apply_u(xs, g)`（调用点不知道 g） | — | 3 | inf + `k(g)` | 符号项 |
+| ⑤ | `rotr(x,n)` / `ch` / `maj` / `Σ0` / `σ0`（叶子单独测） | 13/11/15/51/39 | 10/9/12/42/32 | **13/11/15/51/39** | 0 |
+| ⑤ | `(x)` / `((x))` / `(((x)))` | 3/4/5 | 2/2/2 | **3/4/5** | 0 |
+| ⑤ | `just_call(x)`（`return rotr(x, 2);`） | 17 | 14 | **17** | 0 |
 
 **判据**：每个微例都断 `ops ≤ κ`（符号项那两条断 `κ` 里出现 `k(...)`、数值给
 `inf`——`inf ≥ ops` 成立，但**不作为数值证据**）。「修前 κ」同时用来断
@@ -145,11 +148,11 @@ def xs(n: int = 16):
 
 # ---------------------------------------------------------------- ① 递归深度
 RECUR = """
-func down(const vector<u64>& xs, u64 i) -> u64 {
+u64 down(const vector<u64>& xs, u64 i) {
     if (i == 0) { return xs.length(); }
     return 1 + down(xs, i - 1);
 }
-func main8(const vector<u64>& xs) -> u64 { return down(xs, 8); }
+u64 main8(const vector<u64>& xs) { return down(xs, 8); }
 """
 
 
@@ -171,14 +174,18 @@ spec main8(const vector<u64>& xs) -> u64 {
 def test_recursion_depth():
     print("[1] 递归：κ 按 `.tu` 的 `recursion depth <= N` 乘「函数体只算一次」")
     n = 16
-    # ①-a 声明 D=8：`down(xs, 8)` 的 ops ≤ κ，且 κ 从 33 涨到 153
+    # ①-a 声明 D=8：`down(xs, 8)` 的 ops ≤ κ，且 κ 从 33 涨到 160
     k8 = kappa(RECUR, tu_rec(), "down", {"xs": n, "i": 8})
     o8 = ops_of_call("down", [xs(n), 8], RECUR, tu_rec())
     check(o8 == 104, f"ops(down, i=8) = 104（修前实测，作为基准）", str(o8))
     check(k8 >= PRE["down8"],
           f"κ(down, i=8) = {k8:g} ≥ 修前 {PRE['down8']:g}（只增不减）", str(k8))
     check(o8 <= k8, f"ops {o8} ≤ κ {k8:g}（修前 κ=33，缺口 71）")
-    check(k8 == 153, f"κ(down, i=8) = 153 = (8+1) × κ(体一次 17)", str(k8))
+    # **2026-11-12（P0-R）**：153 → 160。递归合并从「`1+Σ实参` + D×单层」改成
+    # 「D×单层 + max(1+Σ实参, **叶子层**)」——叶子层 = 自调用整条切 0 的体成本
+    # （这里 12）。修前那个 5 = `1 + Σ实参` 只是**碰巧**盖住叶子层（`down` 的
+    # 叶子分支也是 5）；叶子更重的递归会小于真实成本（破界方向），所以补上。
+    check(k8 == 160, f"κ(down, i=8) = 160 = 8 × 17（单层）+ max(5, 12)（尾部）", str(k8))
 
     # ①-b 深度**声明**变大 → κ 严格增长（同一份实现、同一档 n）
     seq = []
@@ -189,6 +196,21 @@ def test_recursion_depth():
         check(od <= kd, f"D={d:2d}：ops {od} ≤ κ {kd:g}")
     check(all(a < b for a, b in zip(seq, seq[1:])),
           f"声明深度 1→16：κ 严格增长 {seq}", str(seq))
+
+    # ①-b' **运行期闸门让 κ 重新成为上界**（2026-11-10 / K3 的 ③）。
+    #
+    # 修前这条声明只进 κ：声明 8 照样能跑 75 层，κ(75)=117 而实测 ops=831
+    # ——「上界」被越过。现在声明 8 跑到第 9 层就抛诊断，跑不到 κ 之外。
+    # 边界不误伤：`down(xs, d)` + `recursion depth <= d`（d 帧 = d+1 层）
+    # 正好在上界内，上面那一轮 (1,2,4,8,16) 全部照常通过。
+    from interp import InterpError as _IErr
+    try:
+        _bad = ops_of_call("down", [xs(n), 20], RECUR, tu_rec())   # 声明 8、实跑 20 层
+        check(False, "声明 8、实跑 down(xs,20) → 必须抛 E-Recursion-Depth-Exceeded",
+              f"没抛，ops={_bad}")
+    except _IErr as exc:
+        check("E-Recursion-Depth-Exceeded" in str(exc),
+              "声明 8、实跑 down(xs,20) → E-Recursion-Depth-Exceeded", str(exc))
 
     # ①-c 调用方也覆盖：`main8` 一次调用会压 8 层
     km = kappa(RECUR, tu_rec(), "main8", {"xs": n})
@@ -221,25 +243,106 @@ spec main8(const vector<u64>& xs) -> u64 {
 """ % d
 
 
+# ---------------------------------------------------------------- ①-b 树递归
+#
+# **2026-11-09**：`_diff/fib_rec` 破界（κ=2,064 < 实测 31,926）。
+# 根因：`recursion depth <= N` 的合并写成了 `N × 体一次`，这只对**一条链**成立；
+# `fib(n-1) + fib(n-2)` 每层分成两支，真实是 Θ(2ⁿ)，κ 却记成了 O(n²)——
+# 于是**指数函数被判「对 O(n²) 达成」**（假通过，不是"松"，是"破界"）。
+# 修法：树递归 ⇒ ⊤（`Cost` 文法没有幂，也不许把指数写成线性）；
+# 单链（`down`、早退二分）保持原来的线性合并。
+TREE = """
+u64 fib(u64 n) {
+    if (n < 2) { return n; }
+    return fib(n - 1) + fib(n - 2);
+}
+u64 main64(u64 n) { return fib(n); }
+"""
+
+TREE_TU = """
+spec fib(u64 n) -> u64 { effects {}; recursion depth <= 8;
+    target { time: { max: O(n * n) }, allocation: { max: 0 }, }; }
+spec main64(u64 n) -> u64 { effects {}; recursion depth <= 8;
+    target { time: { max: O(n * n) }, allocation: { max: 0 }, }; }
+"""
+
+#: 两个自调用点在**互斥分支**里（早退二分）：一条路径只走一个 ⇒ 仍是链。
+BSEARCH = """
+u64 bs(const vector<u64>& xs, u64 lo, u64 hi, u64 k) {
+    if (lo >= hi) { return 0; }
+    const u64 mid = lo + (hi - lo) / 2;
+    if (xs[mid] == k) { return 1; }
+    if (xs[mid] < k) { return bs(xs, mid + 1, hi, k); }
+    return bs(xs, lo, mid, k);
+}
+"""
+
+BSEARCH_TU = """
+spec bs(const vector<u64>& xs, u64 lo, u64 hi, u64 k) -> u64 {
+    effects {};
+    recursion depth <= 8;
+    target { time: { max: O(log(xs.length())) }, allocation: { max: 0 }, };
+}
+"""
+
+#: **同一个调用点**在循环里：每层可能跑 L 次（L 静态不可知）⇒ 树规模非线性。
+LOOPREC = """
+u64 h(u64 n) {
+    if (n < 2) { return n; }
+    u64 s = 0;
+    for (u64 i = 0; i < 2; i = i + 1) { s = s + h(n - 1); }
+    return s;
+}
+"""
+
+LOOPREC_TU = """
+spec h(u64 n) -> u64 { effects {}; recursion depth <= 8;
+    target { time: { max: O(n) }, allocation: { max: 0 }, }; }
+"""
+
+
+def test_tree_recursion():
+    print("[1-b] 树递归：一条路径多个自调用 ⇒ ⊤（不许记成 D × 单次成本）")
+    kf = kappa_cost(TREE, TREE_TU, "fib")
+    check(kf.is_top(), "fib（两个自调用点）⇒ ⊤", kf.render())
+    check(kappa_at(kf, {}) == float("inf"), "fib：evaluate 给 inf（⊤）",
+          str(kappa_at(kf, {})))
+    km = kappa_cost(TREE, TREE_TU, "main64")
+    check(km.is_top(), "调用方 main64 也跟着 ⊤（拿不到整棵调用树上界）", km.render())
+    kl = kappa_cost(LOOPREC, LOOPREC_TU, "h")
+    check(kl.is_top(), "自调用在循环里（同一调用点每层多次）⇒ ⊤", kl.render())
+
+    # 单链保持线性合并：`down(xs, 8)` 的 160 钉在 ①-a；这里补「早退二分」
+    # ——两个自调用点，但**互斥**（一条路径只走一个）⇒ 仍是链，不许误判 ⊤。
+    kb = kappa_cost(BSEARCH, BSEARCH_TU, "bs")
+    check(not kb.is_top(),
+          "早退二分（两个互斥分支各一个自调用）仍是链，不误判 ⊤", kb.render())
+    n = 16
+    ob = ops_of_call("bs", [xs(n), 0, n, 10 ** 9], BSEARCH, BSEARCH_TU)
+    kvb = kappa_at(kb, {"xs": n, "lo": 0, "hi": n, "k": 10 ** 9})
+    check(ob <= kvb, f"二分：ops {ob} ≤ κ {kvb:g}", f"κ={kvb:g}")
+    print()
+
+
 # ---------------------------------------------------------------- ② 内建实参
 BUILTINS = """
-func visit(u64 v) -> u64 { return v; }
-func visit2(const vector<u8>& k, u64 v) -> u64 { return v; }
-func keep(u64 v) -> bool { return v > 0; }
-func addv(u64 a, u64 b) -> u64 { return a + b; }
-func cmpv(u64 a, u64 b) -> bool { return a < b; }
-func p1() -> u64 { print("x"); return 0; }
-func p2() -> u64 {
+u64 visit(u64 v) { return v; }
+u64 visit2(const vector<u8>& k, u64 v) { return v; }
+bool keep(u64 v) { return v > 0; }
+u64 addv(u64 a, u64 b) { return a + b; }
+bool cmpv(u64 a, u64 b) { return a < b; }
+u64 p1() { print("x"); return 0; }
+u64 p2() {
     HashMap<vector<u8>, u64> m = map_new();
     map_put(m, "a", 1);
     return for_each(m, visit2);
 }
-func map1(const vector<u64>& xs) -> vector<u64> { return map(xs, visit); }
-func filt(const vector<u64>& xs) -> vector<u64> { return filter(xs, keep); }
-func fold1(const vector<u64>& xs) -> u64 { return fold(xs, 0, addv); }
-func cnt(const vector<u64>& xs) -> u64 { return count_if(xs, keep); }
-func srt(const vector<u64>& xs) -> vector<u64> { return sort(xs); }
-func srtb(const vector<u64>& xs) -> vector<u64> { return sort_by(xs, cmpv); }
+vector<u64> map1(const vector<u64>& xs) { return map(xs, visit); }
+vector<u64> filt(const vector<u64>& xs) { return filter(xs, keep); }
+u64 fold1(const vector<u64>& xs) { return fold(xs, 0, addv); }
+u64 cnt(const vector<u64>& xs) { return count_if(xs, keep); }
+vector<u64> srt(const vector<u64>& xs) { return sort(xs); }
+vector<u64> srtb(const vector<u64>& xs) { return sort_by(xs, cmpv); }
 """
 
 #: 比较器**不写 target**：`sort_by` 的 `n log n × κ(cmp)` 用**函数体** κ。
@@ -284,8 +387,8 @@ def test_builtin_args():
 
 # ---------------------------------------------------------------- ③ min/max
 MINMAX = """
-func mx(u64 b) -> u64 { return max(b, 1); }
-func mn(u64 b) -> u64 { return min(b, 1); }
+u64 mx(u64 b) { return max(b, 1); }
+u64 mn(u64 b) { return min(b, 1); }
 """
 
 
@@ -303,18 +406,18 @@ def test_minmax_dispatch():
 
 # ---------------------------------------------------------------- ④ 函数值
 FNVAL = """
-func countf(const vector<u64>& xs) -> u64 { return xs.length(); }
-func idf(const vector<u64>& xs) -> vector<u64> { return xs; }
-func apply_u(const vector<u64>& xs, func(vector<u64>) -> u64 g) -> u64 { return g(xs); }
-func apply_v(const vector<u64>& xs, func(vector<u64>) -> vector<u64> g) -> vector<u64> {
+u64 countf(const vector<u64>& xs) { return xs.length(); }
+vector<u64> idf(const vector<u64>& xs) { return vector<u64>::make(); }
+u64 apply_u(const vector<u64>& xs, func(vector<u64>) -> u64 g) { return g(xs); }
+vector<u64> apply_v(const vector<u64>& xs, func(vector<u64>) -> vector<u64> g) {
     return g(xs);
 }
-func apply_vn(const vector<u64>& xs, func(vector<u64>) -> vector<u64> g) -> vector<u64> {
+vector<u64> apply_vn(const vector<u64>& xs, func(vector<u64>) -> vector<u64> g) {
     return g(idf(xs));
 }
-func host_u(const vector<u64>& xs) -> u64 { return apply_u(xs, countf); }
-func host_v(const vector<u64>& xs) -> vector<u64> { return apply_v(xs, idf); }
-func host_vn(const vector<u64>& xs) -> vector<u64> { return apply_vn(xs, idf); }
+u64 host_u(const vector<u64>& xs) { return apply_u(xs, countf); }
+vector<u64> host_v(const vector<u64>& xs) { return apply_v(xs, idf); }
+vector<u64> host_vn(const vector<u64>& xs) { return apply_vn(xs, idf); }
 """
 
 FNVAL_TU = """
@@ -328,8 +431,8 @@ spec apply_v(const vector<u64>& xs, func(vector<u64>) -> vector<u64> g) -> vecto
 
 #: `for_each` 的 κ 是**符号**（`k(visit2)`）：工具必须打印 inf、跳过该点。
 FGAP = """
-func visit2(const vector<u8>& k, u64 v) -> u64 { return v; }
-func f(const vector<u64>& xs) -> u64 {
+u64 visit2(const vector<u8>& k, u64 v) { return v; }
+u64 f(const vector<u64>& xs) {
     HashMap<vector<u8>, u64> m = map_new();
     map_put(m, "a", 1);
     return for_each(m, visit2);
@@ -350,6 +453,10 @@ def test_fnvalue():
     # `host_u` 的被调体 `countf` **有 target**（`O(xs.length())`），所以 κ 用的是
     # target，比函数体松 ⇒ 缺口是负的（有余量）。`host_v` / `host_vn` 的被调体
     # 没有 target（走内联），κ 正好等于 ops —— 那两条断**缺口 0**。
+    # **A-full（2026-11-09）**：`idf` 原先写 `return xs;`（`const&` 形参），值语义下
+    # 那是**一次真实的容器拷贝**，κ 会**故意**大于解释器 ops（解释器不拷贝 ⇒ ops 是
+    # 下界，设计 §10.1）。本测试要钉的是**函数值派发**的记账，所以 `idf` 改成返回
+    # prvalue，让 κ 与 ops 仍可逐项对账。
     for fn, pre, want_ops, exact in (("host_u", 6.0, 10, False),
                                      ("host_v", 6.0, 8, True),
                                      ("host_vn", 6.0, 11, True)):
@@ -406,11 +513,129 @@ def test_fnvalue():
     print()
 
 
+# ---------------------------------------------------------------- ⑤ 括号（叶子）
+#
+# **2026-11-09**：叶子函数 κ < ops 的根因。`paren` 在 κ 里原先**免费**
+# （`_k_expr_paren` 只返回里面的成本），而解释器 `_eval` 对**每个非 None 节点**
+# 记 1（含 `paren` 包裹，见 `test_units.py` 的单位定义）——于是**每层括号在 κ 里
+# 少 1**。大函数里被常数余量盖住，**只有把 SHA-256 的叶子单独测才看得见**：
+# `rotr` κ=10 < ops=13、`big_sigma0` κ=42 < ops=51。
+# 修法：括号节点补记 `OP_COST`（κ 只增不减），**不动解释器计数器**
+# ——它数的就是 AST 节点，改它等于重新定义单位、还会让所有历史 ops 一起变。
+LEAF = """
+u32 rotr(u32 x, u32 n) {
+    return (x >> n) | (x << (32 - n));
+}
+u32 ch(u32 x, u32 y, u32 z) {
+    return (x & y) ^ (~x & z);
+}
+u32 maj(u32 x, u32 y, u32 z) {
+    return (x & y) ^ (x & z) ^ (y & z);
+}
+u32 big_sigma0(u32 x) {
+    return rotr(x, 2) ^ rotr(x, 13) ^ rotr(x, 22);
+}
+u32 small_sigma0(u32 x) {
+    return rotr(x, 7) ^ rotr(x, 18) ^ (x >> 3);
+}
+u32 just_var(u32 x) { return x; }
+u32 just_paren(u32 x) { return (x); }
+u32 just_paren2(u32 x) { return ((x)); }
+u32 just_paren3(u32 x) { return (((x))); }
+u32 just_call(u32 x) { return rotr(x, 2); }
+u32 just_binop(u32 x, u32 y) { return x ^ y; }
+u32 just_not(u32 x) { return ~x; }
+u32 just_shift(u32 x) { return x >> 2; }
+u32 just_min(u32 x, u32 y) { return min(x, y); }
+u32 just_max(u32 x, u32 y) { return max(x, y); }
+u64 just_cast(u32 x) { return x as u64; }
+"""
+
+
+def test_leaf_parens():
+    print("[5] 叶子函数：κ ≥ ops，且缺口 0（修前每层括号少 1）")
+    #: (函数, 实参, 修前 κ, 实测 ops)。修前 κ 是 `_k_expr_paren` 旧实现下的值。
+    cases = (
+        ("rotr", [5, 3], 10, 13),
+        ("ch", [1, 2, 3], 9, 11),
+        ("maj", [1, 2, 3], 12, 15),
+        ("big_sigma0", [5], 42, 51),
+        ("small_sigma0", [5], 32, 39),
+        ("just_call", [5], 14, 17),
+        ("just_paren", [5], 2, 3),
+        ("just_paren2", [5], 2, 4),
+        ("just_paren3", [5], 2, 5),
+    )
+    for fn, args, pre, want_ops in cases:
+        k = kappa(LEAF, "", fn, {})
+        o = ops_of_call(fn, args, LEAF)
+        check(o == want_ops, f"{fn}：ops = {want_ops}（基准）", str(o))
+        check(k >= pre, f"{fn}：κ {k:g} ≥ 修前 {pre:g}（只增不减）", str(k))
+        check(o <= k, f"{fn}：ops {o} ≤ κ {k:g}（上界成立）")
+        check(o - k == 0, f"{fn}：缺口 {o - k:g} = 0（修前 {o - pre:g}）")
+
+    # 括号层数必须**线性**进 κ：每多一层 +1（解释器同样 +1）
+    kv = kappa(LEAF, "", "just_var", {})
+    k1 = kappa(LEAF, "", "just_paren", {})
+    k3 = kappa(LEAF, "", "just_paren3", {})
+    check(k3 - kv == 3 and k1 - kv == 1,
+          f"括号：κ(var)={kv:g} → 1 层 {k1:g} → 3 层 {k3:g}（每层 +1）",
+          f"{kv:g}/{k1:g}/{k3:g}")
+
+    # 单运算符 / `min`/`max` **不是**括号问题：修前就对得上，修后必须不变
+    for fn, args, want in (("just_binop", [5, 3], 4), ("just_not", [5], 3),
+                           ("just_shift", [5], 4), ("just_min", [5, 3], 5),
+                           ("just_max", [5, 3], 5)):
+        k = kappa(LEAF, "", fn, {})
+        o = ops_of_call(fn, args, LEAF)
+        check(k == want and o == want,
+              f"{fn}：κ = ops = {want}（修前就成立，不被括号修法带偏）",
+              f"κ={k:g} ops={o}")
+
+    # `as` 的**类型子节点**在 κ 里也记了 1（解释器不进入它）⇒ κ 比 ops 大 1。
+    # 方向安全（上界只会更松），所以**不**为了对齐把它调小。
+    kc = kappa(LEAF, "", "just_cast", {})
+    oc = ops_of_call("just_cast", [5], LEAF)
+    check(kc >= oc, f"just_cast：κ {kc:g} ≥ ops {oc}（多记 1，安全方向）",
+          f"κ={kc:g} ops={oc}")
+    print()
+
+
+#: `Ok` / `Err` / `print` / `expr-stmt` 的 κ vs ops（2026-11-10 实测，全部相等）。
+#:
+#: 这几条曾是 `interp.py` 文件头「已知的口径差」里点名的：`Ok`/`Err` 说 κ 不计实参、
+#: `print` 说 κ 少 1、`expr-stmt` 说每句多 1。2026-11-10 逐条实测（见下面断言）
+#: κ 与 ops **完全相等**——那段注释已按实测改写，这里把结论钉住。
+MISC_TU = """
+error E;
+"""
+MISC = """
+u64! okk(u64 x) { return Ok(x + 1); }
+u64! errk(u64 x) { return Err(E::Bad); }
+u64 pr(u64 x) { print(x); return x; }
+u64 prf(u64 x) { print("{}", x); return x; }
+u64 stmt2(u64 x) { x * 2; x + 1; return x; }
+"""
+
+
+def test_leaf_misc():
+    print("[6] 叶子：`Ok` / `Err` / `print` / `expr-stmt` 的 κ = ops（修前注释已过时）")
+    for fn, args in (("okk", [5]), ("errk", [5]), ("pr", [5]),
+                     ("prf", [5]), ("stmt2", [5])):
+        k = kappa(MISC, MISC_TU, fn, {})
+        o = ops_of_call(fn, args, MISC, MISC_TU)
+        check(o - k == 0, f"{fn}：κ = ops = {o:g}（缺口 0）", f"κ={k:g} ops={o}")
+    print()
+
+
 def main() -> int:
     test_recursion_depth()
+    test_tree_recursion()
     test_builtin_args()
     test_minmax_dispatch()
     test_fnvalue()
+    test_leaf_parens()
+    test_leaf_misc()
 
     print()
     if _failed:

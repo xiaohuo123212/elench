@@ -50,7 +50,7 @@ spec f(const vector<u64>& xs) -> u64 {
 """
 
 ELN_DEBT = """
-func f(const vector<u64>& xs) -> u64 {
+u64 f(const vector<u64>& xs) {
     u64 s = 0;
     u64 i = 0;
     while (i < xs.length()) {

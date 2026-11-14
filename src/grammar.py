@@ -140,9 +140,9 @@ rewrite-stmt  = "rewrite" IDENT block ;
 
 (* ---------------- 表达式 ---------------- *)
 expr          = or-expr ;
-or-expr       = and-expr { ( "||" | "or" ) and-expr } ;
-and-expr      = not-expr { ( "&&" | "and" ) not-expr } ;
-not-expr      = [ "!" | "not" ] cmp-expr ;
+or-expr       = and-expr { "||" and-expr } ;
+and-expr      = not-expr { "&&" not-expr } ;
+not-expr      = [ "!" ] cmp-expr ;
 cmp-expr      = add-expr { ( "==" | "!=" | "<" | "<=" | ">" | ">=" ) add-expr } ;
 add-expr      = mul-expr { ( "+" | "-" ) mul-expr } ;
 mul-expr      = unary { ( "*" | "/" | "%" ) unary } ;

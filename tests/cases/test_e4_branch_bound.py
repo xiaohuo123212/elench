@@ -50,7 +50,7 @@ TU = """spec f(const vector<u64>& xs) -> u64 {
 }
 """
 
-CH = """func f(const vector<u64>& xs) -> u64 {
+CH = """u64 f(const vector<u64>& xs) {
     u64 i = 0;
     if (xs.length() > 0) {
         i = xs.length();

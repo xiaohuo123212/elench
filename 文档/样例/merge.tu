@@ -22,6 +22,6 @@ spec earlier(Interval a, Interval b) -> bool {
 spec merge(vector<Interval>& xs) -> vector<Interval>! {
     effects { alloc };
 
-    target { time: { max: O(xs.length() * xs.length()) }, allocation: { max: O(xs.length()) }, };
+    target { time: { max: O(xs.size() * xs.size()) }, allocation: { max: O(xs.size()) }, };
 }
 // #endregion spec

@@ -253,6 +253,122 @@ def test_overhead():
                         f"开 {t_on * 1000:.1f}ms，stats.summarize n=4096）")
 
 
+# ---------------------------------------------------------------- (f)
+def _ops_and_allocs(src: str, fn: str = "f"):
+    """跑一次，返回 `(ops, allocs)`（`ops` 是整棵调用树）。"""
+    from parser import parse_source
+    mod = parse_source(src, "copycost.eln").module
+    old = interp._COUNT
+    interp.ops_enable(True)
+    try:
+        ops_reset()
+        it = Interp(mod, None)
+        it.call(fn, [])
+        return ops_of(), it.allocs
+    finally:
+        interp.ops_enable(old)
+
+
+def test_copy_cost():
+    """**拷贝计入 ops / allocs，且系数与 `_copy_cost` 逐项对齐**（A-full 第 2 步）。
+
+    测法：同一份程序，只差**一行** `T dst = src;`。多出来的 ops =
+    `_stmt` 1 + `_eval(path)` 1 + **拷贝项**；allocs 多出来的就是拷贝的分配。
+    于是「Δops − 2」「Δallocs」就是拷贝本身，能逐格对上 `_copy_cost`：
+
+    | 拷贝 | Δops − 2 | Δallocs |
+    |---|---|---|
+    | `vector` / `Text`（n 个元素） | `n + 1` | 1 |
+    | `map` / `set`（n 个节点） | `n` | n |
+    | `array<T,N>`（N 是容量） | N | 0 |
+    | 标量 | **0**（κ 的登记口径） | 0 |
+
+    用「同一行、两种规模」再验一次斜率，防止常数项把系数盖住。
+    """
+    print("[f] 拷贝计入 ops / allocs（系数对齐 `_copy_cost`）")
+    VEC = """
+u64 f() {
+    const u64 n = %d;
+    vector<u64> src = vector<u64>::filled(7, n);
+    vector<u64> dst = src;
+    return dst.length();
+}
+"""
+    VEC_NO = """
+u64 f() {
+    const u64 n = %d;
+    vector<u64> src = vector<u64>::filled(7, n);
+    return src.length();
+}
+"""
+    for n in (3, 10):
+        op, al = _ops_and_allocs(VEC % n)
+        op0, al0 = _ops_and_allocs(VEC_NO % n)
+        check(op - op0 - 2 == n + 1,
+              f"vector 拷贝 n={n}：Δops−2 = {op - op0 - 2} = n+1（{n + 1}）",
+              f"ops {op} vs 不拷贝 {op0}")
+        check(al - al0 == 1, f"vector 拷贝 n={n}：Δalloc = {al - al0} = 1")
+
+    MAP = """
+u64 f() {
+    map<u64, u64> m;
+    m.insert(1, 10); m.insert(2, 20); m.insert(3, 30);
+    map<u64, u64> y = m;
+    return y.length();
+}
+"""
+    MAP_NO = """
+u64 f() {
+    map<u64, u64> m;
+    m.insert(1, 10); m.insert(2, 20); m.insert(3, 30);
+    return m.length();
+}
+"""
+    op, al = _ops_and_allocs(MAP)
+    op0, al0 = _ops_and_allocs(MAP_NO)
+    check(op - op0 - 2 == 3, f"map 拷贝 n=3：Δops−2 = {op - op0 - 2} = n（3）")
+    check(al - al0 == 3, f"map 拷贝 n=3：Δalloc = {al - al0} = n（3）")
+
+    ARR = """
+u64 f() {
+    array<u64, %d> src = array<u64, %d>::filled(1);
+    array<u64, %d> dst = src;
+    return dst.length();
+}
+"""
+    ARR_NO = """
+u64 f() {
+    array<u64, %d> src = array<u64, %d>::filled(1);
+    return src.length();
+}
+"""
+    for cap in (4, 9):
+        op, al = _ops_and_allocs(ARR % (cap, cap, cap))
+        op0, al0 = _ops_and_allocs(ARR_NO % (cap, cap))
+        check(op - op0 - 2 == cap,
+              f"array<u64,{cap}> 拷贝：Δops−2 = {op - op0 - 2} = N（{cap}）")
+        check(al - al0 == 0, f"array<u64,{cap}> 拷贝：Δalloc = {al - al0} = 0")
+
+    SCALAR = """
+u64 f() {
+    u64 src = 7;
+    u64 dst = src;
+    return dst;
+}
+"""
+    SCALAR_NO = """
+u64 f() {
+    u64 src = 7;
+    return src;
+}
+"""
+    op, al = _ops_and_allocs(SCALAR)
+    op0, al0 = _ops_and_allocs(SCALAR_NO)
+    check(op - op0 == 2,
+          f"标量拷贝：Δops = {op - op0} = 2（只有语句 + 取值，拷贝记 0）")
+    check(al - al0 == 0, f"标量拷贝：Δalloc = {al - al0} = 0")
+
+
 def test_per_thread():
     """**per-thread 计数器**：多线程各加 N 次，汇总必须**一个不少**。
 
@@ -289,6 +405,7 @@ def main() -> int:
     test_bound()
     test_counterexample()
     test_overhead()
+    test_copy_cost()
     test_per_thread()
 
     print()

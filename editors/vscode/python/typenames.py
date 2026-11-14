@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Elench contributors
 """typenames.py —— 容器类型名的**别名层**（B1，2026-11-05）
@@ -30,6 +30,20 @@ CANON = {
     "Map": "map",
     "Set": "set",
     "Option": "optional",
+    # **P4-0（2026-11-11）**：`std::expected<T, E>` 是本语言 `Result` 的
+    # **唯一写法**。内部仍叫 `Result`（类型检查 / 解释器都按这个名字判），
+    # 但用户写出来的是 `expected`；`Result` 本身成了旧名（见 `OLD`）。
+    "expected": "Result",
+}
+
+#: **已下线的类型名 → 新名**（P4-0，2026-11-11）。
+#:
+#: 与 `CANON` 分开：`CANON` 是"内部两种写法等价"，这张表是"**外面不许再写**"。
+#: `typecheck` 遇到它们报 `E-Type-OldName`（error），消息里教新名。
+#: `Option` / `Result` 以前都能写，现在只剩 `optional` / `expected`。
+OLD = {
+    "Option": "optional",
+    "Result": "expected",
 }
 
 #: 规范名 → 写出去的名字。将来若要改显示，只动这张表。
@@ -39,6 +53,10 @@ DISPLAY = {
     "map": "map",
     "set": "set",
     "optional": "optional",
+    # 内部名 → 用户写法：诊断里不许出现 `Result<…>` / `Option<…>`
+    # （文档与名字表说的是 `expected` / `optional`，两边必须同源）。
+    "Result": "expected",
+    "Option": "optional",
 }
 
 

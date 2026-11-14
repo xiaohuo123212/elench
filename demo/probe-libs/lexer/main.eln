@@ -1,0 +1,181 @@
+// demo/probe-libs/lexer/main.eln —— main.cpp 的移植（--compat；改动了 7 处，见报告）
+#include <cctype>
+#include <cstdio>
+#include <string>
+#include <vector>
+
+struct Token {
+    int kind;              // 0=num, 1=ident, 2=sym, 3=eof, 9=bad, 100+=keyword
+    std::string text;
+    size_t value;
+    size_t pos;
+};
+
+static int keyword_kind(const std::string &word) {
+    const std::vector<std::string> kws = {"if", "else", "while", "for", "return", "const"};
+    for (u64 k = 0; k < kws.size(); k = k + 1) {
+        if (word == kws[k]) {
+            return 100 + k;
+        }
+    }
+    return -1;
+}
+
+static bool is_symbol(char c) {
+    return c == '+' || c == '-' || c == '=' || c == '(' || c == ')' || c == ';' || c == '<' ||
+           c == '>' || c == '{' || c == '}';
+}
+
+// substr 没有等价方法：手写切片（原件的 src.substr(a, b - a)）
+static std::string slice(const std::string &s, u64 a, u64 b) {
+    std::string out = "";
+    for (u64 k = a; k < b; k = k + 1) {
+        if (k < s.size()) {
+            out.push_back(s[k]);
+        }
+    }
+    return out;
+}
+
+// `std::string(1, c)` 只在声明位置被认：表达式里要自己拼
+static std::string one_char(char c) {
+    std::string s = "";
+    s.push_back(c);
+    return s;
+}
+
+struct Lexer {
+    std::string src;
+    size_t i;
+
+    Lexer(const std::string &s) {
+        src = s;
+        i = 0;
+    }
+
+    bool at_end() const { return i >= src.size(); }
+
+    char peek() const {
+        if (at_end()) {
+            return '\0';
+        }
+        return src[i];
+    }
+
+    void skip_space() {
+        while (i < src.size() && std::isspace(static_cast<unsigned char>(src[i]))) {
+            i = i + 1;
+        }
+    }
+
+    Token blank(int kind) const {
+        Token t;
+        t.kind = kind;
+        t.text = "";
+        t.value = 0;
+        t.pos = i;
+        return t;
+    }
+
+    Token number() {
+        const size_t start = i;
+        size_t v = 0;
+        while (i < src.size() && std::isdigit(static_cast<unsigned char>(src[i]))) {
+            const u64 d = src[i] - '0';
+            v = v * 10 + d;
+            i = i + 1;
+        }
+        Token t;
+        t.kind = 0;
+        t.text = slice(src, start, i);
+        t.value = v;
+        t.pos = start;
+        return t;
+    }
+
+    Token ident() {
+        const size_t start = i;
+        i = i + 1;
+        while (i < src.size() &&
+               (std::isalnum(static_cast<unsigned char>(src[i])) || src[i] == '_')) {
+            i = i + 1;
+        }
+        Token t;
+        t.text = slice(src, start, i);
+        t.value = 0;
+        t.pos = start;
+        const int kw = keyword_kind(t.text);
+        if (kw >= 0) {
+            t.kind = kw;
+        } else {
+            t.kind = 1;
+        }
+        return t;
+    }
+
+    Token next() {
+        skip_space();
+        if (at_end()) {
+            return blank(3);
+        }
+        const char c = peek();
+        if (std::isdigit(static_cast<unsigned char>(c))) {
+            return number();
+        }
+        if (std::isalpha(static_cast<unsigned char>(c))) {
+            return ident();
+        }
+        if (is_symbol(c)) {
+            Token t = blank(2);
+            t.text = one_char(c);
+            i = i + 1;
+            return t;
+        }
+        Token t = blank(9);
+        t.text = one_char(c);
+        i = i + 1;
+        return t;
+    }
+
+    std::vector<Token> run() {
+        std::vector<Token> out;
+        const size_t cap = src.size() + 1;   // 原件是 while (t.kind != 3)：改成带上界的 for + break
+        for (u64 k = 0; k < cap; k = k + 1) {
+            Token t = next();
+            if (t.kind == 3) {
+                break;
+            }
+            out.push_back(t);
+        }
+        return out;
+    }
+};
+
+static std::string kind_name(int kind) {
+    if (kind == 0) return "num";
+    if (kind == 1) return "ident";
+    if (kind == 2) return "sym";
+    if (kind == 3) return "eof";
+    if (kind == 9) return "bad";
+    return "keyword";
+}
+
+int main() {
+    const std::string src = "if count1 = 42 + 7;\nwhile (count1 > 0) { count1 = count1 - 1; }";
+    Lexer lx(src);
+    const std::vector<Token> toks = lx.run();
+    size_t nums = 0;
+    size_t idents = 0;
+    size_t syms = 0;
+    size_t kws = 0;
+    for (const Token &t : toks) {
+        if (t.kind == 0) nums++;
+        if (t.kind == 1) idents++;
+        if (t.kind == 2) syms++;
+        if (t.kind >= 100) kws++;
+        std::printf("%zu %s %s %zu\n", t.pos, kind_name(t.kind).c_str(), t.text.c_str(), t.value);
+    }
+    std::printf("tokens=%zu nums=%zu idents=%zu syms=%zu keywords=%zu\n", toks.size(), nums,
+                idents, syms, kws);
+    return 0;
+}

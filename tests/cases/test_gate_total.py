@@ -41,7 +41,7 @@ tmp = tempfile.mkdtemp(prefix="elench_gate_")
 io.open(os.path.join(tmp, "g.eln"), "w", encoding="utf-8").write(
     'extern mystery(u64 x) -> u64 from "kernel32" effects { env };\n'
     "\n"
-    "func probe(u64 x) -> u64 {\n"
+    "u64 probe(u64 x) {\n"
     "    unsafe {\n"
     "        u64 i = 0;\n"
     "        while (i < mystery(x)) {\n"

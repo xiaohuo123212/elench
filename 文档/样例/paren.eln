@@ -13,25 +13,25 @@
 // 这就是「定长数组」逼作者显式处理容量的地方。
 
 // #region fn
-pub func paren(
-               const vector<u8>& text) -> u64! {
+pub u64! paren(
+               const vector<u8>& text) {
     array<u64,
     STACK_CAP> stack = array<u64,
     STACK_CAP>::make();
     u64 i = 0;
-    const u64 n = text.length();
+    const u64 n = text.size();
 
     while (i < n) {
         const u64 c = text.at(i);
         if (c == OPEN_PAREN) {
             // 定长栈：满了就是"嵌套太深"，不是崩溃
-            if (stack.length() >= STACK_CAP) {
+            if (stack.size() >= STACK_CAP) {
                 return Err(ParenError::TooDeep);
             }
-            stack.push(c);
+            stack.push_back(c);
         } else if (c == CLOSE_PAREN) {
             // requires 的履行：显式分支排除空栈（D6 第 2 条）
-            if (stack.length() == 0) {
+            if (stack.size() == 0) {
                 return Err(ParenError::Unmatched);
             }
             const u64 top = stack.pop();
@@ -39,7 +39,7 @@ pub func paren(
         i = i + 1;
     }
 
-    if (stack.length() != 0) {
+    if (stack.size() != 0) {
         return Err(ParenError::Unclosed);
     }
     return 1;

@@ -41,13 +41,13 @@ def check(name, cond, detail=""):
         print(f"  FAIL {name}   {detail}")
 
 
-CH = """func risky(Option<u64> o) -> u64 {
+CH = """u64 risky(optional<u64> o) {
     return o.unwrap();
 }
 """
-TU_EMPTY = """spec risky(Option<u64> o) -> u64 { effects { }; target { time: { max: O(1) }, allocation: { max: 0 }, }; }
+TU_EMPTY = """spec risky(optional<u64> o) -> u64 { effects { }; target { time: { max: O(1) }, allocation: { max: 0 }, }; }
 """
-TU_PANIC = """spec risky(Option<u64> o) -> u64 { effects { panic }; target { time: { max: O(1) }, allocation: { max: 0 }, }; }
+TU_PANIC = """spec risky(optional<u64> o) -> u64 { effects { panic }; target { time: { max: O(1) }, allocation: { max: 0 }, }; }
 """
 
 print("[1] 用了 unwrap 但没声明 panic → 报错，且带行号")
@@ -63,7 +63,7 @@ res2 = check_module(TU_PANIC, CH, "case2")
 check("无诊断", not res2.diagnostics, [d.code for d in res2.diagnostics])
 
 print("[3] 不用 panic 的程序不误报")
-CH3 = "func safe(vector<u64>& xs) -> u64 {\n    return xs.length();\n}\n"
+CH3 = "u64 safe(vector<u64>& xs) {\n    return xs.length();\n}\n"
 TU3 = "spec safe(vector<u64>& xs) -> u64 { effects { }; target { time: { max: O(1) }, allocation: { max: 0 }, }; }\n"
 res3 = check_module(TU3, CH3, "case3")
 check("无 Effect 类诊断",

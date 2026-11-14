@@ -56,17 +56,17 @@ def diag_of(tu_text, ch_text):
 
 
 print("[1] 封闭：写对变体 → 不报")
-msgs, tc = diag_of(TU, 'func f() -> u64! {\n    return Err(CalcError::BadToken);\n}\n')
+msgs, tc = diag_of(TU, 'u64! f() {\n    return Err(CalcError::BadToken);\n}\n')
 check("无 E-Variant-Unknown", not any("变体" in m for m in msgs), msgs)
 
 print("[2] 封闭：写错变体 → 报，且说清是「错误类型」")
-msgs, _ = diag_of(TU, 'func f() -> u64! {\n    return Err(CalcError::Nope);\n}\n')
+msgs, _ = diag_of(TU, 'u64! f() {\n    return Err(CalcError::Nope);\n}\n')
 hit = [m for m in msgs if "变体" in m]
 check("报出了变体错误", bool(hit), msgs)
 check("措辞是「错误类型」", any("错误类型" in m for m in hit), hit)
 
 print("[3] 开放：`error X;` 不校验变体（老行为不变）")
-msgs, _ = diag_of(TU_OPEN, 'func f() -> u64! {\n    return Err(CalcError::Whatever);\n}\n')
+msgs, _ = diag_of(TU_OPEN, 'u64! f() {\n    return Err(CalcError::Whatever);\n}\n')
 check("不因变体报警", not any("变体" in m for m in msgs), msgs)
 
 print()

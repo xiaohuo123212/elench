@@ -1,6 +1,6 @@
 ﻿// max_pair_sum.eln —— 朴素实现：每个 i 都往后扫一遍，所以是 O(n²)
-pub func max_pair_sum(const vector<u64>& xs) -> u64 {
-    u64 n = xs.length();
+pub u64 max_pair_sum(const vector<u64>& xs) {
+    u64 n = xs.size();
     u64 best = 0;
     u64 i = 0;
     while (i < n) {

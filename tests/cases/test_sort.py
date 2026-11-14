@@ -74,7 +74,7 @@ def unwrap(v):
 
 def test_sort_basic():
     print("[1] sort：基本情形")
-    SRC = """func run(u64 k) -> u64! {
+    SRC = """u64! run(u64 k) {
     vector<u64> xs = vector<u64>::make();
     if (k == 0) { }
     if (k == 1) { xs.push(7); }
@@ -116,10 +116,10 @@ def test_stability():
     TU = """struct Pair { key: u64, tag: u64 }
 """
     SRC = """struct Pair { key: u64, tag: u64 }
-func by_key(Pair a, Pair b) -> bool {
+bool by_key(Pair a, Pair b) {
     return a.key < b.key;
 }
-func run() -> u64! {
+u64! run() {
     vector<Pair> xs = vector<Pair>::make();
     xs.push(Pair { key: 1, tag: 11 });
     xs.push(Pair { key: 0, tag: 20 });
@@ -139,13 +139,13 @@ func run() -> u64! {
 
 def test_sort_by():
     print("[3] sort_by：具名比较器")
-    SRC = """func desc(u64 a, u64 b) -> bool {
+    SRC = """bool desc(u64 a, u64 b) {
     return a > b;
 }
-func asc(u64 a, u64 b) -> bool {
+bool asc(u64 a, u64 b) {
     return a < b;
 }
-func run(u64 which) -> u64! {
+u64! run(u64 which) {
     vector<u64> xs = vector<u64>::make();
     xs.push(5);
     xs.push(1);
@@ -167,18 +167,18 @@ func run(u64 which) -> u64! {
 def test_reject():
     print("[4] 比较器不合规 MUST 报错")
     TU = "spec run(vector<u64>& xs) -> u64 {\n    effects { alloc };\n}\n"
-    bad_name = check_module(TU, """func run(vector<u64>& xs) -> u64 {
+    bad_name = check_module(TU, """u64 run(vector<u64>& xs) {
     sort_by(xs, nope);
     return 0;
 }""", "m")
     check(any(d.code == "E-Sort-BadComparator" for d in bad_name.diagnostics),
           "比较器名字不存在 → E-Sort-BadComparator")
 
-    bad_arity = check_module(TU, """func bad(u64 a) -> bool { return true; }
+    bad_arity = check_module(TU, """bool bad(u64 a) { return true; }
 spec bad(u64 a) -> bool {
     effects {};
 }
-func run(vector<u64>& xs) -> u64 {
+u64 run(vector<u64>& xs) {
     sort_by(xs, bad);
     return 0;
 }""", "m")
@@ -186,7 +186,7 @@ func run(vector<u64>& xs) -> u64 {
           "比较器形参不是 2 个 → E-Sort-BadComparator",
           str([d.code for d in bad_arity.diagnostics]))
 
-    bad_args = check_module(TU, """func run(vector<u64>& xs) -> u64 {
+    bad_args = check_module(TU, """u64 run(vector<u64>& xs) {
     sort(xs, xs);
     return 0;
 }""", "m")
@@ -194,7 +194,7 @@ func run(vector<u64>& xs) -> u64 {
           "sort 给 2 个实参 → E-Sort-BadArgs")
 
     # 运行时：比较器名不是本模块函数
-    it = interp_of("""func run() -> u64! {
+    it = interp_of("""u64! run() {
     vector<u64> xs = vector<u64>::make();
     xs.push(1);
     sort_by(xs, ghost);
@@ -211,14 +211,14 @@ func run(vector<u64>& xs) -> u64 {
 
 def test_cost():
     print("[5] 成本：O(n log n)；sort_by 乘比较器成本")
-    SRC = """func asc(u64 a, u64 b) -> bool {
+    SRC = """bool asc(u64 a, u64 b) {
     return a < b;
 }
-func run(vector<u64>& xs) -> u64! {
+u64! run(vector<u64>& xs) {
     sort(xs);
     return xs.at(0);
 }
-func run2(vector<u64>& xs) -> u64! {
+u64! run2(vector<u64>& xs) {
     sort_by(xs, asc);
     return xs.at(0);
 }"""

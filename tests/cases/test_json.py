@@ -51,7 +51,7 @@ spec f(const vector<u8>& text) -> u64 {
     target { time: { max: O(text.length()) }, allocation: { max: O(text.length()) }, };
 }
 """
-CH = """func f(const vector<u8>& text) -> u64 {
+CH = """u64 f(const vector<u8>& text) {
     Json j = json_parse(text)?;
     match (j) {
         Json::Null => { return 0; }

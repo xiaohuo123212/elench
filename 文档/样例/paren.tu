@@ -17,6 +17,6 @@ spec paren(
     effects { alloc };
     requires STACK_CAP > 0;
 
-    target { time: { max: O(text.length()) }, allocation: { max: 0 }, };
+    target { time: { max: O(text.size()) }, allocation: { max: 0 }, };
 }
 // #endregion spec

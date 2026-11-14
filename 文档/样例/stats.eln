@@ -12,11 +12,11 @@
 // 中间量一律非负：|x - mean| 用 if 分两支算，从写法上避开 i64 负数（E8 未修）。
 
 // #region fn
-pub func summarize(
-                   const vector<u64>& xs) -> Summary! {
+pub Summary! summarize(
+                   const vector<u64>& xs) {
     // 宿主局部名故意避开 `i` / `n`：候选默认 inline，能读宿主局部变量，
     // 若同名就是「遮蔽」——本语言禁止遮蔽（E-Name-Shadowed）。
-    const u64 count = xs.length();
+    const u64 count = xs.size();
     if (count == 0) {
         return Err(StatsError::Empty);
     }
@@ -55,7 +55,7 @@ pub func summarize(
     sum_forward {
         u64 s = 0;
         u64 i = 0;
-        const u64 n = xs.length();
+        const u64 n = xs.size();
         while (i < n) {
             s = s + xs.at(i);
             i = i + 1;
@@ -68,7 +68,7 @@ pub func summarize(
     sum_backward {
         u64 s = 0;
         u64 i = 0;
-        const u64 n = xs.length();
+        const u64 n = xs.size();
         while (i < n) {
             s = s + xs.at(n - 1 - i);
             i = i + 1;

@@ -47,7 +47,7 @@ TU = """spec sum(const vector<u64>& xs) -> u64 {
     target { time: { max: O(xs.length()) }, allocation: { max: 0 }, };
 }
 """
-ELN = """func sum(const vector<u64>& xs) -> u64 {
+ELN = """u64 sum(const vector<u64>& xs) {
     u64 s = 0;
     u64 i = 0;
     while (i < xs.length()) {

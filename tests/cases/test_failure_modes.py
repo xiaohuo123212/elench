@@ -78,6 +78,22 @@ def main() -> int:
              if n not in names]
     check("没有登记不存在的内建", not extra, str(sorted(set(extra))))
 
+    print("=== F-4：失败语义 ↔ 返回类型登记 对账（K5） ===")
+    # `FAIL_MODE` 以前**没有任何代码消费**：它只是一张文档表。`vec_pop` 在这里
+    # 标着 `option`，可另一处 `ret="any"`——checker 无从知道"这个值可能是 None"。
+    # 现在两边必须一致：失败语义说"返回 Option / Result"，返回类型登记就必须
+    # 真的是 `option-*` / `result-*`，否则新内建会悄悄回到 K5。
+    # 反向不要求：`option_some` / `option_unwrap` 返回包装值但**不会失败**（never）。
+    _fns = stdlib.FNS
+    opt = [n for n in _fns if stdlib.failure_mode(n) == "option"]
+    bad_opt = [n for n in opt if not _fns[n]["ret"].startswith("option-")]
+    check(f"{len(opt)} 个 option 模式的 ret 都是 option-*",
+          not bad_opt, str(bad_opt))
+    _errs = [n for n in _fns if stdlib.failure_mode(n) == "err"]
+    bad_err = [n for n in _errs if not _fns[n]["ret"].startswith("result-")]
+    check(f"{len(_errs)} 个 err 模式的 ret 都是 result-*",
+          not bad_err, str(bad_err))
+
     print("=== 分布（和对账文档用） ===")
     from collections import Counter
     dist = Counter(stdlib.failure_mode(n) for n in names)

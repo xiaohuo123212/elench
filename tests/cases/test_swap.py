@@ -34,11 +34,11 @@ def check(name, cond, detail=""):
         print(f"  FAIL {name}   {detail}")
 
 
-SRC = """func take(vector<u64>& xs) -> u64 {
+SRC = """u64 take(vector<u64>& xs) {
     swap(xs, 0, 1);
     return xs.at(0);
 }
-func oob(vector<u64>& xs) -> u64 {
+u64 oob(vector<u64>& xs) {
     swap(xs, 0, 9);
     return 0;
 }

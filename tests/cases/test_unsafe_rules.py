@@ -64,15 +64,15 @@ check("无解析错误", not [d for d in tu.diagnostics if d.code.startswith("E-
       [d.code for d in tu.diagnostics])
 
 print("[2] 有 unsafe 块但没声明 → E-Unsafe-Undeclared")
-c = codes(_tu(""), "func f() -> u64 { unsafe { return 1; } }")
+c = codes(_tu(""), "u64 f() { unsafe { return 1; } }")
 check("报 E-Unsafe-Undeclared", "E-Unsafe-Undeclared" in c, c)
 
 print("[3] 声明了但没有块 → E-Unsafe-Overdeclared")
-c = codes(_tu(" unsafe "), "func f() -> u64 { return 1; }")
+c = codes(_tu(" unsafe "), "u64 f() { return 1; }")
 check("报 E-Unsafe-Overdeclared", "E-Unsafe-Overdeclared" in c, c)
 
 print("[4] 声明了且确实有块 → 不报这两条")
-c = codes(_tu(" unsafe "), "func f() -> u64 { unsafe { return 1; } }")
+c = codes(_tu(" unsafe "), "u64 f() { unsafe { return 1; } }")
 check("两条都不出现",
       "E-Unsafe-Undeclared" not in c and "E-Unsafe-Overdeclared" not in c, c)
 
@@ -85,12 +85,12 @@ FFI_TU = """spec f(const vector<u8>& s) -> u64 {
 
 FFI_CH = """extern c_len(const vector<u8>& s) -> u64 from "ucrtbase" effects { io };
 
-func f(const vector<u8>& s) -> u64 { return c_len(s); }
+u64 f(const vector<u8>& s) { return c_len(s); }
 """
 
 FFI_CH_OK = """extern c_len(const vector<u8>& s) -> u64 from "ucrtbase" effects { io };
 
-func f(const vector<u8>& s) -> u64 { unsafe { return c_len(s); } }
+u64 f(const vector<u8>& s) { unsafe { return c_len(s); } }
 """
 
 print("[5] FFI 调用必须在 unsafe 块里 → E-Unsafe-Required")

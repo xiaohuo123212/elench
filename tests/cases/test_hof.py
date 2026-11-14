@@ -37,9 +37,9 @@ from parser import parse_source       # noqa: E402
 
 FAILED = []
 
-PRELUDE = """func twice(u64 x) -> u64 { return x * 2; }
-func gt10(u64 x) -> u64 { if (x > 10) { return 1; } return 0; }
-func add(u64 a, u64 b) -> u64 { return a + b; }
+PRELUDE = """u64 twice(u64 x) { return x * 2; }
+u64 gt10(u64 x) { if (x > 10) { return 1; } return 0; }
+u64 add(u64 a, u64 b) { return a + b; }
 """
 
 TU = ("spec f(const vector<u64>& xs) -> u64 { effects {}; "
@@ -55,7 +55,7 @@ def check(name, cond, detail=""):
 
 
 def run(body, xs):
-    ch = PRELUDE + "func f(const vector<u64>& xs) -> u64 {\n" + body + "\n}\n"
+    ch = PRELUDE + "u64 f(const vector<u64>& xs) {\n" + body + "\n}\n"
     tu = parse_source(TU, "m.tu").module
     mod = parse_source(ch, "m.eln").module
     return Interp(mod, tu).call("f", [list(xs)])
@@ -80,7 +80,7 @@ def main() -> int:
               "具名" in str(exc) or "成本" in str(exc), str(exc)[:60])
 
     print("=== 成本 = n(xs) × κ(回调) + n(xs) ===")
-    ch = PRELUDE + """func f(const vector<u64>& xs) -> u64 {
+    ch = PRELUDE + """u64 f(const vector<u64>& xs) {
     const vector<u64> d = map(xs, twice);
     return d.length();
 }

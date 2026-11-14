@@ -3,8 +3,8 @@
 // 单计数器循环：`i` 一直加到 n，另一半用 `n - 1 - i` 现算。
 // **为什么不用 `while (i + 1 < j)`**：两个变量同时在变，成本分析推不出上界（κ=⊤）。
 // 换成单计数器后是 O(n)，对拍表里才有数——这也是样例要教的一件事。
-pub func reverse_in(const vector<u64>& xs) -> u64 {
-    u64 n = xs.length();
+pub u64 reverse_in(const vector<u64>& xs) {
+    u64 n = xs.size();
     u64 i = 0;
     u64 diff = 0;
     while (i < n) {

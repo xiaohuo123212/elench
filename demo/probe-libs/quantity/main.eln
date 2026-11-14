@@ -1,0 +1,273 @@
+// quantity —— 带单位的物理量（定点表示）：value 是整数，scale 是 10 的幂次。
+// 这是 main.cpp 的 Elench 转写（--compat）：只做「语言逼你改」的最小改动。
+//   R1  const int MAX_SCALE = 9; 等 5 个文件级常量 → #define
+//                                           （E-Ai-HasDecl：.eln 顶层不许 const）
+//   R2  `cond ? a : b`（compare 里两处）      → if / else（E-Parse-Expected：没有三元）
+//   R3  `const Quantity&` 形参                → 按值 `Quantity`
+//                                           （E-Const-Mutate：成员函数降级后接收者是 T&，
+//                                            const 形参调不了它；本库是 16 字节 POD，按值不亏）
+#include <cstdio>
+#include <string>
+
+typedef long long i64;
+
+// 定点表示最多 9 位小数（宏定义行尾不能跟 // 注释：注释会进宏体）
+#define MAX_SCALE 9
+
+// 错误码（不用异常：运算失败就返回码）
+#define E_NONE 0
+#define E_SCALE 1
+#define E_DIVZERO 2
+#define E_NOTVALID 3
+
+struct Quantity {
+    i64 value;                         // 以 10^-scale 为单位的整数
+    int scale;                         // 小数点后位数
+
+    bool valid() const { return scale >= 0 && scale <= MAX_SCALE; }
+
+    i64 pow10(int k) const {
+        i64 unit = 1;
+        for (int i = 0; i < k; ++i) {
+            unit *= 10;
+        }
+        return unit;
+    }
+
+    // 取反：精度不变
+    Quantity negated() const {
+        Quantity r;
+        r.value = -value;
+        r.scale = scale;
+        return r;
+    }
+
+    // 和另一个量比大小：对齐后比整数部分，返回 -1 / 0 / 1。
+    int compare(Quantity o) const {
+        int s = scale;
+        if (o.scale > s) {
+            s = o.scale;
+        }
+        i64 x = value * pow10(s - scale);
+        i64 y = o.value * o.pow10(s - o.scale);
+        if (x < y) {
+            return -1;
+        }
+        if (x > y) {
+            return 1;
+        }
+        return 0;
+    }
+};
+
+// 一次运算的结果：成功就带着量，失败就带着错误码。
+struct QResult {
+    bool ok;
+    int code;
+    Quantity q;
+};
+
+static QResult fail(int code) {
+    QResult r;
+    r.ok = false;
+    r.code = code;
+    r.q.value = 0;
+    r.q.scale = 0;
+    return r;
+}
+
+static QResult good(i64 value, int scale) {
+    QResult r;
+    r.ok = true;
+    r.code = E_NONE;
+    r.q.value = value;
+    r.q.scale = scale;
+    return r;
+}
+
+// 换到目标精度：放大是精确的，缩小按四舍五入（远离零）。
+static QResult rescale(Quantity a, int target) {
+    if (!a.valid() || target < 0 || target > MAX_SCALE) {
+        return fail(E_SCALE);
+    }
+    QResult r;
+    if (target >= a.scale) {
+        r = good(a.value * a.pow10(target - a.scale), target);
+    } else {
+        i64 unit = a.pow10(a.scale - target);
+        i64 half = unit / 2;
+        i64 v = 0;
+        if (a.value >= 0) {
+            v = (a.value + half) / unit;
+        } else {
+            v = -((-a.value + half) / unit);
+        }
+        r = good(v, target);
+    }
+    return r;
+}
+
+// 加减：先对齐到较大精度再加。
+static QResult add(Quantity a, Quantity b) {
+    if (!a.valid() || !b.valid()) {
+        return fail(E_NOTVALID);
+    }
+    int s = a.scale;
+    if (b.scale > s) {
+        s = b.scale;
+    }
+    QResult x = rescale(a, s);
+    QResult y = rescale(b, s);
+    if (!x.ok || !y.ok) {
+        return fail(E_SCALE);
+    }
+    return good(x.q.value + y.q.value, s);
+}
+
+static QResult sub(Quantity a, Quantity b) {
+    return add(a, b.negated());
+}
+
+// 乘：精度相加。
+static QResult mul(Quantity a, Quantity b) {
+    if (!a.valid() || !b.valid()) {
+        return fail(E_NOTVALID);
+    }
+    int s = a.scale + b.scale;
+    if (s > MAX_SCALE) {
+        return fail(E_SCALE);
+    }
+    return good(a.value * b.value, s);
+}
+
+// 除以一个整数：除零是错误码，不是异常。
+static QResult div_int(Quantity a, i64 d) {
+    if (!a.valid()) {
+        return fail(E_NOTVALID);
+    }
+    if (d == 0) {
+        return fail(E_DIVZERO);
+    }
+    return good(a.value / d, a.scale);
+}
+
+// 定点渲染：不依赖 printf 的宽度 / 精度，自己补前导零。
+static void print_q(const std::string& tag, Quantity q) {
+    i64 unit = q.pow10(q.scale);
+    i64 abs_v = q.value;
+    if (abs_v < 0) {
+        abs_v = -abs_v;
+    }
+    i64 ip = abs_v / unit;
+    i64 fp = abs_v % unit;
+    std::printf("%s = ", tag);
+    if (q.value < 0 && abs_v != 0) {
+        std::printf("-");
+    }
+    std::printf("%lld", ip);
+    if (q.scale > 0) {
+        std::printf(".");
+        i64 u = unit / 10;
+        while (u > 0) {
+            std::printf("%lld", (fp / u) % 10);
+            u /= 10;
+        }
+    }
+    std::printf(" (value=%lld scale=%d)\n", q.value, q.scale);
+}
+
+// 断言式校验：失败留一条记录，最后汇总。
+// 计数器装进 struct：标量出参 `int&` 写不回调用方（E-Ref-Scalar），
+// 而 struct 的引用可以（字段是可变聚合）。
+struct Tally {
+    i64 passed;
+    i64 failed;
+};
+
+static void check(bool cond, const std::string& what, Tally& t) {
+    if (cond) {
+        t.passed += 1;
+    } else {
+        t.failed += 1;
+        std::printf("FAIL: %s\n", what);
+    }
+}
+
+int main() {
+    Tally t;
+    t.passed = 0;
+    t.failed = 0;
+
+    Quantity a;
+    a.value = 12345;
+    a.scale = 2;                       // 123.45
+    Quantity b;
+    b.value = 6789;
+    b.scale = 1;                       // 678.9
+    print_q("a", a);
+    print_q("b", b);
+    check(a.valid() && b.valid(), "both quantities are valid", t);
+
+    QResult s = add(a, b);
+    check(s.ok, "add ok", t);
+    print_q("a+b", s.q);
+    check(s.q.scale == 2, "add keeps the finer scale", t);
+    check(s.q.value == 12345 + 67890, "add aligns before adding", t);
+
+    QResult d = sub(b, a);
+    check(d.ok, "sub ok", t);
+    check(d.q.value == 67890 - 12345, "sub aligns before subtracting", t);
+    print_q("b-a", d.q);
+
+    QResult p = mul(a, b);
+    check(p.ok, "mul ok", t);
+    check(p.q.scale == 3, "mul adds scales", t);
+    print_q("a*b", p.q);
+
+    QResult q4 = div_int(a, 4);
+    check(q4.ok, "div ok", t);
+    print_q("a/4", q4.q);
+    QResult z = div_int(a, 0);
+    check(!z.ok && z.code == E_DIVZERO, "divide by zero reports E_DIVZERO", t);
+    check(z.q.value == 0, "failed result carries a zero quantity", t);
+
+    // 单位换算：精度 2 → 4（放大精确），2 → 0（四舍五入）
+    QResult finer = rescale(a, 4);
+    check(finer.ok, "rescale up ok", t);
+    check(finer.q.value == 1234500, "rescaling up is exact", t);
+    print_q("a at scale 4", finer.q);
+    QResult coarse = rescale(a, 0);
+    check(coarse.ok, "rescale down ok", t);
+    check(coarse.q.value == 123, "rescaling down rounds", t);
+    print_q("a at scale 0", coarse.q);
+
+    check(a.compare(b) < 0, "a < b", t);
+    check(b.compare(a) > 0, "b > a", t);
+    Quantity copy = a;
+    check(copy.compare(a) == 0, "copy compares equal", t);
+    copy.value = 999;
+    check(a.value == 12345, "copy is a value, not a reference", t);
+
+    Quantity n;
+    n.value = -405;
+    n.scale = 1;
+    print_q("neg", n);
+    QResult naive_add = add(n, a);
+    check(naive_add.ok, "negative add ok", t);
+    print_q("neg+a", naive_add.q);
+    check(naive_add.q.value == -4050 + 12345, "negative add aligns too", t);
+
+    Quantity bad;
+    bad.value = 1;
+    bad.scale = 12;
+    check(!bad.valid(), "scale 12 is rejected by valid()", t);
+    check(!rescale(bad, 2).ok, "rescale of an invalid quantity fails", t);
+    check(!add(bad, a).ok, "add with an invalid quantity fails", t);
+    check(!mul(a, bad).ok, "mul with an invalid quantity fails", t);
+
+    std::printf("checks: %lld passed, %lld failed\n", t.passed, t.failed);
+    if (t.failed == 0) {
+        return 0;
+    }
+    return 1;
+}

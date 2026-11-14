@@ -41,10 +41,17 @@ NO_SPACE_AFTER = {
 }
 SPACED = {
     Kind.PLUS, Kind.MINUS, Kind.STAR, Kind.SLASH, Kind.PERCENT, Kind.OMINUS,
+    # `**` 是独立 token，两侧都要空格（否则 `a **b` 会被重新词法成
+    # `a ** b` 之外的东西——格式化后的文本必须再词法回同一棵 AST）
+    Kind.STAR_STAR,
     Kind.EQ, Kind.EQEQ, Kind.NE, Kind.LT, Kind.LE, Kind.GT, Kind.GE,
-    Kind.ARROW, Kind.FATARROW, Kind.PIPE, Kind.PIPE_GT, Kind.RANGE,
+    Kind.ARROW, Kind.FATARROW, Kind.PIPE, Kind.PIPE_GT,
+    Kind.CARET, Kind.SHL, Kind.AMPAMP, Kind.PIPEPIPE,
     Kind.PLUS_EQ, Kind.MINUS_EQ, Kind.STAR_EQ, Kind.SLASH_EQ,
 }
+#: `..` 两侧**不留空格**：`0..4`（批次 4 第 16 条）。
+#: 它以前在 `SPACED` 里，被排成 `0 .. 4`——范围不是二元运算符。
+TIGHT = {Kind.RANGE}
 LINE_LEADING = {
     Kind.FN, Kind.SPEC, Kind.CHOOSE, Kind.STRUCT, Kind.ENUM,
     Kind.TRAIT, Kind.IMPL, Kind.CONST, Kind.USE, Kind.REWRITE, Kind.EXTERN,
@@ -53,7 +60,9 @@ LINE_LEADING = {
     Kind.ERROR_DECL,
 }
 # `kernels` 不是行首词：它接在 fn 体的 `}` 后面（`} kernels L(...) {`）
-PREFIX = {Kind.STAR, Kind.AMP, Kind.MINUS, Kind.BANG, Kind.NOT}
+#: 前缀一元（`+` 在 parser 里仍不支持，但 fmt 是 token 级的：`i + +j` 的两
+#: 个 `+` 有空白、是两个 token，排版必须保持这个 token 流，不能粘成 `i++j`）。
+PREFIX = {Kind.STAR, Kind.AMP, Kind.MINUS, Kind.PLUS, Kind.BANG, Kind.TILDE}
 
 OPENERS = {Kind.LPAREN: Kind.RPAREN, Kind.LBRACKET: Kind.RBRACKET}
 CLOSERS = {Kind.RPAREN, Kind.RBRACKET}
@@ -94,7 +103,13 @@ def _live(items: List[Piece]) -> List[Piece]:
 
 
 def _is_prefix(items: List[Piece], k: int) -> bool:
-    if k < 0 or items[k].dead or items[k].kind not in PREFIX:
+    if k < 0 or k >= len(items) or items[k].dead:
+        return False
+    if items[k].kind in _INCDEC:
+        # `++` / `--` 是**独立 token**（2026-11-11）：后面跟操作数才是前缀
+        # （`++i`），后面接 `;` / `)` / 运算符就是后缀（`i++`）。
+        return _incdec_prefix(items, k)
+    if items[k].kind not in PREFIX:
         return False
     pi = _prev_live(items, k)
     if pi < 0:
@@ -103,8 +118,7 @@ def _is_prefix(items: List[Piece], k: int) -> bool:
     return (prev.kind in SPACED or prev.kind in LINE_LEADING
             or prev.kind in (Kind.LPAREN, Kind.LBRACKET, Kind.COMMA,
                              Kind.LBRACE, Kind.SEMI, Kind.COLON,
-                             Kind.FATARROW, Kind.ARROW, Kind.EQ)
-            or prev.text in ("and", "or", "not"))
+                             Kind.FATARROW, Kind.ARROW, Kind.EQ))
 
 
 def _prev_live(items: List[Piece], k: int) -> int:
@@ -115,6 +129,95 @@ def _prev_live(items: List[Piece], k: int) -> int:
             return j
         j -= 1
     return -1
+
+
+def _next_live(items: List[Piece], k: int) -> int:
+    """k 之后最近的一个"活"token 下标；没有返回 -1。"""
+    j = k + 1
+    while j < len(items):
+        if not items[j].dead and not items[j].is_comment:
+            return j
+        j += 1
+    return -1
+
+
+# ---------------------------------------------------------------- `++` / `--`
+#
+# **2026-11-11 起 `++` / `--` 是独立词法 token**（`Kind.INC` / `Kind.DEC`）：
+# 紧挨着的两个同类符号由词法器合成，中间有空白的一对（`i + +j`）仍是两个
+# `+` token。所以格式化**不再需要猜"相邻性"**——token 已经说清了。
+#
+# 剩下要判的只有**前/后缀**（只影响空白，不改变 token 流）：
+#   · 后缀：左边是操作数结尾，且右边不是操作数开头 → 紧贴左边（`i++`、
+#     `xs[0]++`、`i++ + 1`）；
+#   · 前缀：右边是操作数开头 → 与操作数紧贴、与左边留空格（`++i`、
+#     `if (p) ++i;`）。
+_INCDEC = (Kind.INC, Kind.DEC)
+
+#: 操作数结尾的 token：后缀 `++` / `--` 紧跟在它后面（`i++` / `xs[i]--` / `f()++`）。
+_OPERAND_END = (Kind.IDENT, Kind.INT, Kind.FLOAT, Kind.CHAR, Kind.STRING,
+                Kind.RPAREN, Kind.RBRACKET)
+
+#: 操作数开头的 token：前缀 `++` / `--` 后面跟的是它（`++i` / `++xs[0]`）。
+_OPERAND_START = (Kind.IDENT, Kind.INT, Kind.FLOAT, Kind.CHAR, Kind.STRING,
+                  Kind.LPAREN, Kind.LBRACKET)
+
+
+def _incdec_prefix(items: List[Piece], k: int) -> bool:
+    """`items[k]`（`++` / `--` token）是**前缀**形态吗？
+
+    判据只有一条：后面紧跟操作数开头。`i++ + 1` 的 `++` 后面是 `+`，
+    不是操作数 → 后缀；`if (p) ++i;` 的 `++` 后面是 `i` → 前缀。
+    这条不是多余的：`if (p) ++i;` 里 `)` 属于**条件**，只看左边会把它
+    当成 `)` 的后缀，排出 `if (p)++i;`。
+    """
+    nj = _next_live(items, k)
+    return nj >= 0 and items[nj].kind in _OPERAND_START
+
+
+def _incdec_postfix(items: List[Piece], k: int) -> bool:
+    """`items[k]`（`++` / `--` token）是**后缀**形态吗？
+
+    两个条件，缺一不可：
+      1. 前一个活 token 是操作数结尾（名字 / 字面量 / `)` / `]`）；
+      2. 后面**不是**操作数开头（是 `;` / `)` / `}` / 运算符）。
+    """
+    pi = _prev_live(items, k)
+    if pi < 0 or items[pi].kind not in _OPERAND_END:
+        return False
+    return not _incdec_prefix(items, k)
+
+
+def _comma_in_generic(items: List[Piece], i: int) -> bool:
+    """这个逗号是否落在**泛型实参列表** `A<X, Y>` 里面？
+
+    用法：块顶层逗号会折行（enum 变体 / struct 字段 / target 维度都是这种）。
+    但 `array<u64, 4096>` 里的逗号**不是**块顶层逗号——`<` `>` 不是 group，
+    所以得单独判断，否则类型实参会被劈成两行。
+
+    判据：往左找最近的**未配对的 `<`**，其间不许出现 `;` `{` `}` `)`（那些
+    说明跨出了当前声明），且该 `<` 紧跟在标识符后面（类型名 `array` / `FixedVec`）。
+    """
+    depth = 0
+    j = i - 1
+    while j >= 0:
+        if items[j].dead:
+            j -= 1
+            continue
+        kk = items[j].kind
+        if kk == Kind.GT:
+            depth += 1
+        elif kk == Kind.LT:
+            if depth == 0:
+                pj = j - 1
+                while pj >= 0 and items[pj].dead:
+                    pj -= 1
+                return pj >= 0 and items[pj].kind == Kind.IDENT
+            depth -= 1
+        elif kk in (Kind.SEMI, Kind.LBRACE, Kind.RBRACE, Kind.RPAREN):
+            return False
+        j -= 1
+    return False
 
 
 def _looks_generic(items: List[Piece], k: int) -> bool:
@@ -164,6 +267,30 @@ def _prev_is_generic_close(items: List[Piece], k: int) -> bool:
     return False
 
 
+def _list_init_open(items: List[Piece], i: int) -> bool:
+    """`i` 位置的 `{` 是不是**列表初始化**的左花括号？
+
+    判据与 parser 一致：`Type name = { … }`——`{` 前面是 `=`。
+    这类花括号内部**紧贴**：`{1, 2, 3}`，不是 `{ 1, 2, 3 }`。
+    """
+    pi = _prev_live(items, i)
+    return pi >= 0 and items[pi].kind == Kind.EQ
+
+
+def _brace_open_of(items: List[Piece], i: int) -> int:
+    """`i` 位置（`}`）往前找配对的 `{`；找不到返回 -1。"""
+    depth = 0
+    for j in range(i, -1, -1):
+        kj = items[j].kind
+        if kj == Kind.RBRACE:
+            depth += 1
+        elif kj == Kind.LBRACE:
+            depth -= 1
+            if depth == 0:
+                return j
+    return -1
+
+
 def _space_between(items: List[Piece], k: int) -> bool:
     if k == 0:
         return False
@@ -174,12 +301,35 @@ def _space_between(items: List[Piece], k: int) -> bool:
     prev = items[pi]
     if cur.is_comment or prev.is_comment:
         return True
+    # `0..4`：范围号两侧紧贴（批次 4 第 16 条）
+    if cur.kind in TIGHT or prev.kind in TIGHT:
+        return False
+    # 空花括号 `{}` / `effects {}`：内部不留空格（批次 4 第 16 条）
+    if cur.kind == Kind.RBRACE and prev.kind == Kind.LBRACE:
+        return False
+    # 列表初始化 `{1, 2, 3}`：花括号内部紧贴（但结构体字面量 `{ max: O(1) }` 仍留空格）
+    if cur.kind == Kind.RBRACE:
+        oi = _brace_open_of(items, k)
+        if oi >= 0 and _list_init_open(items, oi):
+            return False
+    if prev.kind == Kind.LBRACE and _list_init_open(items, pi):
+        return False
     if cur.kind in NO_SPACE_BEFORE:
         return False
     if prev.kind in NO_SPACE_AFTER:
         return False
+    # ---- `++` / `--`（独立 token，2026-11-11）
+    # 后缀（`i++`）紧贴左边的操作数；前缀（`++i`）与左边留空格、与操作数紧贴。
+    if cur.kind in _INCDEC:
+        return not _incdec_postfix(items, k)
+    if prev.kind in _INCDEC:
+        return not _incdec_prefix(items, pi)
     # 泛型 `Vec<u8>`：`<` 紧贴类型名（仅当两侧都是类型标识符、且不构成比较时）
     if cur.kind == Kind.LT and prev.kind == Kind.IDENT and _looks_generic(items, k):
+        return False
+    # `>>`：解析器把**相邻**的两个 `>` 当右移；排成 `> >` 会改变含义。
+    # 嵌套泛型 `Vec<Vec<u8>>` 的收尾也因此保持紧贴。
+    if cur.kind == Kind.GT and prev.kind == Kind.GT:
         return False
     # 比较号 `<`：两侧都留空格
     if cur.kind == Kind.LT:
@@ -198,9 +348,12 @@ def _space_between(items: List[Piece], k: int) -> bool:
         return False
     if prev.kind == Kind.LT and _prev_is_generic_open(items, k):
         return False
-    # `T&`：`&` 紧贴类型（C++ 写法）
+    # `T&`：`&` 紧贴类型（C++ 写法）。**但 `&` 同时是按位与**：
+    # 原稿里 `&` 与左侧之间有空白的，按二元运算符排（`a & b`）；
+    # 紧贴的按类型后缀排（`T& xs`）。这条只影响空白，token 流不变，
+    # 所以两种写法都合法、且 fmt 仍幂等。
     if cur.kind == Kind.AMP and prev.kind in (Kind.IDENT, Kind.GT, Kind.RBRACKET):
-        return False
+        return prev.end != cur.start
     if cur.kind == Kind.IDENT and prev.kind == Kind.AMP:
         return True
     if cur.kind in (Kind.LPAREN, Kind.LBRACKET):
@@ -214,9 +367,9 @@ def _space_between(items: List[Piece], k: int) -> bool:
     if cur.kind == Kind.IDENT and prev.kind == Kind.RBRACKET:
         return False
     # 前缀运算符必须在 SPACED 之前判，否则 `*xs` 会被当成乘法
-    if _is_prefix(items, pi) and prev.kind != Kind.NOT:
+    if _is_prefix(items, pi):
         return False
-    if _is_prefix(items, k) and cur.kind != Kind.NOT:
+    if _is_prefix(items, k):
         return True
     if prev.kind in SPACED or cur.kind in SPACED:
         return True
@@ -269,7 +422,14 @@ class Formatter:
 
         inline = False
         if prev is not None:
-            if prev.kind in (Kind.COLON, Kind.COMMA, Kind.LBRACE):
+            if prev.kind == Kind.EQ:
+                # `Type name = { … }` 是 **list-init**（parser 里声明初始化位置
+                # 唯一认 `{` 的地方），不是块：装得下就保持 `{1, 2, 3}`，
+                # 只有真超宽才按块展开（批次 4 第 14 条）。
+                j = self._match_of(i, Kind.LBRACE, Kind.RBRACE)
+                col = len(self.cur) + (1 if _space_between(self.items, i) else 0)
+                inline = col + self._flat_len(i, j) <= MAX_LINE
+            elif prev.kind in (Kind.COLON, Kind.COMMA, Kind.LBRACE):
                 inline = True
             elif prev.text == "effects":
                 inline = True
@@ -362,7 +522,7 @@ class Formatter:
             if k == Kind.RBRACE:
                 inline = self.brace.pop() if self.brace else False
                 if inline:
-                    self._emit("}", True)
+                    self._emit("}", _space_between(items, i))
                     i += 1
                     continue
                 if self.cur.strip():
@@ -393,6 +553,12 @@ class Formatter:
                 continue
 
             if k == Kind.SEMI:
+                # `};` 必须同行（批次 4 第 15 条）：块/初始化列表收尾的 `}`
+                # 后面紧跟 `;` 时，以前会 flush 出一个只有分号的行。
+                if self.cur.strip() == "" and self.out and self.out[-1].rstrip().endswith("}"):
+                    self.out[-1] = self.out[-1].rstrip() + ";"
+                    i += 1
+                    continue
                 self._emit(";", False)
                 self._flush()
                 i += 1
@@ -402,8 +568,14 @@ class Formatter:
                 self._emit(",", False)
                 if self.groups and self.groups[-1]["wrapped"]:
                     self._flush()
-                elif not self.groups and self.brace and self.brace[-1] is False:
+                elif (not self.groups and self.brace and self.brace[-1] is False
+                      and not _comma_in_generic(items, i)):
                     # 块花括号顶层的逗号（enum 变体、struct 字段、target 维度）
+                    #
+                    # **但泛型实参列表里的逗号不算顶层**：`<` / `>` 不是 group
+                    # （`OPENERS` 只收 `(` 与 `[`），于是 `array<u64, 4096> dp = …`
+                    # 里的那个逗号会走到这里把行劈成两半——`array<u64,` /
+                    # `4096> dp = …`。类型实参 MUST 连排（2026-11-08 实测复现）。
                     self._flush()
                 i += 1
                 continue
@@ -425,7 +597,12 @@ class Formatter:
                 i += 1
                 continue
 
-            if k in LINE_LEADING and self.cur.strip() and self.depth == 0:
+            if (k in LINE_LEADING and self.cur.strip() and self.depth == 0
+                    and not self.groups):
+                # 注意 `not self.groups`：`const` 也是 **形参限定词**
+                # （`pub func g(const vector<u8>& xs)`）。它出现在参数表里时
+                # 位于顶层（depth 0），以前会被当成一条新声明从行首开始——
+                # 38 字符的签名也因此被劈成两行（批次 4 第 13 条）。
                 prev = None
                 j = i - 1
                 while j >= 0:
@@ -469,16 +646,17 @@ class Formatter:
     # ---- 收尾 ----
     def _postprocess(self) -> str:
         lines = [ln.rstrip() for ln in self.out]
-        # 折行的续行：以上一行最后一个 `(` 的列位置对齐
+        # 折行的续行：比上一行**多一级（4 空格）**，不对齐左括号
+        # （批次 4 第 13 条：对齐括号会得到 11/40 空格这类脆弱的缩进）
         fixed: List[str] = []
         for ln in lines:
-            if fixed and fixed[-1].rstrip().endswith(("(", ",")) and ln and not ln.startswith(" "):
+            if (fixed and fixed[-1].rstrip().endswith(("(", ","))
+                    and ln and not ln.startswith(" ")):
                 prev = fixed[-1]
-                col = prev.rfind("(")
-                if col >= 0 and prev.rstrip().endswith("("):
-                    ln = " " * (col + 1) + ln.strip()
-                elif prev.rstrip().endswith(","):
-                    ln = prev[:len(prev) - len(prev.lstrip())] + "    " + ln.strip()
+                base = len(prev) - len(prev.lstrip())
+                # 收尾的 `)` / `]` 自己带缩进，别在这里二次偏移
+                if not ln.lstrip().startswith((")", "]")):
+                    ln = " " * (base + len(INDENT)) + ln.strip()
             fixed.append(ln)
         lines = fixed
         # 超过 MAX_LINE 的函数签名：在最后一个逗号后折行
@@ -489,9 +667,9 @@ class Formatter:
                 if idx > 0 and idx < MAX_LINE:
                     head = ln[:idx + 1]
                     tail = ln[idx + 2:]
-                    indent = " " * (head.rfind("(") + 1)
+                    step = len(head) - len(head.lstrip()) + len(INDENT)
                     wrap.append(head)
-                    wrap.append(indent + tail)
+                    wrap.append(" " * step + tail)
                     continue
             wrap.append(ln)
         lines = wrap
@@ -575,7 +753,7 @@ def _fix_generics(text: str) -> str:
     """把 `Vec < u8 >` 收拾成 `Vec<u8>`（只在明显是泛型的位置动手）。"""
     def rep(m):
         name, args = m.group(1), m.group(2)
-        if name in ("if", "while", "for", "match", "return", "and", "or"):
+        if name in ("if", "while", "for", "match", "return"):
             return m.group(0)
         return f"{name}<{args}>"
     return _GEN_SPACE.sub(rep, text)

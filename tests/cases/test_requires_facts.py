@@ -34,7 +34,7 @@ def check(name, cond, detail=""):
         print(f"  FAIL {name}   {detail}")
 
 
-CH = """func p(vector<u64>& xs, u64 hi) -> u64 {
+CH = """u64 p(vector<u64>& xs, u64 hi) {
     u64 j = 0;
     while (j < hi) { j = j + 1; }
     return j;

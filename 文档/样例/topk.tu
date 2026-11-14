@@ -2,7 +2,7 @@
 //
 // 考的四样本事：
 //   1. `vector<u64>` + 整数标量形参 `k`：两种循环上界来源都用到——
-//      `const n = xs.length()`（尺寸量）与 `k` 本身（整数形参）
+//      `const n = xs.size()`（尺寸量）与 `k` 本身（整数形参）
 //   2. `array<u64, HEAP_CAP>` 当**最小堆**：堆顶就是第 k 大
 //   3. 两个候选**有真实阶差**：堆法 O(n·log k)，反复扫描法 O(n·k)
 //   4. `i64` 负数仍未修好（E8），所以所有「比大小」都靠**两支 if**，
@@ -45,9 +45,9 @@ spec topk(
     // 取 max 之后是 **O(n·k)**。
     //
     // v0.69+：target 里**可以**写两个尺寸相乘了（`_target_cost` 支持 `*`），
-    // 所以这里写真实界 `O(xs.length() * k)`；两边尺寸量一致（`{xs, k}`），能直接比。
+    // 所以这里写真实界 `O(xs.size() * k)`；两边尺寸量一致（`{xs, k}`），能直接比。
     // 早先的注释说"认不出"，那是旧版本的实现缺口（E15），已关闭。
-    target { time: { max: O(xs.length() * k) }, allocation: { max: O(1) }, };
+    target { time: { max: O(xs.size() * k) }, allocation: { max: O(1) }, };
 
     // #region choose
     choose topk_kernel(const vector<u64>& xs, u64 k) -> u64! {

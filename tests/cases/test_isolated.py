@@ -71,7 +71,7 @@ TU_OK = """spec total_up(const vector<u64>& xs) -> u64 {
 }
 """
 
-CH_OK = """func total_up(const vector<u64>& xs) -> u64 {
+CH_OK = """u64 total_up(const vector<u64>& xs) {
     u64 s = 0;
     u64 i = 0;
     const u64 n = xs.length();
@@ -98,11 +98,11 @@ TU_DISPATCH = """spec pick(const vector<u64>& xs) -> u64 {
 }
 """
 
-CH_DISPATCH = """func pick(const vector<u64>& xs) -> u64 {
+CH_DISPATCH = """u64 pick(const vector<u64>& xs) {
     return ?!k(xs);
 }
-func a(const vector<u64>& xs) -> u64 { return 0; }
-func b(const vector<u64>& xs) -> u64 { return 1; }
+u64 a(const vector<u64>& xs) { return 0; }
+u64 b(const vector<u64>& xs) { return 1; }
 """
 
 
@@ -185,8 +185,8 @@ def test_b20():
 def test_b21():
     print("[4] B-21：自底向上——先列被调用者")
     tu = TU_OK.replace("total_up", "outer_fn")
-    ch = """func inner_fn(u64 x) -> u64 { return x + 1; }
-func outer_fn(const vector<u64>& xs) -> u64 {
+    ch = """u64 inner_fn(u64 x) { return x + 1; }
+u64 outer_fn(const vector<u64>& xs) {
     const u64 n = xs.length();
     return inner_fn(n);
 }

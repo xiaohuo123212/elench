@@ -36,6 +36,15 @@ import subprocess
 import sys
 import time
 
+#: 中文 Windows 的控制台默认 GBK，打印 `✓` / `✗` 会 `UnicodeEncodeError`
+#: 直接死在 **汇总之前**（一行结果都看不到）。测试子进程已设 UTF-8，
+#: 父进程也必须自己配一次。
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:                                       # noqa: BLE001
+    pass
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, ".."))
 SRC = os.path.join(ROOT, "src")
@@ -59,7 +68,8 @@ TAGS = {
     "test_otel": ["otel"], "test_otel_export": ["otel"],
     "test_otel_dashboard": ["otel"], "test_otel_trace_hooks": ["otel"],
     "test_parser": ["parser"], "test_lexer": ["parser"],
-    "test_formatter": ["parser"], "test_highlight": ["parser"],
+    "test_formatter": ["parser"], "test_fmt_layout": ["parser"],
+    "test_highlight": ["parser"],
     "test_checker": ["checker"], "test_typecheck": ["checker"],
     "test_borrow": ["checker"], "test_borrow_diff": ["checker"],
     "test_effects": ["checker"], "test_invalid": ["checker"],

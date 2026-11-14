@@ -70,7 +70,7 @@ def tu_for(alloc_max: str) -> str:
 
 def main() -> int:
     print("=== 字面量与纯运算：0 次分配 ===")
-    ci = build(tu_for("0"), """func f(const vector<u64>& xs) -> u64 {
+    ci = build(tu_for("0"), """u64 f(const vector<u64>& xs) {
     const vector<u64> s = "hello";
     return s.length() + xs.length();
 }
@@ -80,7 +80,7 @@ def main() -> int:
     check("0 vs target 0 → 达成", compare_exact(a, ci.target_cost("f", "allocation")).kind == "ok")
 
     print("=== 弄成一个分配：1 次 ===")
-    ci = build(tu_for("0"), """func f(const vector<u64>& xs) -> u64 {
+    ci = build(tu_for("0"), """u64 f(const vector<u64>& xs) {
     const vector<u64> t = format_u64(42);
     return t.length();
 }
@@ -91,7 +91,7 @@ def main() -> int:
     check("1 次 vs target 0 → **记债**（不是静默放过）", v.kind == "debt", v.render())
 
     print("=== 循环里分配：每轮 1 次 ===")
-    ci = build(tu_for("O(xs.length())"), """func f(const vector<u64>& xs) -> u64 {
+    ci = build(tu_for("O(xs.length())"), """u64 f(const vector<u64>& xs) {
     u64 i = 0;
     while (i < xs.length()) {
         const vector<u64> t = slice(xs, i, i + 1);
@@ -106,7 +106,7 @@ def main() -> int:
           compare_exact(a, ci.target_cost("f", "allocation")).kind == "ok")
 
     print("=== 循环里不分配：与轮数无关 ===")
-    ci = build(tu_for("0"), """func f(const vector<u64>& xs) -> u64 {
+    ci = build(tu_for("0"), """u64 f(const vector<u64>& xs) {
     u64 i = 0;
     u64 s = 0;
     while (i < xs.length()) {
@@ -120,13 +120,18 @@ def main() -> int:
     check("无分配的循环 = 0 次", a.is_const() and a.value == 0, a.render())
 
     print("=== 一次性 slice：1 次（不论长度） ===")
-    ci = build(tu_for("0"), """func f(const vector<u64>& xs) -> u64 {
-    const vector<u64> t = slice(xs, 0, xs.length());
+    ci = build(tu_for("0"), """u64 f(const vector<u64>& xs) {
+    vector<u64> t = vector<u64>::make();
+    slice(t, 0, t.length());
     return t.length();
 }
 """)
     a = ci.alloc_of("f")
     v = compare_exact(a, ci.target_cost("f", "allocation"))
+    # **A-full**：这里改成「先 make 再 slice」的合法写法。原先写成
+    # `const vector<u64> t = slice(...)`——但 `slice` 是**原地截断、返回新长度**
+    # （`stdlib.py:184`，ret 是 u64），拿它初始化 `vector<u64>` 本来就型别不通；
+    # A-full 的拷贝判定会把这次"初始化"当容器拷贝再多记 1 次分配。
     check("slice 一次 = 1 次（不是 n 次）", a.is_const() and a.value == 1, a.render())
     check("1 次 vs target 0 → 记债", v.kind == "debt", f"{a.render()} → {v.kind}")
 

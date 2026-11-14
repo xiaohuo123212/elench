@@ -47,7 +47,7 @@ TU = """spec f(const vector<u64>& xs) -> u64 {
 }
 """
 
-CH = """func f(const vector<u64>& xs) -> u64 {
+CH = """u64 f(const vector<u64>& xs) {
     u64 a = 0;
     u64 b = 0;
     parallel {
@@ -58,7 +58,7 @@ CH = """func f(const vector<u64>& xs) -> u64 {
 }
 """
 
-CH_NESTED = """func f(const vector<u64>& xs) -> u64 {
+CH_NESTED = """u64 f(const vector<u64>& xs) {
     u64 a = 0;
     u64 b = 0;
     u64 c = 0;

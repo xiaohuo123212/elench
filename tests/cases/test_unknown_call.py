@@ -49,7 +49,7 @@ TU = """spec f(const vector<u64>& xs) -> u64 {
 """
 
 print("[1] 真的未知调用 → 报出来")
-got = names(TU, """func f(const vector<u64>& xs) -> u64 {
+got = names(TU, """u64 f(const vector<u64>& xs) {
     u64 y = mystery_fn(xs);
     return y;
 }
@@ -58,21 +58,21 @@ check("抓到 mystery_fn", got == ["mystery_fn"], got)
 
 print("[2] 不该报的四类")
 cases = [
-    ("方法调用", """func f(const vector<u64>& xs) -> u64 {
+    ("方法调用", """u64 f(const vector<u64>& xs) {
     return xs.length();
 }
 """),
-    ("语言内建 max", """func f(const vector<u64>& xs) -> u64 {
+    ("语言内建 max", """u64 f(const vector<u64>& xs) {
     return max(xs.length(), 1);
 }
 """),
-    ("高阶内建 sort_by", """func f(vector<u64>& xs) -> u64 {
+    ("高阶内建 sort_by", """u64 f(vector<u64>& xs) {
     sort_by(xs, cmp);
     return xs.length();
 }
 """),
-    ("用户函数", """func helper(const vector<u64>& xs) -> u64 { return xs.length(); }
-func f(const vector<u64>& xs) -> u64 { return helper(xs); }
+    ("用户函数", """u64 helper(const vector<u64>& xs) { return xs.length(); }
+u64 f(const vector<u64>& xs) { return helper(xs); }
 """),
 ]
 for label, src in cases:
@@ -81,7 +81,7 @@ for label, src in cases:
 
 print("[3] 已声明的 extern 不报")
 got = names("extern read_file(const vector<u8>& p) -> u64;\n" + TU,
-            """func f(const vector<u64>& xs) -> u64 {
+            """u64 f(const vector<u64>& xs) {
     return read_file(xs);
 }
 """)
@@ -91,7 +91,7 @@ check("extern 不报", got == [], got)
 print("[4] 方案 B：`check` 报 E-Call-Undeclared，声明后不再报")
 from checker import check_module                    # noqa: E402
 
-_bad = check_module(TU, """func f(const vector<u64>& xs) -> u64 {
+_bad = check_module(TU, """u64 f(const vector<u64>& xs) {
     return mystery_fn(xs);
 }
 """)
@@ -102,7 +102,7 @@ check("报错里给出要补的那一行", "external {" in _msg and "mystery_fn"
 
 _good = check_module(
     """extern strlen(const vector<u8>& s) -> u64 from "ucrtbase" effects { io };
-""" + TU, """func f(const vector<u8>& s) -> u64 {
+""" + TU, """u64 f(const vector<u8>& s) {
     return strlen(s);
 }
 """)

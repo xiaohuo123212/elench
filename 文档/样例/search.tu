@@ -11,7 +11,7 @@ error SearchError;
 // 无法由条件形态推出（规格 T13 来源①），只能由谓词的 repeats 声明（来源②）。
 spec in_range(u64 lo, u64 hi) -> bool {
     effects { };
-    repeats log(hi - lo);
+    repeats log(hi - lo) + 1;
 }
 
 spec binary_search(
@@ -31,7 +31,7 @@ spec binary_search(
     };
 
     target {
-        time: { max: O(log(xs.length())) },
+        time: { max: O(log(xs.size())) },
         allocation: { max: 0 },
     }
     ;

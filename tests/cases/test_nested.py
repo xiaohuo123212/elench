@@ -53,7 +53,7 @@ def check(name, cond, detail=""):
 
 def run(body, data: bytes):
     tu = parse_source(TU, "m.tu").module
-    ch = parse_source("func f(const vector<u8>& t) -> u64 {\n" + body + "\n}\n", "m.eln").module
+    ch = parse_source("u64 f(const vector<u8>& t) {\n" + body + "\n}\n", "m.eln").module
     return Interp(ch, tu).call("f", [list(data)])
 
 
@@ -82,13 +82,16 @@ def main() -> int:
     check("Σ 行长 = 4（a + b + cd）", total == 4, str(total))
 
     print("=== 分配 = 1 + n(外层) ===")
-    ch = """func f(const vector<u8>& t) -> u64 {
+    ch = """u64 f(const vector<u8>& t) {
     vector<vector<u8>> rows = text_split_vec(t, ",");
     return rows.length();
 }
 """
     a = CostInterp(parse_source(ch, "m.eln").module, parse_source(TU, "m.tu").module).alloc_of("f").render()
-    check("alloc 含 `1 + n(rows)`", "1 + n(rows)" in a, a)
+    # 2026-11-13：局部容器有了可证上界之后，`n(rows)` 被代成 `n(t)`（`text_split_vec` 的输出行数
+    # ≤ 输入长度：切成 k 段需要 k-1 个分隔符，都来自 t）。新式 `1 + n(t) + 1` **仍是上界**（更宽松一点），
+    # 而且 `n(t)` 是**形参**尺寸量、能写进 target，`n(rows)` 是局部名、写不出来。
+    check("alloc 是 n(t) 的上界（n(rows) 已被代入）", "n(t)" in a and "n(rows)" not in a, a)
 
     print()
     if FAILED:

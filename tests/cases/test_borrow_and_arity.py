@@ -54,20 +54,20 @@ def test_arity():
     print("[1] 用户函数 arity")
     c = codes("spec g(u64 a, u64 b) -> u64 { effects {}; }\n"
               "spec f(const vector<u64>& xs) -> u64 { effects {}; }\n",
-              "func g(u64 a, u64 b) -> u64 { return a; }\n"
-              "func f(const vector<u64>& xs) -> u64 { return g(1); }\n")
+              "u64 g(u64 a, u64 b) { return a; }\n"
+              "u64 f(const vector<u64>& xs) { return g(1); }\n")
     check("E-Call-Arity" in c, "少给实参 → E-Call-Arity", str(c))
     c2 = codes("spec g(u64 a) -> u64 { effects {}; }\n"
                "spec f(const vector<u64>& xs) -> u64 { effects {}; }\n",
-               "func g(u64 a) -> u64 { return a; }\n"
-               "func f(const vector<u64>& xs) -> u64 { return g(1); }\n")
+               "u64 g(u64 a) { return a; }\n"
+               "u64 f(const vector<u64>& xs) { return g(1); }\n")
     check("E-Call-Arity" not in c2, "匹配时不报", str(c2))
 
 
 def test_const_borrow():
     print("[2] const 形参不可写")
     tu = "spec f(const vector<u64>& xs) -> u64 { effects {}; }\n"
-    el = "func f(const vector<u64>& xs) -> u64 { xs.push(0); return xs.length(); }\n"
+    el = "u64 f(const vector<u64>& xs) { xs.push(0); return xs.length(); }\n"
     data = [1, 2]
     try:
         run(tu, el, [data])
@@ -78,7 +78,7 @@ def test_const_borrow():
 
     # 可变借用仍可写
     tu2 = "spec f(vector<u64>& xs) -> u64 { effects {}; }\n"
-    el2 = "func f(vector<u64>& xs) -> u64 { xs.push(0); return xs.length(); }\n"
+    el2 = "u64 f(vector<u64>& xs) { xs.push(0); return xs.length(); }\n"
     d2 = [1, 2]
     check(run(tu2, el2, [d2]) == 3, "可变借用照常可写")
 
@@ -99,7 +99,7 @@ def test_fixedvec_capacity():
               str(_fixed_capacity(ty, {"N": 2})))
 
     tu2 = "spec f(const vector<u64>& xs) -> u64 { effects {}; }\n"
-    el2 = ("func f(const vector<u64>& xs) -> u64 {\n"
+    el2 = ("u64 f(const vector<u64>& xs) {\n"
            "    array<u64, 3> v = array<u64, 3>::make();\n"
            "    v.push(1); v.push(2); v.push(3); v.push(4);\n"
            "    return v.length();\n}\n")

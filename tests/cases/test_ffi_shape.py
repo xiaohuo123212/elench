@@ -62,7 +62,7 @@ spec weird(float x) -> u64 {
 """
 
 ELN = """
-func f() -> u64 {
+u64 f() {
     return 0;
 }
 """

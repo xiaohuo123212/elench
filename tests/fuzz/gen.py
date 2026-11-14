@@ -39,7 +39,7 @@ spec f(const Vec<u64>& xs, u64 n) -> u64 {
 }
 """
 
-ELN_HELPER = """func g(u64 x) -> u64 {
+ELN_HELPER = """u64 g(u64 x) {
     return x + 1;
 }
 """
@@ -56,7 +56,7 @@ spec f(const Vec<u64>& xs) -> u64 {
 }
 """
 
-ELN_VISIT = """func visit(u64 x) -> u64 {
+ELN_VISIT = """u64 visit(u64 x) {
     u64 s = x;
     s = s + 1;
     s = s + 2;
@@ -76,7 +76,7 @@ TU_DISPATCH = """spec f(const Vec<u64>& xs) -> u64 {
 }
 """
 
-ELN_DISPATCH = """func f(const Vec<u64>& xs) -> u64 {
+ELN_DISPATCH = """u64 f(const Vec<u64>& xs) {
     if (xs.length() == 0) {
         return 0;
     }
@@ -87,7 +87,7 @@ ELN_DISPATCH = """func f(const Vec<u64>& xs) -> u64 {
     }
     slow {
         u64 s = 0;
-        for (x in xs) {
+        for (auto x : xs) {
             s = s + x;
         }
         return s;
@@ -104,7 +104,7 @@ TU_REC = """spec f(u64 n) -> u64 {
 }
 """
 
-ELN_REC = """func f(u64 n) -> u64 {
+ELN_REC = """u64 f(u64 n) {
     if (n < 2) {
         return n;
     }
@@ -146,7 +146,7 @@ def _loop_stmt(rng: random.Random, depth: int) -> str:
     if w == "for_xs":
         inner = "\n".join(_loop_stmt(rng, depth + 1)
                           for _ in range(rng.randint(1, 2)))
-        return ("        for (x in xs) {\n"
+        return ("        for (auto x : xs) {\n"
                 f"{inner}\n"
                 "            s = s + x;\n"
                 "        }")
@@ -175,13 +175,13 @@ def gen_program(seed: int) -> Tuple[str, str, str]:
     if family == "hof":
         # 回调成本越高、κ 越容易漏；`for_each` 的 κ 必须含 κ(visit)
         return TU_HOF, ELN_VISIT + "\n" + (
-            "func f(const Vec<u64>& xs) -> u64 {\n"
+            "u64 f(const Vec<u64>& xs) {\n"
             "    for_each(xs, visit);\n"
             "    return 0;\n}\n"), "hof"
 
     body = "\n".join(_loop_stmt(rng, 0) for _ in range(rng.randint(1, 2)))
     eln = (ELN_HELPER + "\n"
-           "func f(const Vec<u64>& xs, u64 n) -> u64 {\n"
+           "u64 f(const Vec<u64>& xs, u64 n) {\n"
            "    u64 s = 0;\n"
            "    u64 i = 0;\n"
            "    while (i < n) {\n"
@@ -198,8 +198,8 @@ def used(eln: str) -> List[str]:
     out = []
     if "while" in eln:
         out.append("while")
-    if "for (x in xs)" in eln:
-        out.append("for_in")
+    if "for (auto x : xs)" in eln:
+        out.append("for_range")
     if "if (" in eln:
         out.append("if")
     if "}" in eln and "} else {" in eln:
@@ -225,7 +225,7 @@ def used(eln: str) -> List[str]:
     return out
 
 
-VOCAB = ["while", "for_in", "if", "if_else", "minmax", "call", "array",
+VOCAB = ["while", "for_range", "if", "if_else", "minmax", "call", "array",
          "cast", "div", "compound", "hof", "rec", "dispatch"]
 
 

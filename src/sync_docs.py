@@ -38,7 +38,12 @@ sync_docs.py —— 文档示例注入（杜绝"同一段代码抄 7 遍"）
 4. **未闭合 / 找不到区域 → 报错并跳过该文件**（不猜、不半改）。
 5. **幂等**：同步两次结果完全相同。
 6. **`_` 开头的文件不处理**（标准文件里会举 include 的写法，那是文档内容不是指令）。
+   **`_` 开头的目录同样不处理**：`_probe/`、`_incoming/`、`_tier_a/` 是代理留下的
+   临时树，里面的 `.md` 是旧快照，不是仓库内容；扫它们只会把别人的脚手架当成文档。
 7. **仓库根目录也算**（README.md 在根上，不在 `文档/` 里）。
+8. **源缺失 = 失败**：`--check` 下「过期」与「include 解析失败」都返回 1。
+   以前只在「有过期」时返回 1，源文件被删后错误只打到 stderr、退出码仍是 0，
+   于是生成器明明知道文档坏了，CI 却看不见（2026-11-10 的 `Vec<u64>` 事故）。
 """
 
 import io
@@ -170,7 +175,8 @@ ARCHIVE_DIRS = {"归档"}
 def md_files():
     for dirpath, dirnames, files in os.walk(ROOT):
         dirnames[:] = [d for d in dirnames
-                       if d not in SKIP_DIRS and d not in ARCHIVE_DIRS]
+                       if d not in SKIP_DIRS and d not in ARCHIVE_DIRS
+                       and not d.startswith("_")]
         for f in files:
             if f.endswith(".md") and not f.startswith("_"):
                 yield os.path.join(dirpath, f)
@@ -205,11 +211,16 @@ def main(argv):
         print("  ✗ " + e, file=sys.stderr)
 
     if check_only:
-        if touched:
-            print(f"✗ {len(touched)} 份文档的示例已过期：")
-            for t in touched:
-                print("    " + t)
-            print("  修：python sync_docs.py")
+        # 解析失败（源文件/区域不存在）与「内容过期」一样是红：否则生成器
+        # 报错、退出码 0，CI 永远看不见文档已经撒谎。
+        if touched or all_errors:
+            if touched:
+                print(f"✗ {len(touched)} 份文档的示例已过期：")
+                for t in touched:
+                    print("    " + t)
+                print("  修：python src/sync_docs.py")
+            if all_errors:
+                print(f"✗ {len(all_errors)} 处 @include 解析失败（逐条见上）")
             return 1
         print("✓ 文档示例与权威样例一致")
         return 0

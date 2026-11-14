@@ -16,14 +16,21 @@ import os
 import subprocess
 import sys
 
+sys.stdout.reconfigure(encoding="utf-8")
+
 CASEDIR = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(CASEDIR, "..", ".."))
 TOOL = os.path.join(ROOT, "tools", "sync_mirror.py")
 
+#: sync_mirror 会打印中文；Windows 下子进程默认按控制台代码页（如 GBK）输出，
+#: 而这里按 UTF-8 解码。显式统一编码，否则测试在中文 Windows 上会先死在
+#: UnicodeDecodeError，而不是报告镜像是否真的同步。
+ENV = dict(os.environ, PYTHONIOENCODING="utf-8")
+
 
 def main() -> int:
     r = subprocess.run([sys.executable, TOOL, "--check"], cwd=ROOT,
-                       capture_output=True, text=True, encoding="utf-8")
+                       capture_output=True, text=True, encoding="utf-8", env=ENV)
     if r.returncode == 0:
         print("check  ok   ", r.stdout.strip().splitlines()[0])
         return 0

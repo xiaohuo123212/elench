@@ -53,7 +53,7 @@ def check(name, cond, detail=""):
 
 def run(body, path: bytes):
     tu = parse_source(TU, "m.tu").module
-    ch = parse_source("func f(const vector<u8>& path) -> u64! {\n" + body + "\n}\n", "m.eln").module
+    ch = parse_source("u64! f(const vector<u8>& path) {\n" + body + "\n}\n", "m.eln").module
     return Interp(ch, tu).call("f", [list(path)])
 
 
@@ -112,8 +112,36 @@ def main() -> int:
     check("写后文件内容是 abcde",
           open(out, "rb").read() == b"abcde", str(getattr(wrote, "v", wrote)))
 
+    print("=== K6：成功值是 Ok 包装，与 Result 语义一致 ===")
+    # 2026-11-10 之前成功值返回**裸** `ReaderVal`：`next_line` / `close` 照样能用，
+    # 但文档推荐的 `match (open_read(p)) { Ok(r) => … }` **永远不命中**、被 `_`
+    # 静默吃掉。这里把三条路都钉住：Ok 臂命中 / Err 臂命中 / 直接传句柄要报错。
+    hit = run("""    match (open_read(path)) {
+        Ok(r) => { close(r); return 1; }
+        Err(e) => { return 2; }
+        _ => { return 3; }
+    }""", pb)
+    check("`match (open_read(p)) { Ok(r) => … }` 命中 Ok 臂",
+          getattr(hit, "v", hit) == 1, repr(hit))
+
+    miss = run("""    match (open_read(path)) {
+        Ok(r) => { close(r); return 1; }
+        Err(e) => { return 2; }
+        _ => { return 3; }
+    }""", list(os.path.join(d, "no-such-file.txt").encode("utf-8")))
+    check("打开不存在的文件 → Err 臂（2）", getattr(miss, "v", miss) == 2, repr(miss))
+
+    try:
+        run("""    close(open_read(path));
+    return 0;""", pb)
+        check("不 `?` 不 `match` 就把 `Reader!` 交给 close → 报错",
+              False, "没有报错（会被静默忽略）")
+    except Exception as exc:                        # noqa: BLE001
+        check("不 `?` 不 `match` 就把 `Reader!` 交给 close → 报错",
+              "Reader" in str(exc), str(exc)[:80])
+
     print("=== 成本：1 + n(ret)，不是常数 ===")
-    ch = """func f(const vector<u8>& path) -> u64! {
+    ch = """u64! f(const vector<u8>& path) {
     Reader r = open_read(path)?;
     const u64 x = next_line(r).length();
     close(r);
@@ -126,7 +154,10 @@ def main() -> int:
 
     print("=== 分配：句柄 1 次 + 每行 1 次 ===")
     a = ci.alloc_of("f").render()
-    check("alloc 里有 2（open + 一行）", "2" in a, a)
+        # **2026-11-08 批次 2**：`map`/`set` 的 `insert` 现在按真实语义记 1 次分配
+    # （C++ 里插一个节点就是一次 `new`）。流式读取内部用 `insert`，
+    # 于是 alloc 从 1 变成 2——**这是修正后的正确值**，不是回归。
+    check("alloc 里有 2（open + 一行插入）", "2" in a, a)
 
     print()
     if FAILED:

@@ -12,7 +12,7 @@ spec rank(
         }
     }
     ;
-    target { time: { max: O(xs.length()) }, allocation: { max: 0 }, };
+    target { time: { max: O(xs.size()) }, allocation: { max: 0 }, };
     choose kernel(const vector<u64>& xs) -> u64! {
         // 候选必须同阶：承诺取 max，混入高阶候选会把 κ 抬到那个阶
         over {

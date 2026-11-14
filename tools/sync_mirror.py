@@ -31,6 +31,16 @@ import os
 import shutil
 import sys
 
+# **Windows GBK 控制台可能编码不了 `✓`/`✗`**：以前这里一 print 就
+# UnicodeEncodeError，`test_mirror_in_sync.py` 只拿到 None，报
+# `AttributeError: 'NoneType' object has no attribute 'strip'`，
+# **把真正的不一致原因盖住了**。改成 UTF-8 + replace，永不因输出崩。
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:                                      # noqa: BLE001
+    pass
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 SRC = os.path.join(ROOT, "src")

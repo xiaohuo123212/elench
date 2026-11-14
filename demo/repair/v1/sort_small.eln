@@ -2,9 +2,9 @@
 //
 // 这段代码"看起来对、测起来也对"，但阶是错的：门禁会在**不运行**的前提下拦住它。
 
-func sort_small(Vec<u64>& xs) -> u64 {
+u64 sort_small(Vec<u64>& xs) {
     u64 i = 1;
-    while (i < xs.length()) {
+    while (i < xs.size()) {
         u64 j = i;
         while (j > 0) {
             if (xs[j - 1] > xs[j]) {
@@ -18,5 +18,5 @@ func sort_small(Vec<u64>& xs) -> u64 {
         }
         i = i + 1;
     }
-    return xs.length();
+    return xs.size();
 }

@@ -47,8 +47,8 @@ def check(name, cond, detail=""):
 
 
 def run(body, data=b"ab;cd"):
-    ch = ("func take(const vector<vector<u8>>& rows) -> u64 { return rows.length(); }\n"
-          "func f(const vector<u8>& t) -> u64 {\n" + body + "\n}\n")
+    ch = ("u64 take(const vector<vector<u8>>& rows) { return rows.length(); }\n"
+          "u64 f(const vector<u8>& t) {\n" + body + "\n}\n")
     mod = parse_source(ch, "m.eln").module
     tu = parse_source(TU, "m.tu").module
     return Interp(mod, tu).call("f", [list(data)])

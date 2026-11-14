@@ -148,8 +148,8 @@ def test_inner_statement():
     解释器实测 18 —— 差的 8 正好是两个实参子树的 `2 × (5-1)`。
     """
     print("[1] 复合下标 `a.at(i*dim+k)`：κ 与实测操作数一致（±2）")
-    ONE = """func at_cost(const vector<u64>& a, const vector<u64>& b,
-                     u64 dim, u64 i, u64 k, u64 j) -> u64! {
+    ONE = """u64! at_cost(const vector<u64>& a, const vector<u64>& b,
+                     u64 dim, u64 i, u64 k, u64 j) {
     return a.at(i * dim + k) * b.at(k * dim + j);
 }"""
     ch = parse_source(ONE, "one.eln").module

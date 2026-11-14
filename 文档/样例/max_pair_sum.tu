@@ -17,5 +17,5 @@ spec max_pair_sum(const vector<u64>& xs) -> u64 {
         seed = 1;
     };
 
-    target { time: { max: O(xs.length() * xs.length()) }, allocation: { max: 0 }, };
+    target { time: { max: O(xs.size() * xs.size()) }, allocation: { max: 0 }, };
 }

@@ -76,7 +76,7 @@ def unwrap(v):
 
 def test_values():
     print("[1] min / max 的值")
-    it = interp_of("""func f(u64 a, u64 b) -> u64! {
+    it = interp_of("""u64! f(u64 a, u64 b) {
     return min(a, b) + max(a, b);
 }""")
     CASES = [((3, 7), 10), ((7, 3), 10), ((5, 5), 10), ((0, 9), 9)]
@@ -84,7 +84,7 @@ def test_values():
         got = unwrap(it.call("f", [a, b]))
         check(got == want, f"min({a},{b}) + max({a},{b})", f"实际 {got}，期望 {want}")
 
-    it2 = interp_of("""func f(u64 a, u64 b) -> u64! {
+    it2 = interp_of("""u64! f(u64 a, u64 b) {
     return min(a, b) * 100 + max(a, b);
 }""")
     got = unwrap(it2.call("f", [2, 8]))
@@ -95,7 +95,7 @@ def test_values():
 
 def test_edges():
     print("[2] 边界：相等、0、大数")
-    it = interp_of("""func f(u64 a, u64 b) -> u64! {
+    it = interp_of("""u64! f(u64 a, u64 b) {
     return max(a, b) - min(a, b);
 }""")
     check(unwrap(it.call("f", [7, 7])) == 0, "相等 → 差 0")
@@ -111,7 +111,7 @@ def test_negative_xfail():
 
     # `min(-3, 2)` 现在**能过**——负数字面量不走 `_wrap`，原样传给 min。
     # （这条原本标了 xfail，XPASS 提示后改成正常断言。）
-    it0 = interp_of("""func f(i64 a, i64 b) -> i64! {
+    it0 = interp_of("""i64! f(i64 a, i64 b) {
     return min(a, b);
 }""")
     check(unwrap(it0.call("f", [-3, 2])) == -3,
@@ -119,13 +119,15 @@ def test_negative_xfail():
           str(unwrap(it0.call("f", [-3, 2]))))
 
     # 真正的缺口：**减法**会把负数掩成无符号大数，于是 min 拿到的已经是错的。
-    it = interp_of("""func f(i64 a, i64 b) -> i64! {
+    it = interp_of("""i64! f(i64 a, i64 b) {
     return min(a - b, 0);
 }""")
-    xcheck(unwrap(it.call("f", [1, 3])), -2,
-           "min(1-3, 0) = -2",
-           "减法先被 _wrap 掩成无符号大数（1.8e19），min 再取也救不回来",
-           since="2026-10-30 01:20", blocker="E4-C")
+    # **2026-11-12：这条不再 xfail** —— 整数减法早就不把负数掩成无符号大数了
+    # （`8f5ce9d` 起的整数语义），实测 `min(1-3, 0)` 就是 -2。
+    # xfail 标记留着会 XPASS，反而让 runner 红。
+    check(unwrap(it.call("f", [1, 3])) == -2,
+          "min(1-3, 0) = -2（减法不再掩成无符号大数）",
+          str(unwrap(it.call("f", [1, 3]))))
 
 
 # ---------------------------------------------------------------- 类型检查
@@ -135,18 +137,18 @@ def test_typecheck():
     TU = "spec f(u64 a, u64 b) -> u64 {\n    effects {};\n}\n"
     tu = parse_source(TU, "t.tu").module
 
-    ok = typecheck(tu, parse_source("""func f(u64 a, u64 b) -> u64 {
+    ok = typecheck(tu, parse_source("""u64 f(u64 a, u64 b) {
     return min(a, b) + max(a, b);
 }""", "t.eln").module)
     check(not ok, "正确用法零诊断", str([d.code for d in ok]))
 
-    one = typecheck(tu, parse_source("""func f(u64 a, u64 b) -> u64 {
+    one = typecheck(tu, parse_source("""u64 f(u64 a, u64 b) {
     return min(a);
 }""", "t.eln").module)
     check(any(d.code == "E-Type-ArgCount" for d in one),
           "少给实参 → E-Type-ArgCount", str([d.code for d in one]))
 
-    mixed = typecheck(tu, parse_source("""func f(u64 a, u64 b) -> u64 {
+    mixed = typecheck(tu, parse_source("""u64 f(u64 a, u64 b) {
     return min(a, true);
 }""", "t.eln").module)
     check(any(d.code == "E-Type-ArgMismatch" for d in mixed),
@@ -160,7 +162,7 @@ def test_cost():
     from cost_interp import CostInterp
     from symbolic import Cost
 
-    ch = parse_source("""func f(vector<u64>& xs) -> u64! {
+    ch = parse_source("""u64! f(vector<u64>& xs) {
     u64 best = 0;
     u64 i = 0;
     while (i < xs.length()) {

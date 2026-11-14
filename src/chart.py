@@ -32,8 +32,16 @@ def line_chart(series: Sequence[Tuple[str, Sequence[Tuple[float, float]]]],
                title: str, ylabel: str, log_x: bool = True,
                log_y: bool = False, hline: float = None,
                annotate: bool = False, vline: float = None,
-               note: str = None, direct_labels: bool = False) -> str:
-    """series = [(名字, [(x, y), ...]), ...] → SVG 文本。"""
+               note: str = None, direct_labels: bool = False,
+               dots_only: Sequence[str] = ()) -> str:
+    """series = [(名字, [(x, y), ...]), ...] → SVG 文本。
+
+    `dots_only`（2026-11-10）：**这些系列只画点、不连线**。
+    它存在的唯一理由是诚实——`export --full --out=*.html` 的实测点在少于 4 个时
+    连成一条折线就等于画了条趋势线，而 3 个点撑不起趋势判断。
+    **默认空元组**：不传时输出与以前逐字节相同（`export --full --out=*.svg`
+    的产物不受影响，`tests/cases/test_cli_smoke.py` 里有逐字节比对）。
+    """
     pts = [(x, y) for _n, xs in series for x, y in xs if y == y and y > 0]
     if not pts:
         # **空面板也要有标题**：否则读者只看到一块白板，分不清"没数据"还是"画砸了"
@@ -133,8 +141,9 @@ def line_chart(series: Sequence[Tuple[str, Sequence[Tuple[float, float]]]],
         d = " ".join(f"{sx(x):.1f},{sy(y):.1f}" for x, y in data if y == y and y > 0)
         if not d:
             continue
-        out.append(f'<polyline points="{d}" fill="none" stroke="{color}" '
-                   f'stroke-width="2.4"/>')
+        if name not in dots_only:
+            out.append(f'<polyline points="{d}" fill="none" stroke="{color}" '
+                       f'stroke-width="2.4"/>')
         for x, y in data:
             if y == y and y > 0:
                 out.append(f'<circle cx="{sx(x):.1f}" cy="{sy(y):.1f}" r="3" '

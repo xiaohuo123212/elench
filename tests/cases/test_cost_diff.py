@@ -37,7 +37,7 @@ V1_TU = """spec f(const vector<u64>& xs) -> u64 {
     target { time: { max: O(n * n) } };
 }
 """
-V1_ELN = """func f(const vector<u64>& xs) -> u64 {
+V1_ELN = """u64 f(const vector<u64>& xs) {
     u64 i = 0;
     u64 s = 0;
     while (i < xs.length()) {
@@ -48,7 +48,7 @@ V1_ELN = """func f(const vector<u64>& xs) -> u64 {
 }
 """
 # 加一层循环：O(n) → O(n²)
-V2_ELN = """func f(const vector<u64>& xs) -> u64 {
+V2_ELN = """u64 f(const vector<u64>& xs) {
     u64 i = 0;
     u64 s = 0;
     while (i < xs.length()) {
@@ -63,7 +63,7 @@ V2_ELN = """func f(const vector<u64>& xs) -> u64 {
 }
 """
 # 只改常数：多一条加法
-V3_ELN = """func f(const vector<u64>& xs) -> u64 {
+V3_ELN = """u64 f(const vector<u64>& xs) {
     u64 i = 0;
     u64 s = 0;
     while (i < xs.length()) {

@@ -17,9 +17,17 @@
 """
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
+
+#: **占位符**的形状：`<...>` / `<…>` / 尖括号里有中文（`<原来的条件>`）。
+#: 不能简单判「含 `<`」——真实签名里的泛型（`Vec<u64>`）和比较式
+#: （`while (i < xs.length())`）都有 `<`，那是**代码**不是占位符。
+#: 2026-11-11 之前这条断言用 `"<" not in x or "->" in x`，把泛型签名
+#: `u64 b(const Vec<u64>& xs) { … }` 误判成占位符（test_actions 红了）。
+PLACEHOLDER = re.compile(r"<[^<>]*(?:\.\.\.|…|[\u4e00-\u9fff])[^<>]*>")
 
 CASEDIR = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(CASEDIR, "..", ".."))
@@ -53,8 +61,8 @@ def main() -> int:
                 "    guarantees sorted(xs);\n"
                 "}\n")
     with open(eln, "w", encoding="utf-8", newline="\n") as f:
-        f.write("func a(const Vec<u64>& xs) -> u64 { return 1; }\n"
-                "func b(const Vec<u64>& xs) -> u64 { return 2; }\n")
+        f.write("u64 a(const Vec<u64>& xs) { return 1; }\n"
+                "u64 b(const Vec<u64>& xs) { return 2; }\n")
 
     print("[1] 诊断带上可执行的 actions")
     _rc, out = run(["check", os.path.join(tmp, "a"), "--format=json"])
@@ -65,8 +73,8 @@ def main() -> int:
           [a.get("kind") for a in acts])
     texts = [a.get("patch", {}).get("text", "") for a in acts]
     check("patch.text 不为空", all(texts), texts)
-    check("**没有占位符**（不许出现 `<...>`）",
-          all("<" not in x or "->" in x for x in texts), texts)
+    check("**没有占位符**（不许出现 `<...>` / `<原来的条件>`）",
+          all(not PLACEHOLDER.search(x) for x in texts), texts)
 
     print("[2] 修法清单编号，--apply=N 能取到")
     _rc, out = run(["check", os.path.join(tmp, "a")])
@@ -97,7 +105,7 @@ def main() -> int:
                 "    target { time: { minimum: O(xs.length()) }, };\n"
                 "}\n")
     with open(os.path.join(d2, "b.eln"), "w", encoding="utf-8", newline="\n") as f:
-        f.write("func b(const Vec<u64>& xs) -> u64 { u64 i = 0; "
+        f.write("u64 b(const Vec<u64>& xs) { u64 i = 0; "
                 "while (i != 7) { i = i + 1; } return i; }\n")
     _rc, out = run(["check", os.path.join(d2, "b")])
     check("槽位有修法", "E-Target-BadSlot" in out and "改成 `max`" in out, out[:400])

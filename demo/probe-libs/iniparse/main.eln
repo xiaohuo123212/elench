@@ -1,0 +1,151 @@
+// demo/probe-libs/iniparse/main.eln —— main.cpp 的移植（--compat；改动见报告）
+#include <cstdio>
+#include <map>
+#include <string>
+#include <vector>
+
+// substr 没有等价方法：手写切片（原件是 s.substr(a, b - a)）
+static std::string text_cut(const std::string &s, size_t a, size_t b) {
+    std::string out = "";
+    if (a >= s.size()) return out;
+    if (b > s.size()) b = s.size();
+    if (b <= a) return out;
+    for (size_t k = a; k < b; k = k + 1) {
+        out.push_back(s[k]);
+    }
+    return out;
+}
+
+static std::vector<std::string> split_lines(const std::string &text) {
+    std::vector<std::string> out;
+    size_t start = 0;
+    size_t i = 0;
+    while (i < text.size()) {
+        if (text[i] == '\n') {
+            out.push_back(text_cut(text, start, i));
+            start = i + 1;
+        }
+        i = i + 1;
+    }
+    out.push_back(text_cut(text, start, text.size()));
+    return out;
+}
+
+static std::string strip_comment(const std::string &line) {
+    size_t i = 0;
+    while (i < line.size()) {
+        if (line[i] == ';' || line[i] == '#') return text_cut(line, 0, i);
+        i = i + 1;
+    }
+    return line;
+}
+
+static std::string trim(const std::string &s) {
+    size_t a = 0;
+    size_t b = s.size();
+    while (a < b && (s[a] == ' ' || s[a] == '\t' || s[a] == '\r')) {
+        a = a + 1;
+    }
+    while (b > a && (s[b - 1] == ' ' || s[b - 1] == '\t' || s[b - 1] == '\r')) {
+        b = b - 1;
+    }
+    return text_cut(s, a, b);
+}
+
+static size_t first_index(const std::string &s, char c) {
+    for (size_t i = 0; i < s.size(); i++) {
+        if (s[i] == c) return i;
+    }
+    return s.size();
+}
+
+struct Ini {
+    std::map<std::string, std::string> items;
+    std::string section;
+    size_t kept;      // 真正写进 map 的键数（含覆盖）
+    size_t skipped;   // 空行 / 注释 / 缺 '=' 的行
+
+    Ini() {
+        section = "";
+        kept = 0;
+        skipped = 0;
+    }
+
+    std::string qualify(const std::string &key) const {
+        if (section.empty()) return key;
+        std::string out = section + ".";
+        for (size_t k = 0; k < key.size(); k = k + 1) {
+            out.push_back(key[k]);
+        }
+        return out;
+    }
+
+    void parse(const std::string &text) {
+        const std::vector<std::string> lines = split_lines(text);
+        for (size_t i = 0; i < lines.size(); i++) {
+            const std::string body = trim(strip_comment(lines[i]));
+            if (body.empty()) {
+                skipped = skipped + 1;
+                continue;
+            }
+            if (body[0] == '[') {
+                section = trim(text_cut(body, 1, body.size() - 1));
+                continue;
+            }
+            const size_t eq = first_index(body, '=');
+            if (eq == body.size()) {
+                skipped = skipped + 1;
+                continue;
+            }
+            const std::string key = qualify(trim(text_cut(body, 0, eq)));
+            const std::string val = trim(text_cut(body, eq + 1, body.size()));
+            if (key.empty()) {
+                skipped = skipped + 1;
+                continue;
+            }
+            items[key] = val;
+            kept = kept + 1;
+        }
+    }
+
+    // 原件是 items.find(key) != items.end()：本语言没有迭代器，contains 也没有 C++ 后端，
+    // 只能 keys() 快照 + 逐项比较（代价：O(n) 而不是 O(log n)）
+    bool has(const std::string &key) const {
+        const std::vector<std::string> ks = items.keys();
+        for (size_t i = 0; i < ks.size(); i = i + 1) {
+            if (ks[i] == key) return true;
+        }
+        return false;
+    }
+
+    std::string get(const std::string &key, const std::string &fallback) const {
+        if (!has(key)) return fallback;
+        return items.get(key);
+    }
+
+    size_t size() const { return items.size(); }
+};
+
+int main() {
+    // 原件用相邻字面量拼接（"…" "…"）：本语言不认，改成分两段赋值
+    std::string cfg = "name = demo\n; 整行注释\ncount=3\n\nretry = 5\ncount = 4\n";
+    cfg = cfg + "[net]\nhost=localhost\nport = 8080  # 行尾注释\nbroken line\n";
+    Ini ini;
+    ini.parse(cfg);
+
+    std::printf("cfg_lines=%zu\n", split_lines(cfg).size());
+    std::printf("size=%zu kept=%zu skipped=%zu\n", ini.size(), ini.kept, ini.skipped);
+    std::printf("name=[%s]\n", ini.get("name", "?").c_str());
+    std::printf("count=[%s]\n", ini.get("count", "?").c_str());
+    std::printf("retry=[%s]\n", ini.get("retry", "?").c_str());
+    std::printf("net.host=[%s]\n", ini.get("net.host", "?").c_str());
+    std::printf("net.port=[%s]\n", ini.get("net.port", "?").c_str());
+    std::printf("missing=[%s]\n", ini.get("nope", "default-value").c_str());
+    if (ini.has("name")) {
+        std::printf("has_name=1 has_nope=0\n");
+    } else {
+        std::printf("has_name=0 has_nope=0\n");
+    }
+    std::printf("section=[%s]\n", ini.section.c_str());
+    return 0;
+}

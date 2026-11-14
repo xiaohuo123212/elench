@@ -5,7 +5,7 @@
 
 ## 为什么单独一条文件
 
-审计实测过：`func f() -> u64 { return true; }` 能 `build` 出"✓ 构建通过"、
+审计实测过：`u64 f() { return true; }` 能 `build` 出"✓ 构建通过"、
 能 `run` 出 `True`。一个会说"通过"的门禁，比缺功能严重得多——所以它值得
 一个**专门的**测试文件，而不是散在别处。
 
@@ -52,7 +52,7 @@ def check(ok, label, detail=""):
 
 TU = ('spec f() -> u64 {\n    effects {};\n'
       '    target { time: { max: O(1) } };\n}\n')
-ELN_BAD = "func f() -> u64 {\n    return true;\n}\n"
+ELN_BAD = "u64 f() {\n    return true;\n}\n"
 
 
 def write(tmp, tu=TU, eln=ELN_BAD):
@@ -85,10 +85,10 @@ def test_gate():
 def test_kappa_top_on_parse_error():
     print("[2] 解析失败 → κ = ⊤（不许 0）")
     tu = parse_source(TU, "m.tu").module
-    bad = parse_source("func f() -> u64 {\n    return ???;\n}\n", "m.eln").module
+    bad = parse_source("u64 f() {\n    return ???;\n}\n", "m.eln").module
     ci = CostInterp(bad, tu, diags=getattr(bad, "_parse_diags", None))
     check(ci.cost_of("f").is_top(), "坏 .eln 的 κ 是 ⊤", ci.cost_of("f").render())
-    good = parse_source("func f() -> u64 {\n    return 1;\n}\n", "m.eln").module
+    good = parse_source("u64 f() {\n    return 1;\n}\n", "m.eln").module
     ci2 = CostInterp(good, tu, diags=getattr(good, "_parse_diags", None))
     check(not ci2.cost_of("f").is_top(), "好 .eln 照常给数")
 
@@ -97,7 +97,7 @@ def test_match_cost():
     print("[3] match 单语句臂的 κ > 0")
     tu = parse_source('spec f(u64 n) -> u64 { effects {}; '
                       'target { time: { max: O(n) } }; }\n', "m.tu").module
-    eln = parse_source("func f(u64 n) -> u64 {\n"
+    eln = parse_source("u64 f(u64 n) {\n"
                        "    match (n) {\n        0 => return 1,\n"
                        "        _ => return 2,\n    }\n}\n", "m.eln").module
     ci = CostInterp(eln, tu)
@@ -110,9 +110,9 @@ def test_alloc_in_loop():
     tu = parse_source('spec f(const vector<u64>& xs) -> u64 { effects {}; '
                       'target { time: { max: O(n) }, allocation: { max: 0 } }; }\n',
                       "m.tu").module
-    eln = parse_source("func f(const vector<u64>& xs) -> u64 {\n"
+    eln = parse_source("u64 f(const vector<u64>& xs) {\n"
                        "    u64 s = 0;\n"
-                       "    for (x in xs) { vector<u64> t = [1, 2]; s = s + t.length(); }\n"
+                       "    for (auto x : xs) { vector<u64> t = [1, 2]; s = s + t.length(); }\n"
                        "    return s;\n}\n", "m.eln").module
     ci = CostInterp(eln, tu)
     a = ci.alloc_of("f").render()

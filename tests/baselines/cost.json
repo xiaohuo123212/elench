@@ -1,0 +1,184 @@
+{
+  "note": "κ 基线（口径：max，不读 *.dispatch.yaml）。变了要人看一眼：变松（界变大）要解释，变紧是好事",
+  "modules": {
+    "文档/样例/blur": {
+      "blur": {
+        "kappa": "4 + h×(4 + 2 + w×16 + 16 + 5) + 4 + 2 + w×16 + 16 + 5 + 2",
+        "target": "w×h",
+        "verdict": "ok"
+      }
+    },
+    "文档/样例/calculator": {
+      "apply_top": {
+        "kappa": "49",
+        "target": null,
+        "verdict": "unknown"
+      },
+      "digit_value": {
+        "kappa": "7",
+        "target": null,
+        "verdict": "unknown"
+      },
+      "evaluate": {
+        "kappa": "1 + 1 + 1 + 9 + n(text)×1447 + 1447 + 10 + 4098 + 1 + 27790173",
+        "target": "n(text)",
+        "verdict": "ok"
+      },
+      "is_digit": {
+        "kappa": "8",
+        "target": null,
+        "verdict": "unknown"
+      },
+      "more_digits": {
+        "kappa": "21",
+        "target": null,
+        "verdict": "unknown"
+      },
+      "pop_until_open": {
+        "kappa": "n(operators)×87 + 87 + 2",
+        "target": null,
+        "verdict": "unknown"
+      },
+      "precedence": {
+        "kappa": "5",
+        "target": null,
+        "verdict": "unknown"
+      },
+      "read_number": {
+        "kappa": "1383",
+        "target": null,
+        "verdict": "unknown"
+      },
+      "reduce": {
+        "kappa": "11 + n(tokens)×6782 + 6782 + 4290 + 10 + 5",
+        "target": null,
+        "verdict": "unknown"
+      },
+      "should_reduce": {
+        "kappa": "41",
+        "target": null,
+        "verdict": "unknown"
+      },
+      "tokenize": {
+        "kappa": "9 + n(text)×1447 + 1447 + 10 + 4098",
+        "target": null,
+        "verdict": "unknown"
+      }
+    },
+    "文档/样例/count": {
+      "count": {
+        "kappa": "12 + 1 + 1 + max(9 + n(text)×23 + 23 + 2 + 2 + 4626 + 2, 9 + n(text)×(4 + 9 + n(text)×21 + 21 + 6 + 5) + 4 + 9 + n(text)×21 + 21 + 6 + 5 + 2)",
+        "target": "n(text)×n(text)",
+        "verdict": "ok"
+      }
+    },
+    "文档/样例/count_above": {
+      "count_above": {
+        "kappa": "9 + n(xs)×20 + 20 + 2",
+        "target": "n(xs)",
+        "verdict": "ok"
+      }
+    },
+    "文档/样例/insertion": {
+      "insertion": {
+        "kappa": "7 + n(xs)×(4 + 6 + n(xs)×26 + 26 + 5 + 5) + 4 + 6 + n(xs)×26 + 26 + 5 + 5 + 2",
+        "target": "n(xs)×n(xs)",
+        "verdict": "ok"
+      }
+    },
+    "文档/样例/lcs": {
+      "lcs": {
+        "kappa": "28 + n(a)×(7 + 2 + n(b)×67 + 67 + 5) + 7 + 2 + n(b)×67 + 67 + 5 + 14",
+        "target": "n(a)×n(b)",
+        "verdict": "ok"
+      }
+    },
+    "文档/样例/matmul": {
+      "matmul": {
+        "kappa": "29 + dim×(4 + 2 + dim×(4 + 4 + dim×30 + 30 + 5 + 5) + 4 + 4 + dim×30 + 30 + 5 + 5 + 5) + 4 + 2 + dim×(4 + 4 + dim×30 + 30 + 5 + 5) + 4 + 4 + dim×30 + 30 + 5 + 5 + 5 + 2",
+        "target": "dim×dim×dim",
+        "verdict": "ok"
+      }
+    },
+    "文档/样例/max_in": {
+      "max_in": {
+        "kappa": "17 + n(xs)×20 + 20 + 2",
+        "target": "n(xs)",
+        "verdict": "ok"
+      }
+    },
+    "文档/样例/max_pair_sum": {
+      "max_pair_sum": {
+        "kappa": "9 + n(xs)×(4 + 4 + n(xs)×24 + 24 + 5) + 4 + 4 + n(xs)×24 + 24 + 5 + 2",
+        "target": "n(xs)×n(xs)",
+        "verdict": "ok"
+      }
+    },
+    "文档/样例/merge": {
+      "earlier": {
+        "kappa": "10",
+        "target": null,
+        "verdict": "unknown"
+      },
+      "merge": {
+        "kappa": "14 + 1 + 2 + n(xs)×log2(n(xs))×10 + 1 + 6 + 6 + 2 + n(xs)×36 + 36 + 5 + 2",
+        "target": "n(xs)×n(xs)",
+        "verdict": "ok"
+      }
+    },
+    "文档/样例/paren": {
+      "paren": {
+        "kappa": "9 + n(text)×37 + 37 + 10 + 2",
+        "target": "n(text)",
+        "verdict": "ok"
+      }
+    },
+    "文档/样例/reverse_in": {
+      "reverse_in": {
+        "kappa": "9 + n(xs)×32 + 32 + 2",
+        "target": "n(xs)",
+        "verdict": "ok"
+      }
+    },
+    "文档/样例/search": {
+      "binary_search": {
+        "kappa": "12 + 1 + 1 + 1 + 1 + max(2 + n(xs)×18 + 18 + 3, 4 + (log2(n(xs)) + 1)×39 + 39 + 3) + 1 + max(2 + n(xs)×18 + 18 + 3, 4 + (log2(n(xs)) + 1)×39 + 39 + 3) + 2",
+        "target": "log2(n(xs))",
+        "verdict": "debt"
+      },
+      "in_range": {
+        "kappa": "4",
+        "target": null,
+        "verdict": "unknown"
+      }
+    },
+    "文档/样例/stats": {
+      "summarize": {
+        "kappa": "12 + 1 + 1 + 1 + 1 + max(9 + n(xs)×17 + 17 + 2, 9 + n(xs)×21 + 21 + 2) + 1 + max(9 + n(xs)×17 + 17 + 2, 9 + n(xs)×21 + 21 + 2) + 6 + 2 + 5 + 5 + 2 + n(xs)×42 + 42 + 6 + 2",
+        "target": "n(xs)",
+        "verdict": "ok"
+      }
+    },
+    "文档/样例/sum": {
+      "average": {
+        "kappa": "12 + 1 + 1 + 1 + 1 + max(4 + n(scores)×17 + 17 + 2, 2 + n(scores)×7 + 2) + 1 + max(4 + n(scores)×17 + 17 + 2, 2 + n(scores)×7 + 2) + 4",
+        "target": "n(scores)",
+        "verdict": "ok"
+      }
+    },
+    "文档/样例/sum_sq": {
+      "sum_sq": {
+        "kappa": "9 + n(xs)×20 + 20 + 2",
+        "target": "n(xs)",
+        "verdict": "ok"
+      }
+    },
+    "文档/样例/topk": {
+      "topk": {
+        "kappa": "26 + 1 + 1 + max(21 + n(xs)×624 + 624 + 5, 27 + k×(4 + 9 + n(xs)×43 + 43 + 3 + 3 + n(xs)×21 + 21 + 3 + 22) + 4 + 9 + n(xs)×43 + 43 + 3 + 3 + n(xs)×21 + 21 + 3 + 22 + 2)",
+        "target": "n(xs)×k",
+        "verdict": "ok"
+      }
+    }
+  }
+}

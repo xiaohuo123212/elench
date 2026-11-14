@@ -117,7 +117,7 @@ def _struct_fields(tu, type_name):
 def measure_one(prog, n, runs, args_override=None):
     """返回该程序里有 target 的函数的对照行。"""
     from bench import make_u8s, random_u64s
-    from cost_check import evaluate
+    from cost_check import evaluate, _sym_names
     from cost_interp import CostInterp
     from interp import Interp
     from parser import parse_source
@@ -125,12 +125,27 @@ def measure_one(prog, n, runs, args_override=None):
     # **`prog` 可以是名字（在样例目录里找），也可以是路径**（任意模块）。
     # 以前只认名字，于是 `文档/入门/例子/crossover.tu` 报"没有可对照的函数"。
     if prog.endswith(".tu") or os.path.sep in prog or "/" in prog:
-        _base = prog[:-3] if prog.endswith(".tu") else prog
+        # `.eln` 结尾也要剥掉：否则 `foo.eln` 会拼成 `foo.eln.eln`，
+        # 后面就找不到文件、`@spec` 也没机会生效（2026-11-11）。
+        if prog.endswith(".tu"):
+            _base = prog[:-3]
+        elif prog.endswith(".eln"):
+            _base = prog[:-4]
+        else:
+            _base = prog
         tu_p = _base + ".tu"
         ch_p = _base + ".eln"
     else:
         tu_p = os.path.join(SAMPLES, prog + ".tu")
         ch_p = os.path.join(SAMPLES, prog + ".eln")
+    # **`@spec` 优先，同名回退**：与 `check` / `cost` / `run` 用同一个解析器
+    # （2026-11-11）。否则同一个契约在 `cost` 与 `export` 下可能指向不同文件——
+    # 那正是"解耦只解了一半"。延迟导入：`dsh` 在调用链上游，模块级导入会成环。
+    if os.path.exists(ch_p):
+        from dsh import _pair_from_eln
+        _pair = _pair_from_eln(ch_p)
+        if _pair:
+            tu_p, ch_p = _pair[0], _pair[1]
     if not (os.path.exists(tu_p) and os.path.exists(ch_p)):
         return []
 
@@ -256,21 +271,26 @@ def measure_one(prog, n, runs, args_override=None):
                 _env[_nm] = _shape(_a)
         except Exception:                                  # noqa: BLE001
             pass
-        kv = evaluate(kappa, {v: _env.get(v, n) for v in kappa.variables()})
+        # **标量形参现在是裸符号 `sym(dim)`**（P1），它不在 `variables()` 里；
+        # 求值时也要按实参代入，否则会被当成未知 → `kappa_inf`。
+        def _vars_of(_c):
+            return sorted(set(_c.variables()) | set(_sym_names(_c)))
+
+        kv = evaluate(kappa, {v: _env.get(v, n) for v in _vars_of(kappa)})
         _tgt = ci.target_cost(fn)
         try:
-            _tv = float(evaluate(_tgt, {v: _env.get(v, n) for v in _tgt.variables()})) \
+            _tv = float(evaluate(_tgt, {v: _env.get(v, n) for v in _vars_of(_tgt)})) \
                 if _tgt is not None else None
         except Exception:                                  # noqa: BLE001
             _tv = None
         _ak = ci.alloc_of(fn)
         try:
-            _akv = float(evaluate(_ak, {v: _env.get(v, n) for v in _ak.variables()}))
+            _akv = float(evaluate(_ak, {v: _env.get(v, n) for v in _vars_of(_ak)}))
         except Exception:                                  # noqa: BLE001
             _akv = None
         _at = ci.target_cost(fn, "allocation")
         try:
-            _atv = float(evaluate(_at, {v: _env.get(v, n) for v in _at.variables()})) \
+            _atv = float(evaluate(_at, {v: _env.get(v, n) for v in _vars_of(_at)})) \
                 if _at is not None else None
         except Exception:                                  # noqa: BLE001
             _atv = None

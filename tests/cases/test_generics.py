@@ -40,7 +40,7 @@ from interp import Interp             # noqa: E402
 from parser import parse_source       # noqa: E402
 
 FAILED = []
-T = "target { time: { max: O(xs.length()) }, allocation: { max: 0 }, };\n"
+T = "target { time: { max: O(xs.size()) }, allocation: { max: 0 }, };\n"
 
 
 def check(name, cond, detail=""):
@@ -53,7 +53,7 @@ def check(name, cond, detail=""):
 
 def main() -> int:
     print("=== 解析 ===")
-    m = parse_source("func id<T>(const vector<T>& xs) -> vector<T> { return xs; }\n", "m.eln")
+    m = parse_source("vector<T> id<T>(const vector<T>& xs) { return xs; }\n", "m.eln")
     fn = next((c for c in m.module.children if c.kind == "fn"), None)
     tp = next((c for c in fn.children if c.kind == "type-params"), None) if fn else None
     check("函数签名里有 type-params", tp is not None)
@@ -63,10 +63,10 @@ def main() -> int:
     tu = f"""spec id(const vector<u64>& xs) -> vector<u64> {{ effects {{}}; {T} }}
 spec consume(const vector<u64>& xs) -> u64 {{ effects {{}}; {T} }}
 """
-    ch = """func id<T>(const vector<T>& xs) -> vector<T> {
+    ch = """vector<T> id<T>(const vector<T>& xs) {
     return xs;
 }
-func consume(const vector<u64>& xs) -> u64 {
+u64 consume(const vector<u64>& xs) {
     const vector<u64> ys = copy(xs);
     const vector<u64> zs = id(ys);
     return zs.length();
@@ -85,8 +85,8 @@ func consume(const vector<u64>& xs) -> u64 {
     tu2 = f"""spec onlyret(const vector<u64>& xs) -> u64 {{ effects {{}}; {T} }}
 spec id(const vector<u64>& xs) -> vector<u64> {{ effects {{}}; {T} }}
 """
-    ch_ok = """func id<T>(const vector<T>& xs) -> vector<T> { return xs; }
-func onlyret(const vector<u64>& xs) -> u64 {
+    ch_ok = """vector<T> id<T>(const vector<T>& xs) { return xs; }
+u64 onlyret(const vector<u64>& xs) {
     const vector<u64> ys = id(xs);
     return ys.length();
 }
@@ -94,8 +94,8 @@ func onlyret(const vector<u64>& xs) -> u64 {
     check("能从实参推出 T（无诊断）",
           [d.code for d in check_module(tu2, ch_ok, "m").diagnostics] == [])
 
-    ch_bad = """func id<T>(const vector<T>& xs) -> vector<T> { return xs; }
-func onlyret(const vector<u64>& xs) -> u64 {
+    ch_bad = """vector<T> id<T>(const vector<T>& xs) { return xs; }
+u64 onlyret(const vector<u64>& xs) {
     const u64 n = id(1);
     return n;
 }
@@ -106,7 +106,7 @@ func onlyret(const vector<u64>& xs) -> u64 {
     print("=== HashMap<K,V>（有界探测） ===")
     tu3 = f"""spec m(const vector<u64>& xs) -> u64 {{ effects {{}}; {T} }}
 """
-    ch3 = """func m(const vector<u64>& xs) -> u64 {
+    ch3 = """u64 m(const vector<u64>& xs) {
     HashMap<vector<u8>, u64> h = map_new();
     map_put(h, "a", 1);
     map_put(h, "b", 2);
@@ -119,7 +119,7 @@ func onlyret(const vector<u64>& xs) -> u64 {
     check("HashMap 能存能取（长度 2）", Interp(ch3m, tu3m).call("m", [[1]]) == 2)
 
     print("=== 非泛型函数仍然严格 ===")
-    bad = """func id(const vector<u64>& xs) -> vector<u64> {
+    bad = """vector<u64> id(const vector<u64>& xs) {
     return xs;
 }
 """

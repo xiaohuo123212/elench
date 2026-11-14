@@ -32,15 +32,15 @@ def check(name, cond, detail=""):
         print(f"  FAIL {name}   {detail}")
 
 
-SRC = """func ok() -> u64 {
+SRC = """u64 ok() {
     optional<u64> o = option_some(7);
     return option_unwrap(o);
 }
-func bad() -> u64 {
+u64 bad() {
     optional<u64> n = option_none();
     return option_unwrap(n);
 }
-func with_default() -> u64 {
+u64 with_default() {
     optional<u64> n = option_none();
     return option_unwrap_or(n, 42);
 }

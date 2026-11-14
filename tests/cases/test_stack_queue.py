@@ -27,7 +27,7 @@ def check(name, cond, detail=""):
         print(f"  FAIL {name}   {detail}")
 
 
-SRC = """func s() -> u64 {
+SRC = """u64 s() {
     stack<u64> st = stack<u64>::new();
     st.push(1);
     st.push(2);
@@ -35,7 +35,7 @@ SRC = """func s() -> u64 {
     u64 b = st.pop();
     return a * 10 + b;
 }
-func q() -> u64 {
+u64 q() {
     queue<u64> qq = queue<u64>::new();
     qq.push(1);
     qq.push(2);
@@ -43,7 +43,7 @@ func q() -> u64 {
     u64 b = qq.pop();
     return a * 10 + b;
 }
-func empty_stack() -> u64 {
+u64 empty_stack() {
     stack<u64> st = stack<u64>::new();
     return st.pop();
 }

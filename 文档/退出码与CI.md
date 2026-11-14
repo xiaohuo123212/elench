@@ -1,4 +1,4 @@
-﻿# 退出码与 CI 用法
+# 退出码与 CI 用法
 
 > 2026-11-06（L-12）。**本表每一行都是跑出来的**，不是照代码猜的。
 > 复现命令见每节末尾。
@@ -31,6 +31,30 @@
 
 现已改为 **1**。`cost` 仍有两个返回 2 的地方，但都是**真正的用法错误**：
 缺 `.tu` 文件、缺实现文件。
+
+## `build` 的判定规则（2026-11-09）
+
+`build` 是门禁最后一环：**它放行就等于"坏代码能进主干"**。所以：
+
+| 情形 | 不带开关 | `--deny-unknown` | `--deny-debt` |
+|---|---|---|---|
+| `check` 有 **error** | **1** | **1** | **1** |
+| `check` 只有 warning | 0 | 0 | 0 |
+| 超出 target（debt） | 0 + 警告 | 0（只拒 unknown） | **1** |
+| **无法判定（κ=⊤ / unknown）** | 0 + **警告** | **1** | **1** |
+
+- `--deny-debt` **也拒绝 unknown**（2026-11-06 起）——"不知道"不能当成"没问题"；
+- `--deny-unknown` **只**拒绝 unknown，债务仍放行；
+- 不带开关时 unknown 必须**警告**（以前 `build` 一声不吭地打"✓ 构建通过"）；
+- **`✓ 构建通过` 与 `✗ 拒绝构建` 不会同时出现**：先算完所有判定，
+  按最终结论只打一条；
+- `build --strict` / `--checks=overflow:…` / `--relax=…` 与 `check` 同口径
+  （以前 `build` 忽略 `--strict`，`check --strict` 的 error 在 build 里是绿的）。
+
+```bash
+python src/dsh.py build 文档/样例/sum --deny-debt      # CI：debt + unknown 都拒绝
+python src/dsh.py build 文档/样例/sum --deny-unknown   # 只拒绝 unknown
+```
 
 ## CI 样例
 
@@ -67,7 +91,7 @@ jobs:
 # 好程序 → 0
 python src/dsh.py check 文档/样例/sum
 # 语法错 → 1
-printf 'func h() -> u64 { return (1 + ; }\n' > /tmp/syn.eln
+printf 'u64 h() { return (1 + ; }\n' > /tmp/syn.eln
 python src/dsh.py fmt /tmp/syn.eln; echo "exit=$?"
 # 用法错 → 2
 python src/dsh.py check; echo "exit=$?"

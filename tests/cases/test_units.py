@@ -72,26 +72,26 @@ def steps_of(src: str, fn: str, args=None):
 
 def test_leaf_and_op():
     print("[1] 叶子与操作：`return 1 + 2;` = 语句 1 + 节点 3")
-    n = steps_of("func f() -> u64! { return 1 + 2; }", "f")
+    n = steps_of("u64! f() { return 1 + 2; }", "f")
     check(n == 4, "步数 = 4（return 1 + 叶子 1 + 叶子 2 + 二元 1）", f"实际 {n}")
 
 
 def test_more_leaves_more_steps():
     print("[2] 每加一个叶子读取，步数 +1（这是「比例放大」的来源）")
-    a = steps_of("func f() -> u64! { return 1 + 2; }", "f")
-    b = steps_of("func f() -> u64! { return 1 + 2 + 3; }", "f")
+    a = steps_of("u64! f() { return 1 + 2; }", "f")
+    b = steps_of("u64! f() { return 1 + 2 + 3; }", "f")
     check(b - a == 2, "多一个 `+ 3` = 二元 1 + 叶子 1 = +2", f"{a} → {b}")
 
 
 def test_decl_and_return():
     print("[3] 声明 + 返回：`u64 s = 0; return s;` = 4")
-    n = steps_of("func f() -> u64! { u64 s = 0; return s; }", "f")
+    n = steps_of("u64! f() { u64 s = 0; return s; }", "f")
     check(n == 4, "步数 = 4（声明 1 + 叶子 0 1 + return 1 + 叶子 s 1）", f"实际 {n}")
 
 
 def test_loop_linear_in_rounds():
     print("[4] 循环：轮数翻倍，步数约翻倍（线性）")
-    src = """func f() -> u64! {
+    src = """u64! f() {
         u64 s = 0; u64 i = 0;
         while (i < {N}) {{ s = s + i; i = i + 1; }}
         return s;

@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Elench contributors
 """test_half_rules.py —— 减半识别的**四条防错**（判错比判不出坏得多）
@@ -52,7 +52,7 @@ SPEC = ("spec %s -> u64 { effects { }; target { time: { max: O(log(n)) }, "
         "allocation: { max: 0 }, }; }\n")
 
 CASES = [
-    ("同变量二次赋值", """func f(u64 i) -> u64 {
+    ("同变量二次赋值", """u64 f(u64 i) {
     while (i > 0) {
         u64 p = (i - 1) / 2;
         p = i;
@@ -61,7 +61,7 @@ CASES = [
     return i;
 }
 """),
-    ("减半只在一条分支", """func f(u64 i, u64 c) -> u64 {
+    ("减半只在一条分支", """u64 f(u64 i, u64 c) {
     while (i > 0) {
         if (c > 0) {
             i = i / 2;
@@ -72,7 +72,7 @@ CASES = [
     return i;
 }
 """),
-    ("从 0 开始乘 2", """func f(u64 n) -> u64 {
+    ("从 0 开始乘 2", """u64 f(u64 n) {
     u64 i = 0;
     while (i < n) {
         i = i * 2;
@@ -88,7 +88,7 @@ for label, src in CASES:
     check(f"{label} 不是 log", "log2" not in k, k)
 
 print("[2] 正例（中转减半）必须是 log")
-HEAP = """func f(vector<u64>& h, u64 i) -> u64 {
+HEAP = """u64 f(vector<u64>& h, u64 i) {
     while (i > 0) {
         u64 p = (i - 1) / 2;
         if (h[p] >= h[i]) { return i; }
@@ -102,7 +102,7 @@ check("中转减半报 log2", "log2" in k, k)
 
 print()
 print("[3] 欧几里得成语：while (b != 0) { t = b; b = a % b; a = t; } → log2(a)")
-GCD = """func f(u64 a, u64 b) -> u64 {
+GCD = """u64 f(u64 a, u64 b) {
     while (b != 0) {
         u64 t = b;
         b = a % b;
@@ -112,7 +112,8 @@ GCD = """func f(u64 a, u64 b) -> u64 {
 }
 """
 k = kappa(GCD, "spec f(u64 a, u64 b) -> u64 { effects { }; target { time: { max: O(log(a)) }, allocation: { max: 0 }, }; }\n", "f")
-check("gcd 报 log2", "log2" in k and "n(a)" in k, k)
+# P1（2026-11-08）：标量形参在 κ 里渲染成裸符号 `a`，不再是 `n(a)`。
+check("gcd 报 log2（裸符号 a）", "log2" in k and "a" in k and "n(a)" not in k, k)
 
 print("[4] 形状不符就不给 log（多一条语句）")
 GCD2 = GCD.replace("        a = t;", "        a = t;\n        b = b + 1;")

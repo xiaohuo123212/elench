@@ -43,9 +43,9 @@ def check(name, cond, detail=""):
 
 
 CASES = [
-    ("spawn", "E-Spawn-Removed", "func f() -> u64 { spawn g(1); return 0; }"),
-    ("asm", "E-Asm-Removed", 'func f() -> u64 { asm("nop"); return 1; }'),
-    ("scope", "E-Scope-Removed", "func f() -> u64 { scope { return 1; } }"),
+    ("spawn", "E-Spawn-Removed", "u64 f() { spawn g(1); return 0; }"),
+    ("asm", "E-Asm-Removed", 'u64 f() { asm("nop"); return 1; }'),
+    ("scope", "E-Scope-Removed", "u64 f() { scope { return 1; } }"),
 ]
 
 print("[1] 三条都报迁移错（不是「期望表达式」）")
@@ -62,7 +62,7 @@ for kw in ("spawn", "asm", "scope"):
     check(f"EBNF 提到 {kw}", kw in ebnf)
 
 print("[3] parallel 仍然能解析（没被误删）")
-d = parse_source("func f() -> u64 { parallel { return 1; } }", "a.eln").diagnostics
+d = parse_source("u64 f() { parallel { return 1; } }", "a.eln").diagnostics
 check("parallel 无诊断", not [x for x in d if x.code.startswith("E-Parse")],
       [x.code for x in d])
 

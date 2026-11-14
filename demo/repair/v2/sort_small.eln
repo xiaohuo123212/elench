@@ -2,7 +2,7 @@
 //
 // 声明**一个字没改**，只换了实现。
 
-func sort_small(Vec<u64>& xs) -> u64 {
+u64 sort_small(Vec<u64>& xs) {
     sort(xs);
-    return xs.length();
+    return xs.size();
 }

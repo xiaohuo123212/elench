@@ -1,4 +1,4 @@
-func main() -> u64 {
+u64 main() {
     print(42);
     return 0;
 }

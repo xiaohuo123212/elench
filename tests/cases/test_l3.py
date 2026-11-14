@@ -49,7 +49,7 @@ def check(name, cond, detail=""):
 
 def run(body, a, b=None):
     tu = parse_source(TU, "m.tu").module
-    ch = parse_source("func f(const vector<u8>& a, const vector<u8>& b) -> u64 {\n" + body + "\n}\n",
+    ch = parse_source("u64 f(const vector<u8>& a, const vector<u8>& b) {\n" + body + "\n}\n",
                       "m.eln").module
     return Interp(ch, tu).call("f", [list(a), list(b if b is not None else b"")])
 
@@ -127,7 +127,7 @@ def main() -> int:
 
     print("=== 成本 ===")
     tu = parse_source(TU, "m.tu").module
-    ch = parse_source("""func f(const vector<u8>& a, const vector<u8>& b) -> u64 {
+    ch = parse_source("""u64 f(const vector<u8>& a, const vector<u8>& b) {
     return text_find(a, b);
 }
 """, "m.eln").module

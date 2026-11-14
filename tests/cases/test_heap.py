@@ -36,7 +36,7 @@ TU = """spec k() -> u64 { effects {}; target { time: { max: O(1) }, allocation: 
 spec e() -> u64 { effects {}; target { time: { max: O(1) }, allocation: { max: 0 }, }; }
 """
 
-SRC = """func k() -> u64 {
+SRC = """u64 k() {
     vector<u64> h = vector<u64>::make();
     push_heap(h, 3);
     push_heap(h, 9);
@@ -46,7 +46,7 @@ SRC = """func k() -> u64 {
     u64 second = h.at(0);
     return top * 10 + second;
 }
-func e() -> u64 {
+u64 e() {
     vector<u64> h = vector<u64>::make();
     pop_heap(h);
     return 0;

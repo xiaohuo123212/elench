@@ -30,7 +30,7 @@ spec count(
     // 桶法是 O(n)，两两比较是 O(n²)。`?!` 承诺按**最慢候选**给（取 max），
     // 所以整个函数的上界是 O(n²) —— 这是诚实的契约（和 search 同理，会判债务）。
     // 两个尺寸相乘现在**成本分析认得出**了（E15 已修）。
-    target { time: { max: O(text.length() * text.length()) }, allocation: { max: 0 }, };
+    target { time: { max: O(text.size() * text.size()) }, allocation: { max: 0 }, };
 
     // #region choose
     choose freq_kernel(const vector<u8>& text) -> u64! {

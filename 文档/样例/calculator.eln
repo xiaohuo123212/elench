@@ -16,20 +16,20 @@
 // 全部契约（cost / effects / target）见同目录 calculator.tu。
 // ============================================================
 
-pub func evaluate(
-                  const vector<u8>& text) -> i64! {
+pub i64! evaluate(
+                  const vector<u8>& text) {
     const array<Token,
     MAX_TOKENS> tokens = tokenize(text)?;
     return reduce(tokens);
 }
 
-func tokenize(
-              const vector<u8>& text) -> array<Token, MAX_TOKENS>! {
+array<Token, MAX_TOKENS>! tokenize(
+              const vector<u8>& text) {
     array<Token,
     MAX_TOKENS> tokens = array<Token,
     MAX_TOKENS>::make();
     u64 index = 0;
-    const u64 total = text.length();
+    const u64 total = text.size();
 
     while (index < total) {
         const u64 byte = text.at(index);
@@ -37,47 +37,46 @@ func tokenize(
         if (byte == SPACE) {
             index = index + 1;
         } else if (byte == PLUS) {
-            tokens.push(Token::Plus);
+            tokens.push_back(Token::Plus);
             index = index + 1;
         } else if (byte == MINUS) {
-            tokens.push(Token::Minus);
+            tokens.push_back(Token::Minus);
             index = index + 1;
         } else if (byte == STAR) {
-            tokens.push(Token::Star);
+            tokens.push_back(Token::Star);
             index = index + 1;
         } else if (byte == SLASH) {
-            tokens.push(Token::Slash);
+            tokens.push_back(Token::Slash);
             index = index + 1;
         } else if (byte == OPEN_PAREN) {
-            tokens.push(Token::OpenParenthesis);
+            tokens.push_back(Token::OpenParenthesis);
             index = index + 1;
         } else if (byte == CLOSE_PAREN) {
-            tokens.push(Token::CloseParenthesis);
+            tokens.push_back(Token::CloseParenthesis);
             index = index + 1;
         } else if (is_digit(byte)) {
             const (i64, u64) scanned = read_number(text, index)?;
-            tokens.push(Token::Number(scanned.0));
+            tokens.push_back(Token::Number(scanned.0));
             index = scanned.1;
         } else {
             return Err(CalcError::UnexpectedByte(index));
         }
     }
 
-    if (tokens.length() == 0) {
+    if (tokens.size() == 0) {
         return Err(CalcError::EmptyExpression);
     }
 
     return tokens;
 }
 
-func read_number(
-                 const vector<u8>& text, u64 start) -> (i64, u64)! {
+(i64, u64)! read_number(
+                 const vector<u8>& text, u64 start) {
     u64 index = start;
     i64 value = 0;
     u64 digits = 0;
-    const u64 total = text.length();
 
-    while (index < total and is_digit(text.at(index))) {
+    while (more_digits(text, index)) {
         if (digits >= MAX_DIGITS) {
             return Err(CalcError::NumberTooLong);
         }
@@ -95,8 +94,8 @@ func read_number(
     return (value, index);
 }
 
-func reduce(
-            const array<Token, MAX_TOKENS>& tokens) -> i64! {
+i64! reduce(
+            const array<Token, MAX_TOKENS>& tokens) {
     array<i64,
     MAX_DEPTH> values = array<i64,
     MAX_DEPTH>::make();
@@ -104,23 +103,23 @@ func reduce(
     MAX_DEPTH> operators = array<Token,
     MAX_DEPTH>::make();
     u64 index = 0;
-    const u64 total = tokens.length();
+    const u64 total = tokens.size();
 
     while (index < total) {
         const Token token = tokens.at(index);
 
         match token {
             Token::Number(value) => {
-                values.push(value);
+                values.push_back(value);
             }
             ,
             Token::OpenParenthesis => {
-                operators.push(token);
+                operators.push_back(token);
             }
             ,
             Token::CloseParenthesis => {
                 const bool closed = pop_until_open(values, operators)?;
-                if (not closed) {
+                if (!closed) {
                     return Err(CalcError::UnbalancedParenthesis);
                 }
             }
@@ -128,9 +127,9 @@ func reduce(
             _ => {
                 while (should_reduce(operators, token)) {
                     const i64 value = apply_top(& values, & operators)?;
-                    values.push(value);
+                    values.push_back(value);
                 }
-                operators.push(token);
+                operators.push_back(token);
             }
             ,
         }
@@ -138,41 +137,41 @@ func reduce(
         index = index + 1;
     }
 
-    while (operators.length() > 0) {
+    while (operators.size() > 0) {
         const i64 value = apply_top(& values, & operators)?;
-        values.push(value);
+        values.push_back(value);
     }
 
-    if (values.length() != 1) {
+    if (values.size() != 1) {
         return Err(CalcError::UnbalancedParenthesis);
     }
 
     return values.at(0);
 }
 
-func pop_until_open(array<i64, MAX_DEPTH>& values, array<Token,
-                    MAX_DEPTH>& operators) -> bool! {
-    while (operators.length() > 0) {
-        const Token top = operators.at(operators.length() - 1);
+bool! pop_until_open(array<i64, MAX_DEPTH>& values, array<Token,
+                    MAX_DEPTH>& operators) {
+    while (operators.size() > 0) {
+        const Token top = operators.at(operators.size() - 1);
         if (top == Token::OpenParenthesis) {
             // pop 的 requires 由上一层分支与循环条件直接履行（T12 + T12-a）
             operators.pop();
             return true;
         }
         const i64 value = apply_top(values, operators)?;
-        values.push(value);
+        values.push_back(value);
     }
 
     return false;
 }
 
-func should_reduce(
-                   const array<Token, MAX_DEPTH>& operators, Token next) -> bool {
-    if (operators.length() == 0) {
+bool should_reduce(
+                   const array<Token, MAX_DEPTH>& operators, Token next) {
+    if (operators.size() == 0) {
         return false;
     }
 
-    const Token top = operators.at(operators.length() - 1);
+    const Token top = operators.at(operators.size() - 1);
     if (top == Token::OpenParenthesis) {
         return false;
     }
@@ -180,7 +179,7 @@ func should_reduce(
     return precedence(top) >= precedence(next);
 }
 
-func precedence(Token token) -> u64 {
+u64 precedence(Token token) {
     match token {
         Token::Plus => return 1,
         Token::Minus => return 1,
@@ -190,9 +189,9 @@ func precedence(Token token) -> u64 {
     }
 }
 
-func apply_top(array<i64, MAX_DEPTH>& values, array<Token,
-               MAX_DEPTH>& operators) -> i64! {
-    if (values.length() < 2 or operators.length() < 1) {
+i64! apply_top(array<i64, MAX_DEPTH>& values, array<Token,
+               MAX_DEPTH>& operators) {
+    if (values.size() < 2 || operators.size() < 1) {
         return Err(CalcError::UnbalancedParenthesis);
     }
 
@@ -210,17 +209,23 @@ func apply_top(array<i64, MAX_DEPTH>& values, array<Token,
             if (right == 0) {
                 return Err(CalcError::Arith(cause = Arithmetic::DivisionByZero));
             }
-            return (left / right)?;
+            // 除法返回普通整数；除零已在上面显式转成 CalcError，不需要 `?`。
+            return left / right;
         }
         ,
         _ => return Err(CalcError::UnbalancedParenthesis),
     }
 }
 
-func is_digit(u64 byte) -> bool {
-    return byte >= ZERO and byte <= NINE;
+bool more_digits(
+                  const vector<u8>& text, u64 index) {
+    return index < text.size() && is_digit(text.at(index));
 }
 
-func digit_value(u64 byte) -> i64 {
+bool is_digit(u64 byte) {
+    return byte >= ZERO && byte <= NINE;
+}
+
+i64 digit_value(u64 byte) {
     return (byte - ZERO) as i64;
 }

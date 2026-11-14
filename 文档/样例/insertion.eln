@@ -1,6 +1,15 @@
 // insertion.eln —— 插入排序（嵌套循环，O(n²)）
-pub func insertion(const vector<u64>& xs) -> u64 {
-    u64 n = xs.length();
+//
+// **形参是可变借用 `vector<u64>&`，不是 `const vector<u64>&`**：
+// 这是**原地**插入排序，`xs[j] = xs[j - 1]` 改的就是调用方的向量。
+// 以前标成 `const` 也能过 check（改的是调用方的数据），现在
+// `check` 报 `E-Const-Mutate`——`const` 是只读借用，别让它撒谎。
+//
+// **2026-11-09 修算法**：内层 `else` 分支以前写 `j = 0;`，把插入位置
+// 强行归零，于是 `xs[j] = key` 永远写到 `xs[0]`——`{5,2,9}` 排成 `9 5 9`。
+// 正确写法是 `break;`（"找到位置就停"），`j` 保持插入点。
+pub u64 insertion(vector<u64>& xs) {
+    u64 n = xs.size();
     u64 i = 1;
     while (i < n) {
         u64 key = xs[i];
@@ -10,7 +19,7 @@ pub func insertion(const vector<u64>& xs) -> u64 {
                 xs[j] = xs[j - 1];
                 j = j - 1;
             } else {
-                j = 0;
+                break;
             }
         }
         xs[j] = key;

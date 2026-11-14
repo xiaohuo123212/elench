@@ -10,7 +10,7 @@ spec top(const vector<u64>& xs) -> u64! {
         data { xs = random_u64s(); }
         scale { xs in range(8, 65536, *2); }
     };
-    target { time: { max: O(xs.length()) }, allocation: { max: 0 }, };
+    target { time: { max: O(xs.size()) }, allocation: { max: 0 }, };
     choose kernel(const vector<u64>& xs) -> u64! {
         over { by_scan_heavy, by_scan_setup };
         objective time;

@@ -42,7 +42,7 @@ def _run(module_dir):
 tmp = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_tmp_spec")
 os.makedirs(tmp, exist_ok=True)
 io.open(os.path.join(tmp, "t.eln"), "w", encoding="utf-8").write(
-    "func foo(vector<u64>& xs) -> u64 {\n    return xs.length();\n}\n")
+    "u64 foo(vector<u64>& xs) {\n    return xs.length();\n}\n")
 io.open(os.path.join(tmp, "t.tu"), "w", encoding="utf-8").write("")
 
 out = _run(os.path.join(tmp, "t"))

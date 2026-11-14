@@ -43,12 +43,12 @@ FAILED = []
 TU = "spec f(const vector<u64>& xs, func(u64, u64) -> u64 g) -> u64 { effects {}; }\n"
 TU_CALL = ("spec f(const vector<u64>& xs, func(u64, u64) -> u64 g) -> u64 { effects {}; }\n"
            "spec h(const vector<u64>& xs) -> u64 { effects {}; }\n")
-CH = """func add(u64 a, u64 b) -> u64 { return a + b; }
-func f(const vector<u64>& xs, func(u64, u64) -> u64 g) -> u64 { return g(3, 4); }
+CH = """u64 add(u64 a, u64 b) { return a + b; }
+u64 f(const vector<u64>& xs, func(u64, u64) -> u64 g) { return g(3, 4); }
 """
-CH_CALL = """func add(u64 a, u64 b) -> u64 { return a + b; }
-func f(const vector<u64>& xs, func(u64, u64) -> u64 g) -> u64 { return g(3, 4); }
-func h(const vector<u64>& xs) -> u64 { return f(xs, add); }
+CH_CALL = """u64 add(u64 a, u64 b) { return a + b; }
+u64 f(const vector<u64>& xs, func(u64, u64) -> u64 g) { return g(3, 4); }
+u64 h(const vector<u64>& xs) { return f(xs, add); }
 """
 
 
@@ -81,10 +81,15 @@ def main() -> int:
     target { time: { max: O(xs.length() * k(visit)) }, allocation: { max: 0 }, };
 }
 """
-    CH_COST = """func visit(const vector<u8>& k, u64 v) -> u64 { return v; }
-func f(const vector<u64>& xs) -> u64 {
-    HashMap<vector<u8>, u64> m = map_new();
-    for_each(m, visit);
+    # **探针用 `vector` 而不是 `HashMap`**（2026-11-11）：本项钉的是
+    # 「`k(f)` 渲染成裸符号、不许写成 `n(k(f))`」，与容器长度无关。
+    # HashMap 自 2026-11-11 起有尺寸上界（`map_put` 登记成 `log2(n(h))` 后
+    # 必须能推出 `n(h)`），空 HashMap 的 `for_each` 轮数是 0 ⇒ κ 里
+    # **根本不该出现 `k(visit)`**（0 次迭代是更紧的真上界，不是漏算）。
+    # 用形参 `xs` 的 `n(xs)` 当轮数，才继续测到"裸符号"这件事。
+    CH_COST = """u64 visit(u64 v) { return v; }
+u64 f(const vector<u64>& xs) {
+    for_each(xs, visit);
     return 0;
 }
 """

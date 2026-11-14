@@ -43,7 +43,7 @@ def run(src, fn="f"):
 
 print("[1] 未实现的容器名 → 报错（不是静默 0）")
 for _ty in ("deque", "vectr", "list"):
-    src = (f"func f() -> u64 {{\n    {_ty}<u64> q = {_ty}<u64>::new();\n"
+    src = (f"u64 f() {{\n    {_ty}<u64> q = {_ty}<u64>::new();\n"
            f"    return q.length();\n}}\n")
     try:
         v = run(src)
@@ -52,7 +52,7 @@ for _ty in ("deque", "vectr", "list"):
         check(f"{_ty} 报错", "未知容器" in str(ex), str(ex)[:60])
 
 print("[2] 已实现的容器仍然可用")
-_v = run("func f() -> u64 {\n    vector<u64> v = vector<u64>::make();\n"
+_v = run("u64 f() {\n    vector<u64> v = vector<u64>::make();\n"
          "    v.push(1);\n    return v.length();\n}\n")
 check("vector 仍可用", _v == 1, _v)
 

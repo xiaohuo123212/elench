@@ -3,7 +3,7 @@
 // 考的四样本事：
 //   1. 二维 DP 表用「扁平序列 + 宽度」表示（同 matmul），但这里要**原地写**：
 //      `dp[(i + 1) * width + (j + 1)] = v`
-//   2. 两层嵌套循环——上界分别是 `a.length()` 与 `b.length()`，
+//   2. 两层嵌套循环——上界分别是 `a.size()` 与 `b.size()`，
 //      都是容器参数的尺寸，T13 来源①认得出
 //   3. `array<u64, LCS_CAP>` 的容量是**真边界**：表格装不下就 Err(Capacity)，
 //      不许静默丢格子
@@ -24,10 +24,10 @@ spec lcs(
     effects { alloc };
     requires LCS_CAP > 0;
 
-    // 两层循环各跑一次长度 → 格数 A×B，真实界是 **O(a.length() * b.length())**。
+    // 两层循环各跑一次长度 → 格数 A×B，真实界是 **O(a.size() * b.size())**。
     // v0.69+：target 支持两个尺寸相乘（`_target_cost` 的 `*`），两边尺寸量一致，能直接比。
     // 容量上界不靠 target——由 LCS_CAP 在实现里显式挡住。
-    target { time: { max: O(a.length() * b.length()) },
-             allocation: { max: O(a.length()) }, };
+    target { time: { max: O(a.size() * b.size()) },
+             allocation: { max: O(a.size()) }, };
 }
 // #endregion spec

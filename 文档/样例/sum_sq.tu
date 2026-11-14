@@ -14,5 +14,5 @@ spec sum_sq(const vector<u64>& xs) -> u64 {
         seed = 1;
     };
 
-    target { time: { max: O(xs.length()) }, allocation: { max: 0 }, };
+    target { time: { max: O(xs.size()) }, allocation: { max: 0 }, };
 }

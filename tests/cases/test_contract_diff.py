@@ -64,7 +64,7 @@ def main() -> int:
         src = open(tu_p, encoding="utf-8").read()
         # 一口气做四种"κ 不动但契约变"的改动
         src = src.replace("effects { };", "effects { io };")
-        src = src.replace("O(xs.length())", "O(xs.length() * xs.length())")
+        src = src.replace("O(xs.size())", "O(xs.size() * xs.size())")
         src = src.replace("range(1, 4096, *2)", "range(1, 1024, *2)")
         open(tu_p, "w", encoding="utf-8").write(src)
 

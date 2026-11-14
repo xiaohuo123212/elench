@@ -3,8 +3,10 @@
 
 ## 起因（真实事故，两次）
 
-1. `文档/语法清单.md` 的遍历那行写的是 `for (u64 x : xs)`——**解析器只认 `for (x in xs)`**，
-   这行从来编不过，而它是对外文档里被抄得最多的一行。
+1. `文档/语法清单.md` 的遍历那行曾写 `for (u64 x : xs)`，而当时**解析器只认
+   `for (x in xs)`**，这行从来编不过。2026-11-10 晚起 C++ range-for 已接受，
+   而 `for (… in …)` 三种写法在当晚**整个删除**（与 C++ range-for 重合）。
+   所以现在文档里只允许 `:` 形状；`in` 形状必须报 `E-For-InRemoved`。
 2. `文档/项目介绍.md` 的示例里有 `val idx = …`——`val` 是**退役关键字**（`E-Decl-OldKeyword`）。
 
 两条都不是"写错了某个字"，是**文档与实现之间没有任何机器对账**。
@@ -57,6 +59,8 @@ BLOCK = re.compile(r"```elench[^\n]*\n(.*?)```", re.S)
 SPAN = re.compile(r"`([^`\n]+)`")
 TEMPLATE = re.compile(r"^\s*//\s*doc-template:\s*(\S.*)$", re.M)
 STMT_START = re.compile(r"^(for|while|if)\s*\(")
+#: 内建表的一行：`| \`名字\` | 参数 | \`返回\` | 成本 | 备注 |`
+ROW = re.compile(r"^\| `([a-z0-9_]+)` \| [^|]+ \| `[^|]+` \| [^|]+ \| (.*) \|$")
 
 
 def docs():
@@ -108,9 +112,19 @@ def test_inline_statements():
             t = m.group(1).strip()
             if not STMT_START.match(t):
                 continue
+            # **只测完整语句**（以 `{…}` 块或 `;` 结尾）。
+            #
+            # 判据不能只"以 for/while/if 开头"：`文档/C++惯用法对照.md` 里
+            # 有一批**故意的反例**——`while (n --> 0)`、`while (cin >> x)`、
+            # `for (i, x in xs)`（没有 `{…}` 的裸头）——它们本来就该编不过，
+            # 那是文档在说"C++ 这套写法这里没有"。以前这条测试把它们当
+            # "必须能编译"，于是整道门对**文档说真话**的部分报红。
+            # 裸头不是一个语句，没法"包进函数体"验证，跳过它才是对的。
+            if not (t.endswith("}") or t.endswith(";")):
+                continue
             total += 1
             body = t.replace("…", "").replace("...", "")
-            src = ("func _t(const vector<u64>& xs) -> u64 {\n    "
+            src = ("u64 _t(const vector<u64>& xs) {\n    "
                    + body + "\n    return 0;\n}\n")
             errs = errs_of(src)
             if errs:
@@ -119,23 +133,89 @@ def test_inline_statements():
     check(total >= 2, "真的检查到了东西（不是空跑）", str(total))
 
 
+def test_builtins_doc_notes():
+    """内建表的备注栏必须来自 `stdlib.py` 的 `empty=`，不能是空壳。
+
+    2026-11-09 的回归：生成器把备注硬编码成 `""`——`text_find` 的「未找到 → -1」、
+    `map_get` 的「未命中 → Option::None」等**几十条**语义在文档里蒸发，
+    而 `gen_builtins_doc.py --check` 照样绿（它比的是"文档 == 生成结果"，两边一起错）。
+    所以这里**直接对登记表**：每条非 `—` 的 `empty=` 都必须原样出现在它那一行。
+    """
+    print("[3] 内建函数表：每条 `empty=` 都进了备注栏")
+    import stdlib  # noqa: E402  （sys.path 已在文件顶部指向 src）
+
+    path = os.path.join(ROOT, "文档", "内建函数.md")
+    rows = {}
+    for line in open(path, encoding="utf-8").read().split("\n"):
+        m = ROW.match(line)
+        if m:
+            rows[m.group(1)] = m.group(2)
+    missing = [n for n in sorted(stdlib.FNS) if n not in rows]
+    check(not missing, f"`stdlib.FNS` 的 {len(stdlib.FNS)} 个名字都在表里",
+          ", ".join(missing[:6]))
+
+    bad, want = [], 0
+    for name in sorted(stdlib.FNS):
+        e = (stdlib.FNS[name].get("empty") or "").strip()
+        if e in ("", "—"):
+            continue
+        want += 1
+        want_note = e.replace("->", "→")
+        got = rows.get(name, "")
+        if got != want_note:
+            bad.append(f"`{name}` 备注是 `{got[:24]}`，应为 `{want_note[:24]}`")
+    check(not bad, f"{want} 条 `empty=` 全部进了备注栏", "; ".join(bad[:4]))
+    check(want >= 50, "真的检查到了东西（不是空跑）", str(want))
+
+
 def test_regressions_are_named():
-    print("[3] 把踩过的两个坑写成断言（这两个写法**必须**编译失败）")
+    print("[4] 把踩过的坑写成断言（这些写法**必须**编译失败 / 成功）")
     for label, src in (
-        ("`for (u64 x : xs)` 不是合法遍历", "func f(const vector<u64>& xs) -> u64 {\n"
-                                            "    for (u64 x : xs) { }\n    return 0;\n}\n"),
-        ("`val` 是退役关键字", "func f() -> u64 {\n    val x = 1;\n    return x;\n}\n"),
+        ("`for (u64 x in xs)` 不是合法遍历（`in` 已整个删除）",
+         "u64 f(const vector<u64>& xs) {\n"
+         "    for (u64 x in xs) { }\n    return 0;\n}\n"),
+        ("`for (x in xs)` 已删除（与 C++ range-for 重合）",
+         "u64 f(const vector<u64>& xs) {\n"
+         "    for (x in xs) { }\n    return 0;\n}\n"),
+        ("`for (i, x in xs)` 已删除（带下标的旧写法）",
+         "u64 f(const vector<u64>& xs) {\n"
+         "    for (i, x in xs) { }\n    return 0;\n}\n"),
+        ("`for (i in 0..n)` 已删除（`..` 区间一并删）",
+         "u64 f(u64 n) {\n"
+         "    for (i in 0..n) { }\n    return 0;\n}\n"),
+        ("`val` 是退役关键字", "u64 f() {\n    val x = 1;\n    return x;\n}\n"),
     ):
         errs = errs_of(src)
         check(bool(errs), f"{label} → 必须报 E-", str([d.code for d in errs]))
 
-    ok_src = "func f(const vector<u64>& xs) -> u64 {\n    for (x in xs) { }\n    return 0;\n}\n"
-    check(not errs_of(ok_src), "`for (x in xs)` 是合法写法（对照）")
+    # 三种 `in` 形状必须报到**同一条**码，且消息教替代写法。
+    for label, src in (
+        ("`for (x in xs)`", "u64 f(const vector<u64>& xs) {\n"
+         "    for (x in xs) { }\n    return 0;\n}\n"),
+        ("`for (i, x in xs)`", "u64 f(const vector<u64>& xs) {\n"
+         "    for (i, x in xs) { }\n    return 0;\n}\n"),
+        ("`for (i in 0..n)`", "u64 f(u64 n) {\n"
+         "    for (i in 0..n) { }\n    return 0;\n}\n"),
+    ):
+        errs = errs_of(src)
+        msg = "; ".join(d.message for d in errs)
+        check("E-For-InRemoved" in [d.code for d in errs],
+              f"{label} 报 E-For-InRemoved", [d.code for d in errs])
+        check("for (auto& x : xs)" in msg and "for (u64 i = 0; i < n; i = i + 1)" in msg,
+              f"{label} 的消息教替代写法", msg[:200])
+
+    cpp_src = ("u64 f(const vector<u64>& xs) {\n"
+               "    for (u64 x : xs) { }\n    return 0;\n}\n")
+    check(not errs_of(cpp_src), "`for (u64 x : xs)` 是合法写法（C++ range-for）")
+    ref_src = ("u64 f(const vector<u64>& xs) {\n"
+               "    for (const auto& x : xs) { }\n    return 0;\n}\n")
+    check(not errs_of(ref_src), "`for (const auto& x : xs)` 是合法写法（引用迭代）")
 
 
 def main() -> int:
     test_blocks()
     test_inline_statements()
+    test_builtins_doc_notes()
     test_regressions_are_named()
     print()
     if _failed:

@@ -48,7 +48,7 @@ spec g(const vector<u64>& xs) -> u64 {
 }
 """
 
-SQ = """func sq(u64 x) -> u64 {
+SQ = """u64 sq(u64 x) {
     u64 s = 0;
     u64 i = 0;
     while (i < x) {
@@ -62,22 +62,22 @@ SQ = """func sq(u64 x) -> u64 {
     return s;
 }
 
-func apply(const vector<u64>& xs, func(u64) -> u64 f) -> u64 {
+u64 apply(const vector<u64>& xs, func(u64) -> u64 f) {
     return f(xs.at(0));
 }
 
-func g(const vector<u64>& xs) -> u64 {
+u64 g(const vector<u64>& xs) {
     return apply(xs, sq);
 }
 """
 
-ONE = """func one(u64 x) -> u64 { return x + 1; }
+ONE = """u64 one(u64 x) { return x + 1; }
 
-func apply(const vector<u64>& xs, func(u64) -> u64 f) -> u64 {
+u64 apply(const vector<u64>& xs, func(u64) -> u64 f) {
     return f(xs.at(0));
 }
 
-func g(const vector<u64>& xs) -> u64 {
+u64 g(const vector<u64>& xs) {
     return apply(xs, one);
 }
 """

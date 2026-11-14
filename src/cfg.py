@@ -49,8 +49,8 @@ class CfgNode:
 
 #: 会**改容器内容**的方法。漏一个，借用检查就在那个方法上失效
 #: （2026-11-06 补：`fill` / `extend` / `enqueue` / `dequeue` 都曾漏掉）。
-MUT_METHODS = {"push", "pop", "clear", "set", "sort", "sort_by",
-               "reverse", "resize", "insert", "remove",
+MUT_METHODS = {"push", "push_back", "pop", "clear", "set", "sort", "sort_by",
+               "reverse", "resize", "insert", "remove", "erase",
                "fill", "extend", "enqueue", "dequeue"}
 
 #: 会改**第一个实参**的内建函数（不是方法，所以方法扫描抓不到）。

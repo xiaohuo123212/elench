@@ -44,7 +44,7 @@ def diags(ch_src, tu_src="spec caller() -> u64 { effects { }; target { time: { m
 
 
 print("[1] 直接借容器元素，再改容器 → 报冲突")
-SRC1 = """func caller() -> u64 {
+SRC1 = """u64 caller() {
     vector<u64> xs = [1,2,3];
     const u64& r = xs.at(0);
     xs.push(4);
@@ -59,10 +59,10 @@ except Exception as e:                                  # noqa: BLE001
     print(f"  (调用方式不同：{type(e).__name__}: {e})")
 
 print("[2] 返回引用的函数只有一个引用参数 → 归属唯一（BR-4 不拦）")
-SRC2 = """func head_ref(vector<u64>& xs) -> u64& {
+SRC2 = """u64& head_ref(vector<u64>& xs) {
     return xs.at(0);
 }
-func caller() -> u64 {
+u64 caller() {
     vector<u64> v = [1,2,3];
     const u64& r = head_ref(v);
     v.push(9);
@@ -77,10 +77,10 @@ except Exception as e:                                  # noqa: BLE001
     print(f"  (调用方式不同：{type(e).__name__}: {e})")
 
 print("[3] 两个引用参数且返回引用 → BR-4 直接拒绝")
-SRC3 = """func pick_ref(vector<u64>& a, vector<u64>& b) -> u64& {
+SRC3 = """u64& pick_ref(vector<u64>& a, vector<u64>& b) {
     return b.at(0);
 }
-func caller() -> u64 {
+u64 caller() {
     vector<u64> x = [1];
     vector<u64> y = [2];
     const u64& r = pick_ref(x, y);
@@ -95,7 +95,7 @@ except Exception as e:                                  # noqa: BLE001
     print(f"  (调用方式不同：{type(e).__name__}: {e})")
 
 print("[4] 结构体字段上的方法调用也算变异（`s.items.push` → `s` 被改）")
-SRC4 = """func taker(Box& s) -> u64 {
+SRC4 = """u64 taker(Box& s) {
     const u64& r = s.items.at(0);
     s.items.push(9);
     return r;
@@ -116,7 +116,7 @@ except Exception as e:                                  # noqa: BLE001
 print("[5] 所有会改容器的方法都必须被算作变异（漏一个就是漏报）")
 for _m, _a in (("fill", "0"), ("extend", "xs"), ("resize", "5"), ("clear", ""),
                ("push", "9"), ("pop", ""), ("reverse", "")):
-    _src = f"""func caller() -> u64 {{
+    _src = f"""u64 caller() {{
     vector<u64> xs = [1,2,3];
     const u64& r = xs.at(0);
     xs.{_m}({_a});
@@ -127,7 +127,7 @@ for _m, _a in (("fill", "0"), ("extend", "xs"), ("resize", "5"), ("clear", ""),
     check(f"xs.{_m}() 报冲突", any("Borrow-Conflict" in c for c in _codes), _codes)
 
 print("[6] 内建函数改第一个实参也算变异（swap(xs, i, j)）")
-_codes = [d[0] for d in diags("""func caller() -> u64 {
+_codes = [d[0] for d in diags("""u64 caller() {
     vector<u64> xs = [1,2,3];
     const u64& r = xs.at(0);
     swap(xs, 0, 1);
@@ -137,7 +137,7 @@ _codes = [d[0] for d in diags("""func caller() -> u64 {
 check("swap(xs, 0, 1) 报冲突", any("Borrow-Conflict" in c for c in _codes), _codes)
 
 print("[7] 可变引用（`u64& q`）也必须是借用——以前只扫 const-decl")
-_codes = [d[0] for d in diags("""func caller() -> u64 {
+_codes = [d[0] for d in diags("""u64 caller() {
     vector<u64> xs = [1,2,3];
     u64& q = xs.at(0);
     xs.push(9);
@@ -147,7 +147,7 @@ _codes = [d[0] for d in diags("""func caller() -> u64 {
 check("u64& q 报冲突", any("Borrow-Conflict" in c for c in _codes), _codes)
 
 print("[8] 拷贝不是借用（`u64 v = xs.at(0)` 不该报）")
-_codes = [d[0] for d in diags("""func caller() -> u64 {
+_codes = [d[0] for d in diags("""u64 caller() {
     vector<u64> xs = [1,2,3];
     u64 v = xs.at(0);
     xs.push(9);
@@ -158,8 +158,8 @@ check("拷贝不报", not any("Borrow" in c for c in _codes), _codes)
 
 print("[9] 传可变引用算修改；传只读引用不算（`const` 记在 param 上）")
 _SRC9A = (
-    "func take(vector<u64>& v) -> u64 { return 0; }\n"
-    "func caller() -> u64 {\n"
+    "u64 take(vector<u64>& v) { return 0; }\n"
+    "u64 caller() {\n"
     "    vector<u64> xs = [1,2,3];\n"
     "    const u64& r = xs.at(0);\n"
     "    take(xs);\n"
@@ -169,8 +169,8 @@ _codes = [d[0] for d in diags(_SRC9A)]
 check("take(xs) 报冲突", any("Borrow-Conflict" in c for c in _codes), _codes)
 
 _SRC9B = (
-    "func look(const vector<u64>& v) -> u64 { return 0; }\n"
-    "func caller() -> u64 {\n"
+    "u64 look(const vector<u64>& v) { return 0; }\n"
+    "u64 caller() {\n"
     "    vector<u64> xs = [1,2,3];\n"
     "    const u64& r = xs.at(0);\n"
     "    look(xs);\n"

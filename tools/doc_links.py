@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Elench contributors
 """doc_links.py —— 公开文档**死链**检查（CI 门）
@@ -28,6 +28,13 @@ import io
 import os
 import re
 import sys
+
+#: 中文 Windows 控制台默认 GBK，`✓` 会让门禁**在打印结果时崩掉**。
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:                                       # noqa: BLE001
+    pass
 
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SKIP_DIRS = ("设计", "实验", ".git")

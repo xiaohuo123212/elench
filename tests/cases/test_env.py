@@ -57,13 +57,13 @@ TU = "spec f(const vector<u64>& xs) -> u64 { effects { env, io }; }\n"
 def main() -> int:
     print("=== args ===")
     stdlib.set_prog_args(["foo", "bar"])
-    got = run(TU, """func f(const vector<u64>& xs) -> u64 {
+    got = run(TU, """u64 f(const vector<u64>& xs) {
     Args a = args();
     return args_len(a);
 }
 """)
     check("args_len 读到 2", got == 2, str(got))
-    first = run(TU, """func f(const vector<u64>& xs) -> u64 {
+    first = run(TU, """u64 f(const vector<u64>& xs) {
     Args a = args();
     return args_get(a, 0).length();
 }
@@ -73,7 +73,7 @@ def main() -> int:
 
     print("=== env_get：找不到是 None，不是空串 ===")
     os.environ["ELENCH_T"] = "hello"
-    hit = run(TU, """func f(const vector<u64>& xs) -> u64 {
+    hit = run(TU, """u64 f(const vector<u64>& xs) {
     match (env_get("ELENCH_T")) {
         optional::Some(v) => { return v.length(); }
         optional::None => { return 0; }
@@ -82,7 +82,7 @@ def main() -> int:
 }
 """)
     check("命中 → 长度 5", hit == 5, str(hit))
-    miss = run(TU, """func f(const vector<u64>& xs) -> u64 {
+    miss = run(TU, """u64 f(const vector<u64>& xs) {
     match (env_get("ELENCH_NOPE_XYZ")) {
         optional::Some(v) => { return 1; }
         optional::None => { return 2; }
@@ -93,7 +93,7 @@ def main() -> int:
     check("未命中 → optional::None 分支（不是空串命中）", miss == 2, str(miss))
 
     print("=== cwd ===")
-    n = run(TU, """func f(const vector<u64>& xs) -> u64 {
+    n = run(TU, """u64 f(const vector<u64>& xs) {
     return cwd().length();
 }
 """)
@@ -101,7 +101,7 @@ def main() -> int:
 
     print("=== exit：控制流 ===")
     try:
-        run(TU, """func f(const vector<u64>& xs) -> u64 {
+        run(TU, """u64 f(const vector<u64>& xs) {
     exit(7);
     return 1;
 }

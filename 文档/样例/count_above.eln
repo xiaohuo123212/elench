@@ -1,6 +1,6 @@
 // count_above.eln —— 数一数有多少个元素大于阈值（单循环 + 分支）
-pub func count_above(const vector<u64>& xs) -> u64 {
-    u64 n = xs.length();
+pub u64 count_above(const vector<u64>& xs) {
+    u64 n = xs.size();
     u64 c = 0;
     u64 i = 0;
     while (i < n) {

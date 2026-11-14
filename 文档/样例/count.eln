@@ -15,9 +15,9 @@
 // **真实交叉点**，不是编出来的。
 
 // #region fn
-pub func count(
-               const vector<u8>& text) -> u64! {
-    const u64 len = text.length();
+pub u64! count(
+               const vector<u8>& text) {
+    const u64 len = text.size();
     if (len == 0) {
         return Err(CountError::Empty);
     }
@@ -30,7 +30,7 @@ pub func count(
         BUCKET_COUNT> buckets = array<u64,
         BUCKET_COUNT>::filled(0);
 
-        const u64 n = text.length();
+        const u64 n = text.size();
         u64 i = 0;
         while (i < n) {
             const u64 b = text.at(i);
@@ -47,7 +47,7 @@ pub func count(
         return best;
     }
     freq_pairwise {
-        const u64 n = text.length();
+        const u64 n = text.size();
         u64 best = 0;
         u64 i = 0;
         while (i < n) {

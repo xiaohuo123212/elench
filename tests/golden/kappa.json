@@ -2,45 +2,46 @@
   "note": "κ 的 golden 基准。改 κ 后必须 --freeze 并在提交信息里写理由。",
   "programs": {
     "calculator": {
-      "apply_top": "48",
-      "digit_value": "6",
-      "evaluate": "1 + 1 + 1 + 9 + n(text)×18 + 18 + 10 + 2 + 1 + 27523803",
+      "apply_top": "47",
+      "digit_value": "7",
+      "evaluate": "1 + 1 + 1 + 9 + n(text)×1447 + 1447 + 10 + 4098 + 1 + 27257433",
       "is_digit": "8",
-      "pop_until_open": "n(operators)×86 + 86 + 2",
+      "more_digits": "21",
+      "pop_until_open": "n(operators)×85 + 85 + 2",
       "precedence": "5",
-      "read_number": "11 + n(text)×57 + 57 + 8 + 4",
-      "reduce": "11 + n(tokens)×6717 + 6717 + 4225 + 10 + 5",
+      "read_number": "1383",
+      "reduce": "11 + n(tokens)×6652 + 6652 + 4160 + 10 + 5",
       "should_reduce": "41",
-      "tokenize": "9 + n(text)×18 + 18 + 10 + 2"
+      "tokenize": "9 + n(text)×1447 + 1447 + 10 + 4098"
     },
     "count": {
       "count": "12 + 1 + 1 + max(9 + n(text)×23 + 23 + 2 + 2 + 4626 + 2, 9 + n(text)×(4 + 9 + n(text)×21 + 21 + 6 + 5) + 4 + 9 + n(text)×21 + 21 + 6 + 5 + 2)"
     },
     "lcs": {
-      "lcs": "27 + n(a)×(7 + 2 + n(b)×63 + 63 + 5) + 7 + 2 + n(b)×63 + 63 + 5 + 14"
+      "lcs": "28 + n(a)×(7 + 2 + n(b)×67 + 67 + 5) + 7 + 2 + n(b)×67 + 67 + 5 + 14"
     },
     "matmul": {
-      "matmul": "29 + n(dim)×(4 + 2 + n(dim)×(4 + 4 + n(dim)×30 + 30 + 5 + 5) + 4 + 4 + n(dim)×30 + 30 + 5 + 5 + 5) + 4 + 2 + n(dim)×(4 + 4 + n(dim)×30 + 30 + 5 + 5) + 4 + 4 + n(dim)×30 + 30 + 5 + 5 + 5 + 2"
+      "matmul": "29 + dim×(4 + 2 + dim×(4 + 4 + dim×30 + 30 + 5 + 5) + 4 + 4 + dim×30 + 30 + 5 + 5 + 5) + 4 + 2 + dim×(4 + 4 + dim×30 + 30 + 5 + 5) + 4 + 4 + dim×30 + 30 + 5 + 5 + 5 + 2"
     },
     "merge": {
-      "earlier": "6",
-      "merge": "14 + 1 + 2 + n(xs)×log2(n(xs))×6 + 1 + 6 + 6 + 2 + n(xs)×36 + 36 + 5 + 2"
+      "earlier": "10",
+      "merge": "14 + 1 + 2 + n(xs)×log2(n(xs))×10 + 1 + 6 + 6 + 2 + n(xs)×36 + 36 + 5 + 2"
     },
     "paren": {
-      "paren": "9 + n(text)×33 + 33 + 10 + 2"
+      "paren": "9 + n(text)×37 + 37 + 10 + 2"
     },
     "search": {
-      "binary_search": "12 + 1 + 1 + 1 + max(2 + n(xs)×18 + 18 + 3, 4 + log2(n(xs))×37 + 37 + 3) + 1 + max(2 + n(xs)×18 + 18 + 3, 4 + log2(n(xs))×37 + 37 + 3) + 2",
+      "binary_search": "12 + 1 + 1 + 1 + 1 + max(2 + n(xs)×18 + 18 + 3, 4 + (log2(n(xs)) + 1)×38 + 38 + 3) + 1 + max(2 + n(xs)×18 + 18 + 3, 4 + (log2(n(xs)) + 1)×38 + 38 + 3) + 2",
       "in_range": "4"
     },
     "stats": {
-      "summarize": "12 + 1 + 1 + 1 + max(9 + n(xs)×17 + 17 + 2, 9 + n(xs)×21 + 21 + 2) + 1 + max(9 + n(xs)×17 + 17 + 2, 9 + n(xs)×21 + 21 + 2) + 5 + 2 + 5 + 5 + 2 + n(xs)×42 + 42 + 5 + 2"
+      "summarize": "12 + 1 + 1 + 1 + 1 + max(9 + n(xs)×17 + 17 + 2, 9 + n(xs)×21 + 21 + 2) + 1 + max(9 + n(xs)×17 + 17 + 2, 9 + n(xs)×21 + 21 + 2) + 6 + 2 + 5 + 5 + 2 + n(xs)×42 + 42 + 6 + 2"
     },
     "sum": {
-      "average": "12 + 1 + 1 + 1 + max(4 + n(scores)×17 + 17 + 2, 2 + n(scores)×7 + 2) + 1 + max(4 + n(scores)×17 + 17 + 2, 2 + n(scores)×7 + 2) + 4"
+      "average": "12 + 1 + 1 + 1 + 1 + max(4 + n(scores)×17 + 17 + 2, 2 + n(scores)×7 + 2) + 1 + max(4 + n(scores)×17 + 17 + 2, 2 + n(scores)×7 + 2) + 4"
     },
     "topk": {
-      "topk": "26 + 1 + 1 + max(21 + n(xs)×393 + 393 + 5, 27 + n(k)×(4 + 9 + n(xs)×38 + 38 + 3 + 3 + n(xs)×21 + 21 + 3 + 22) + 4 + 9 + n(xs)×38 + 38 + 3 + 3 + n(xs)×21 + 21 + 3 + 22 + 2)"
+      "topk": "26 + 1 + 1 + max(21 + n(xs)×624 + 624 + 5, 27 + k×(4 + 9 + n(xs)×43 + 43 + 3 + 3 + n(xs)×21 + 21 + 3 + 22) + 4 + 9 + n(xs)×43 + 43 + 3 + 3 + n(xs)×21 + 21 + 3 + 22 + 2)"
     }
   }
 }

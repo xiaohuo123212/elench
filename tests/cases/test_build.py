@@ -108,10 +108,105 @@ def test_usage():
     check("用法" in txt, "打印用法", txt[:60])
 
 
+def test_gate_rules():
+    """**build 是门禁最后一环**（2026-11-09）：三个洞的回归。
+
+    ① `check --strict` 报 error（E-While-NoBound）时，`build --strict`
+       也必须非零退出——以前 build 不认 `--strict`，红灯变绿灯；
+    ② κ = ⊤ 默认**放行但警告**（不许静默），`--deny-unknown` 才拒绝；
+    ③ `✓ 构建通过` 与 `✗ 拒绝构建` **不许同时出现**（按最终结论只打一条）。
+    """
+    import shutil
+    tmp = tempfile.mkdtemp(prefix="build_gate_")
+
+    def write(name, tu, eln):
+        open(os.path.join(tmp, name + ".tu"), "w", encoding="utf-8",
+             newline="\n").write(tu)
+        open(os.path.join(tmp, name + ".eln"), "w", encoding="utf-8",
+             newline="\n").write(eln)
+
+    # ① check 里是 error（严格模式）/ warning（默认）的同一个循环
+    write("unbound",
+          'spec probe(const vector<u64>& xs) -> u64 {\n'
+          '    effects {};\n'
+          '    target { time: { max: O(xs.length()) }, allocation: { max: 0 }, };\n'
+          '}\n',
+          'u64 probe(const vector<u64>& xs) {\n'
+          '    u64 i = 0;\n'
+          '    while (i < xs.at(0)) { i = i + 1; }\n'
+          '    return i;\n'
+          '}\n')
+    tp = os.path.join(tmp, "unbound.tu")
+    ep = os.path.join(tmp, "unbound.eln")
+    rc_c, _txt_c = run("check", tp, ep, "--strict")
+    check(rc_c == 1, "check --strict 报 error", f"rc={rc_c}")
+    rc_b, txt_b = run("build", tp, ep, "--strict", "--allow-missing-table")
+    check(rc_b == 1, "build --strict 也必须失败（以前 exit 0）", f"rc={rc_b}")
+    check("✓ 构建通过" not in txt_b, "失败时不许打「✓ 构建通过」", txt_b[-160:])
+
+    # ② κ = ⊤：树递归（cost 侧的既有判定）
+    write("tree",
+          'spec main() -> u64 {\n'
+          '    effects {};\n'
+          '    target { time: { max: O(1) }, allocation: { max: 0 }, };\n'
+          '}\n'
+          'spec bt(u64 k) -> u64 {\n'
+          '    effects {};\n'
+          '    recursion depth <= 64;\n'
+          '    target { time: { max: O(1) }, allocation: { max: 0 }, };\n'
+          '}\n',
+          'u64 main() { return bt(10); }\n'
+          'u64 bt(u64 k) {\n'
+          '    if (k == 0) { return 1; }\n'
+          '    u64 a = bt(k - 1);\n'
+          '    u64 b = bt(k - 1);\n'
+          '    return a + b;\n'
+          '}\n')
+    tp = os.path.join(tmp, "tree.tu")
+    ep = os.path.join(tmp, "tree.eln")
+    rc, txt = run("build", tp, ep, "--allow-missing-table")
+    check(rc == 0, "κ=⊤ 默认放行（渐进采用）", f"rc={rc}")
+    check("无法判定" in txt and "默认放行" in txt,
+          "κ=⊤ 默认**必须警告**（不许静默）", txt[-240:])
+
+    rc, txt = run("build", tp, ep, "--deny-unknown", "--allow-missing-table")
+    check(rc == 1, "--deny-unknown 拒绝 κ=⊤", f"rc={rc}")
+    check("✗ 拒绝构建" in txt, "打出拒绝", txt[-240:])
+    check("✓ 构建通过" not in txt, "拒绝时不动「✓ 构建通过」", txt[-240:])
+
+    rc, txt = run("build", tp, ep, "--deny-debt", "--allow-missing-table")
+    check(rc == 1, "--deny-debt 也拒绝 unknown（全函数门禁）", f"rc={rc}")
+    check("✓ 构建通过" not in txt, "--deny-debt 不再先 ✓ 后 ✗", txt[-240:])
+
+    # ③ debt 与 unknown 是两件事：--deny-unknown 不拒债务
+    write("debt",
+          'spec f(const vector<u64>& xs) -> u64 {\n'
+          '    effects {};\n'
+          '    target { time: { max: O(1) }, allocation: { max: 0 }, };\n'
+          '}\n',
+          'u64 f(const vector<u64>& xs) {\n'
+          '    u64 i = 0;\n'
+          '    u64 s = 0;\n'
+          '    while (i < xs.length()) { s = s + 1; i = i + 1; }\n'
+          '    return s;\n'
+          '}\n')
+    tp = os.path.join(tmp, "debt.tu")
+    ep = os.path.join(tmp, "debt.eln")
+    rc, _txt = run("build", tp, ep, "--deny-unknown", "--allow-missing-table")
+    check(rc == 0, "--deny-unknown 不拒 debt", f"rc={rc}")
+    rc, txt = run("build", tp, ep, "--deny-debt", "--allow-missing-table")
+    check(rc == 1, "--deny-debt 拒 debt", f"rc={rc}")
+    check("✗ 拒绝构建" in txt and "✓ 构建通过" not in txt,
+          "debt 拒绝时只打一条结论", txt[-240:])
+
+    shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main():
     test_no_pending()
     test_with_pending()
     test_usage()
+    test_gate_rules()
 
     print("[4] E31：有 ?! 但没有分档表 → build 必须失败，并给出修法")
     import shutil

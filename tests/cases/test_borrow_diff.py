@@ -70,7 +70,7 @@ def codes(ds):
 
 def main() -> int:
     print("[1] 回边漏报：循环里每轮先读后改——旧版看不见，新版必须看见")
-    src = """func f(vector<u64>& xs) -> u64! {
+    src = """u64! f(vector<u64>& xs) {
     const u64& r = xs.at(0);
     u64 s = 0;
     u64 i = 0;
@@ -101,7 +101,7 @@ def main() -> int:
     check(not bad, "十个样例两版都零诊断", str(bad))
 
     print("[3] 互斥分支：then 里改、else 里用——**不该报**（分支敏感的正确性）")
-    src = """func f(vector<u64>& xs) -> u64! {
+    src = """u64! f(vector<u64>& xs) {
     const u64& r = xs.at(0);
     u64 s = 0;
     if (n > 0) {
@@ -118,7 +118,7 @@ def main() -> int:
           "旧版会误报（按时间线把 else 的读排在 then 的改之后）", str(codes(old)))
 
     print("[4] 放行即可跑：新分析不报的程序，解释器必须能跑通")
-    src = """func f(const vector<u64>& xs) -> u64! {
+    src = """u64! f(const vector<u64>& xs) {
     const u64& r = xs.at(0);
     const u64 a = r;
     return a + 1;

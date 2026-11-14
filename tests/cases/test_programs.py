@@ -184,7 +184,7 @@ def test_paren():
 
     # 定长数组本身的边界：push 超过 N 必须抛（不是静默扩容）
     from interp import Interp
-    src = """func f(u64 k) -> u64! {
+    src = """u64! f(u64 k) {
     array<u64, 3> s = array<u64, 3>::make();
     u64 i = 0;
     while (i < k) {

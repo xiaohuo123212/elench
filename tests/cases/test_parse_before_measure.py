@@ -47,7 +47,7 @@ benchmodel {
 }
 """
 
-BAD_ELN = """func total(const vector<Point>& pts) -> u64 {
+BAD_ELN = """u64 total(const vector<Point>& pts) {
     return pts.length();
 }
 """

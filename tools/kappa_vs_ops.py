@@ -45,6 +45,28 @@
   两个工具的口径不许分叉；
 - **超预算**：单次调用超过 `--max-ops`（默认 300 万次求值步）就**中止并标「未测」**，
   既不算成立也不算破界——**不猜**。
+
+## 含符号指数的 κ（`n(xs)^(n(xs))`）怎么测
+
+判据不变（`ops(n) ≤ κ(n)`），变的是**κ(n) 能不能算得出来**。`cost_check.evaluate`
+对幂做**饱和**求值（`cost_domain.symbolic.MAG_CAP = 1e18`）：
+
+| κ(n) 的值 | 本工具的状态 | 判定 |
+|---|---|---|
+| 有限、且 < `MAG_CAP` | `ok` | 比 `ops ≤ κ` |
+| `+∞` / `NaN`（⊤、`k(g)`、`ext(...)`） | `kappa_inf` | 不作判定（打印 inf） |
+| ≥ `MAG_CAP`（幂饱和） | `kappa_saturated` | **不作判定**（单独一栏） |
+
+**为什么饱和时不许判**：`1e18` 是「算不出来」的**标记值**，不是 κ 的真值。
+拿它跟 ops（最多 300 万）比永远成立 —— 每个 `n^n` 函数都会显示「✅ 成立」，
+这正是本项目最忌讳的**假绿**。**饱和 ≠ 破界，也 ≠ 成立**：这一档没有结论。
+
+**小 n 仍然能测**：`n^n` 在 n=6 是 46656（远低于饱和），这一档的 `ops ≤ κ`
+是真实判定。所以要测这类函数，把规模轴调小：
+
+    python tools/kappa_vs_ops.py --sizes 4,6,8 --function <程序>
+
+饱和档要等 `MAG_CAP`/求值口径变化才可能有结论——**工具侧不猜**。
 """
 import argparse
 import io
@@ -59,6 +81,15 @@ ROOT = os.path.abspath(os.path.join(HERE, ".."))
 SRC = os.path.join(ROOT, "src")
 sys.path.insert(0, SRC)
 
+#: 中文 Windows 控制台默认 GBK：`✅` / `🔴` / `κ` 会在**打印结果时**崩掉
+#: （`UnicodeEncodeError: 'gbk' codec can't encode character '\u2705'`），
+#: 一行结论都看不到。`tools/tightness_compare.py` / `tools/gates.py` 已有同一段。
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:                                       # noqa: BLE001
+    pass
+
 #: 默认样例目录（10 个程序，10 个带 target 的函数）
 DEFAULT_DIR = os.path.join(ROOT, "文档", "样例")
 
@@ -67,6 +98,45 @@ DEFAULT_SIZES = "64,512,4096"
 
 #: 单次调用的求值步预算：超了就「未测」，不让一条命令跑成半小时
 DEFAULT_MAX_OPS = 3_000_000
+
+
+# ---------------------------------------------------------------- 饱和判定
+
+def mag_cap() -> float:
+    """饱和阈值：**直接用 `cost_domain.symbolic.MAG_CAP`**，不在这里另立一个数。
+
+    两处必须是同一个值：`evaluate` 的 `pow` 超过它就把 **`MAG_CAP` 本身**当
+    返回值（"算不出来"的标记）。工具若自己写一个 1e18，`src` 改了阈值这边
+    就会悄悄判错。
+    """
+    from cost_domain.symbolic import MAG_CAP
+    return float(MAG_CAP)
+
+
+def kappa_value_kind(kv) -> "str | None":
+    """`evaluate` 出来的 κ(n) 能不能当**真实上界**用。
+
+    返回：
+
+      · `None`        —— 可以判（有限、且没饱和）
+      · `"inf"`       —— 含符号项 / 外部项 / ⊤（+∞ 或 NaN）
+      · `"saturated"` —— ≥ `MAG_CAP`：这是**标记值**，不是上界
+
+    **为什么饱和单独一类**：符号指数 `n^n` 在大 n 下只能算到 `MAG_CAP`
+    （15,000 位十进制没法存）。1e18 跟 ops 比永远成立，若按 `ok` 记就是
+    **假绿**；而它也不是破界。所以单独标出来、**不判**。
+    """
+    if kv is None:
+        return "inf"
+    try:
+        v = float(kv)
+    except (TypeError, ValueError):
+        return "inf"
+    if math.isnan(v) or math.isinf(v):
+        return "inf"
+    if v >= mag_cap():
+        return "saturated"
+    return None
 
 
 # ---------------------------------------------------------------- 实参构造
@@ -232,10 +302,26 @@ def measure_one(prog_dir, prog, n, max_ops=DEFAULT_MAX_OPS,
         # 这不是「κ 少算」，而是「这个点上 κ 不可判定」：**打印 inf、跳过该点**，
         # 既不算成立也不算破界。修前这里直接 `int(inf)` → OverflowError，
         # 一个 `k(g)`（函数值调用）就能把整条命令崩掉。
-        if math.isnan(kv) or math.isinf(kv):
-            rows.append({"program": prog, "function": fn, "n": n,
-                         "status": "kappa_inf", "kappa": kappa.render(),
-                         "detail": "κ 含符号/外部项（∞），不可判定，跳过该点"})
+        #
+        # **饱和（2026-11-12）**：符号指数 `n^n` 的求值会停在 `MAG_CAP=1e18`
+        # —— 那是"算不出来"的标记，**不是上界**。拿它比 ops 永远成立 ⇒ 假绿。
+        # 所以和 inf 一样跳过，但**单独一个状态**（饱和与小 n 可测是两件事，
+        # 汇总里也要单列）。`kappa_value_kind` 是这两条的唯一判据。
+        kind = kappa_value_kind(kv)
+        if kind is not None:
+            if kind == "saturated":
+                rows.append({
+                    "program": prog, "function": fn, "n": n,
+                    "status": "kappa_saturated", "kappa": kappa.render(),
+                    "detail": ("κ 在 n=%d 达到饱和阈值 MAG_CAP=%s"
+                               "（`cost_domain.symbolic.MAG_CAP`）：这是**标记值**，"
+                               "不是真实上界 ⇒ **不作判定**（既不算成立也不算破界）"
+                               % (n, format(mag_cap(), ",.0f"))),
+                })
+            else:
+                rows.append({"program": prog, "function": fn, "n": n,
+                             "status": "kappa_inf", "kappa": kappa.render(),
+                             "detail": "κ 含符号/外部项（∞），不可判定，跳过该点"})
             continue
         kv = int(kv * kappa_scale)
 
@@ -256,7 +342,12 @@ def measure_one(prog_dir, prog, n, max_ops=DEFAULT_MAX_OPS,
                 ops_reset()
                 it = Interp(ch, tu, budget=max_ops, table_path=tbl)
                 value = it.call(fn, fixed)
-            ops = ops_of(fn)
+            # **用总数，不用 `ops_of(fn)`**（2026-11-12）：
+            # `ops_of(fn)` 是"该函数各次激活的累计"，**递归时会把内层调用的计数
+            # 重复算到外层头上**（实测 depth3(n=5)：total=61、ops_of(fn)=201，3.3×）。
+            # 拿它跟 κ 比会报**假破界**。这里 `ops_reset()` 之后只跑了一次调用，
+            # 所以"总操作数"正好是这棵调用树的成本。
+            ops = ops_of(None)
         except Exception as exc:                            # noqa: BLE001
             from interp import InterpBudgetExceeded
 
@@ -322,17 +413,27 @@ def summarize(rows, sizes):
     """把行汇总成结论。**只许如实报告**，不许把“未测”算成“成立”。"""
     by_fn = _index(rows)
     ok_full, broken, incomplete, flat, symbolic = [], [], [], [], []
+    saturated = []
     for (prog, fn), per_n in sorted(by_fn.items()):
         good = {n: r for n, r in per_n.items() if r["status"] == "ok"}
         bad = [n for n, r in good.items() if not r.get("holds", False)]
+        # **破界优先**：某个 n 上 `ops > κ` 是**真发现**，不能被同一函数在别的
+        # n 上的「饱和 / inf」盖掉（修前饱和那一栏写在 bad 前面，会漏报破界）。
+        if bad:
+            broken.append((prog, fn, sorted(bad)))
+            continue
+        # **饱和（`n^n` 这类符号指数）**：κ(n) 停在 MAG_CAP=1e18，那是标记值。
+        # 既不能算成立（会假绿）也不能算破界。**单列一栏**，
+        # `--strict` 不因它失败，但它也**不进 ok_full**：1e18 不是证据。
+        if any(r["status"] == "kappa_saturated" for r in per_n.values()):
+            saturated.append((prog, fn, sorted(
+                n for n, r in per_n.items() if r["status"] == "kappa_saturated")))
+            continue
         # **κ 含符号/外部项（inf）：不可判定**。这不是「未测」，也不是破界——
         # 单独一栏报告，`--strict` 不因它失败（否则 `k(g)` 这类契约项会让
         # 整条命令永远红）。**它也不进 ok_full**：inf 不是证据。
         if any(r["status"] == "kappa_inf" for r in per_n.values()):
             symbolic.append((prog, fn))
-            continue
-        if bad:
-            broken.append((prog, fn, sorted(bad)))
             continue
         if set(good) == set(sizes) and len(good) == len(sizes):
             seq = [good[n]["ops"] for n in sorted(sizes)]
@@ -346,7 +447,8 @@ def summarize(rows, sizes):
         missing = [n for n in sizes if n not in good]
         incomplete.append((prog, fn, len(good), len(sizes), missing))
     return {"ok_full": ok_full, "broken": broken, "incomplete": incomplete,
-            "flat": flat, "symbolic": symbolic, "total_functions": len(by_fn)}
+            "flat": flat, "symbolic": symbolic, "saturated": saturated,
+            "total_functions": len(by_fn)}
 
 
 def render_table(rows, sizes):
@@ -368,6 +470,11 @@ def render_table(rows, sizes):
                     # 第 ④ 类：κ 含 `k(g)` / `ext` 符号 ⇒ 数值上是 inf。
                     # **照实打印 inf 并跳过**，不装成数字。
                     cells.append(f"{n:>9} {'inf':>12} {'跳过':>10} {'-':>4}")
+                    continue
+                if r["status"] == "kappa_saturated":
+                    # 符号指数（`n^n`）：κ(n) 停在 MAG_CAP=1e18（标记值）。
+                    # **不打印 1e18**——那会被当成真实上界；也不比大小。
+                    cells.append(f"{n:>9} {'饱和':>12} {'不判定':>10} {'-':>4}")
                     continue
                 why = {"budget": "未测(预算)", "kappa_top": "κ=⊤",
                        "kappa_error": "κ 出错", "run_error": "跑不了"}.get(
@@ -442,6 +549,14 @@ def main(argv=None):
         print("      未测 ≠ 成立：调大 --max-ops 才能给出判定"
               "（`matmul` 在 dim=64 就是这样一条：默认 300 万预算不够，"
               "调大后才有判定——E36 修完是成立，修前是破界）")
+    if s["saturated"]:
+        names = "、".join(f"{p}.{f}" for p, f, _ns in s["saturated"])
+        print(f"  · **κ 饱和（≥MAG_CAP=1e18，标记值，不作判定）："
+              f"{len(s['saturated'])} 个** —— {names}")
+        for prog, fn, ns in s["saturated"]:
+            print(f"      {prog}.{fn}：n={ns} 时 κ 停在 1e18（符号指数算不出来）")
+        print("      饱和 ≠ 成立 ≠ 破界：1e18 是**标记值**，拿它跟 ops 比会"
+              "假绿；小 n（饱和前）的档仍是真实判定（试 `--sizes 4,6,8`）")
     if s["symbolic"]:
         names = "、".join(f"{p}.{f}" for p, f in s["symbolic"])
         print(f"  · **κ 含符号/外部项（inf，跳过该点，不作判定）："

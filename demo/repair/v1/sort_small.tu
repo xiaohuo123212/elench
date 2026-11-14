@@ -8,7 +8,7 @@
 spec sort_small(Vec<u64>& xs) -> u64 {
     effects {};
     target {
-        time: { max: O(xs.length() * log(xs.length())) },
+        time: { max: O(xs.size() * log(xs.size())) },
         allocation: { max: 0 },
     };
 }

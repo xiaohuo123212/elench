@@ -16,13 +16,13 @@
 // #region fn
 // 比较器：按 start 升序。**必须是具名函数**——匿名比较器是任意代码，
 // 成本不可静态界定，会打穿 `O(n log n × κ(cmp))` 这条契约。
-func earlier(Interval a, Interval b) -> bool {
+bool earlier(Interval a, Interval b) {
     return a.start < b.start;
 }
 
-pub func merge(vector<Interval>& xs) -> vector<Interval>! {
+pub vector<Interval>! merge(vector<Interval>& xs) {
     vector<Interval> out = vector<Interval>::make();
-    const u64 n = xs.length();
+    const u64 n = xs.size();
     if (n == 0) {
         return out;
     }
@@ -47,13 +47,13 @@ pub func merge(vector<Interval>& xs) -> vector<Interval>! {
             // 重叠或相邻：延长右端（取大——用 if 分两支，避免 i64 负数）
             cur_finish = max(cur_finish, e);
         } else {
-            out.push(Interval { start: cur_begin, finish: cur_finish });
+            out.push_back(Interval { start: cur_begin, finish: cur_finish });
             cur_begin = s;
             cur_finish = e;
         }
         idx = idx + 1;
     }
-    out.push(Interval { start: cur_begin, finish: cur_finish });
+    out.push_back(Interval { start: cur_begin, finish: cur_finish });
     return out;
 }
 // #endregion fn

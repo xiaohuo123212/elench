@@ -66,7 +66,8 @@ def test_sample():
                       os.path.join(SAMPLE, "calculator.eln"))
     check(res.ok, "calculator 通过",
           "; ".join(f"{d.code}@{d.line}" for d in res.diagnostics[:3]))
-    check(len(res.functions) == 10, "10 个函数", f"实际 {len(res.functions)}")
+    check(len(res.functions) == 11, "11 个函数（第 4 步加了 more_digits）",
+          f"实际 {len(res.functions)}")
 
     ev = next(f for f in res.functions if f.name == "evaluate")
     check(ev.state == "?", "evaluate 有体有 target → 状态待 cost 判定")
@@ -83,22 +84,42 @@ def test_signatures():
     print("[2] F-1 实现必须有 spec / F-2 签名一致")
 
     tu = "spec a(x: u64) -> bool { effects {}; }"
-    ai = "func a(x: u64) -> bool { return true; }"
+    ai = "bool a(x: u64) { return true; }"
     check(check_module(tu, ai).ok, "签名一致时通过")
 
-    ai2 = "func b(x: u64) -> bool { return true; }"
+    ai2 = "bool b(x: u64) { return true; }"
     r = check_module(tu, ai2)
     check(has(r, "E-Fn-NoSpec"), "实现无 spec → E-Fn-NoSpec", str(codes(r)))
+    # **2026-11-10：`.tu` 可选**（规格 §8.9）——「没有 spec」=「没有契约声明」，
+    # 默认档**不是错误**（不拦 run/build），`--strict` 才回到 error。
+    check(all(d.severity == "warning" for d in r.diagnostics
+              if d.code == "E-Fn-NoSpec"),
+          "默认档 E-Fn-NoSpec 是 warning（不阻断）",
+          str([(d.code, d.severity) for d in r.diagnostics]))
+    check(r.ok, "默认档下无 spec 仍算通过（没有契约 ≠ 有错）", str(codes(r)))
+    r_strict_no = check_module(tu, ai2, strict=True)
+    check(any(d.code == "E-Fn-NoSpec" and d.severity == "error"
+              for d in r_strict_no.diagnostics),
+          "--strict 下 E-Fn-NoSpec 仍是 error（保持旧行为）",
+          str([(d.code, d.severity) for d in r_strict_no.diagnostics]))
+    # **完全没有 `.tu`**：不逐条报，只给一条汇总 info（check 仍 exit 0）。
+    r_bare = check_module("", "u64 b(x: u64) { return x; }", has_tu=False)
+    check(r_bare.ok, "没有 .tu：check 通过", str(codes(r_bare)))
+    check(any(d.code == "I-Fn-NoSpec-Module" and d.severity == "info"
+              for d in r_bare.diagnostics),
+          "没有 .tu：汇总一条 info「N 个函数未声明契约」",
+          str([(d.code, d.severity) for d in r_bare.diagnostics]))
+    check(not has(r_bare, "E-Fn-NoSpec"), "没有 .tu：不逐条报 E-Fn-NoSpec")
 
-    ai3 = "func a(x: u64, y: u64) -> bool { return true; }"
+    ai3 = "bool a(x: u64, y: u64) { return true; }"
     r = check_module(tu, ai3)
     check(has(r, "E-Spec-SigMismatch"), "参数个数不同 → E-Spec-SigMismatch", str(codes(r)))
 
-    ai4 = "func a(x: i64) -> bool { return true; }"
+    ai4 = "bool a(x: i64) { return true; }"
     r = check_module(tu, ai4)
     check(has(r, "E-Spec-SigMismatch"), "参数类型不同 → 报错")
 
-    ai5 = "func a(x: u64) -> u64 { return 1; }"
+    ai5 = "u64 a(x: u64) { return 1; }"
     r = check_module(tu, ai5)
     check(has(r, "E-Spec-SigMismatch"), "返回类型不同 → 报错")
 
@@ -147,7 +168,7 @@ spec host(const vector<u64>& xs) -> u64 {
 """
 
 BASE_AI = """
-func host(const vector<u64>& xs) -> u64 {
+u64 host(const vector<u64>& xs) {
     const u64 n = xs.length();
     if (n == 0) { return 0; }
     return ?!L(xs);
@@ -190,7 +211,7 @@ def test_choose():
 spec other(const vector<u64>& xs) -> u64 { effects {}; }
 """
     ai2 = BASE_AI + """
-func other(const vector<u64>& xs) -> u64 {
+u64 other(const vector<u64>& xs) {
     const u64 n = xs.length();
     return ?!L(n);
 }
@@ -331,13 +352,13 @@ def test_states():
 
     # unchecked：有体无 target
     tu3 = "spec a() -> bool { effects {}; }"
-    r3 = check_module(tu3, "func a() -> bool { return true; }")
+    r3 = check_module(tu3, "bool a() { return true; }")
     f3 = next(x for x in r3.functions if x.name == "a")
     check(f3.state == "unchecked", "有体无 target → unchecked", f3.state)
 
     # ?：有体有 target（待 cost）
     tu4 = "spec a() -> bool { effects {}; target { time: { max: O(1) }, }; }"
-    r4 = check_module(tu4, "func a() -> bool { return true; }")
+    r4 = check_module(tu4, "bool a() { return true; }")
     f4 = next(x for x in r4.functions if x.name == "a")
     check(f4.state == "?", "有体有 target → 待 cost 判定", f4.state)
 
@@ -360,6 +381,11 @@ fn b(x: u64) -> bool { return true; } end fn
     r = check_module(tu, ai)
     check(has(r, "E-Ai-HasDecl"), "报 .ai 声明")
     check(has(r, "E-Fn-NoSpec"), "报无 spec")
+    # **档位**（2026-11-10，规格 §8.9）：默认档是 warning，不是 error。
+    check(any(d.code == "E-Fn-NoSpec" and d.severity == "warning"
+              for d in r.diagnostics),
+          "无 spec 在默认档是 warning（不阻断）",
+          str([(d.code, d.severity) for d in r.diagnostics]))
     check(has(r, "E-Choose-PendingMismatch"), "报缺实现又没标 pending")
     check(len(r.diagnostics) >= 3, "多错误同时报出", f"实际 {len(r.diagnostics)}")
 
@@ -370,13 +396,13 @@ def test_strict():
     print("[11] 严格模式 L3 / L4 / L5")
 
     clean_tu = "spec a(x: u64) -> bool { effects {}; }"
-    clean_ai = "func a(x: u64) -> bool { return true; }"
+    clean_ai = "bool a(x: u64) { return true; }"
     check(check_module(clean_tu, clean_ai, strict=True).ok,
           "规范代码在严格模式通过",
           str(codes(check_module(clean_tu, clean_ai, strict=True))))
 
     # L3：省略 end if
-    lax_ai = "func a(x: u64) -> bool { if (x == 0) { return true; } return false; }"
+    lax_ai = "bool a(x: u64) { if (x == 0) { return true; } return false; }"
     r_lax = check_module(clean_tu, lax_ai)
     check(not has(r_lax, "L3-EndOmitted"), "v0.68 下 L3 已下线", str(codes(r_lax)))
     r_strict = check_module(clean_tu, lax_ai, strict=True)
@@ -393,7 +419,7 @@ def test_strict():
     check(not has(r3, "L4-TupleTooLong"), "3 元组合法", str(codes(r3)))
 
     # L4：表达式元组
-    ai4 = "func c() -> u64 { val t = (1, 2, 3, 4); return 1; }"
+    ai4 = "u64 c() { val t = (1, 2, 3, 4); return 1; }"
     tu4b = "spec c() -> u64 { effects {}; }"
     r4 = check_module(tu4b, ai4, strict=True)
     check(has(r4, "L4-TupleTooLong"), "表达式 4 元组 → L4", str(codes(r4)))
@@ -425,16 +451,16 @@ def test_no_ai_file():
 def test_immutability():
     print("[13] let / var 可变性")
     tu = "spec a() -> u64 { effects {}; }"
-    r = check_module(tu, "func a() -> u64 { const u64 x = 1; x = 2; return x; }")
+    r = check_module(tu, "u64 a() { const u64 x = 1; x = 2; return x; }")
     check(has(r, "E-Assign-Immutable"), "给 const 赋值 → E-Assign-Immutable", str(codes(r)))
-    r2 = check_module(tu, "func a() -> u64 { u64 x = 1; x = 2; return x; }")
+    r2 = check_module(tu, "u64 a() { u64 x = 1; x = 2; return x; }")
     check(r2.ok, "给可变绑定赋值合法", str(codes(r2)))
-    r3 = check_module(tu, "func a() -> u64 { const (u64, u64) t = (1, 2); t.0 = 3; return 1; }")
+    r3 = check_module(tu, "u64 a() { const (u64, u64) t = (1, 2); t.0 = 3; return 1; }")
     check(has(r3, "E-Assign-Immutable"), "给 const 的字段赋值也拦", str(codes(r3)))
-    r4 = check_module(tu, "func a() -> u64 { const u64 x = 1; x += 2; return x; }")
+    r4 = check_module(tu, "u64 a() { const u64 x = 1; x += 2; return x; }")
     check(has(r4, "E-Assign-Immutable"), "+= 也拦", str(codes(r4)))
     r5 = check_module(
-        tu, "func a() -> u64 { const u64 x = 1; if (true) { u64 x = 2; x = 3; } return x; }")
+        tu, "u64 a() { const u64 x = 1; if (true) { u64 x = 2; x = 3; } return x; }")
     check(r5.ok, "内层 var 遮蔽外层 let 时合法", str(codes(r5)))
 
 
@@ -450,25 +476,25 @@ def test_while_bounds():
 spec a(const vector<u64>& xs) -> u64 { effects {}; }"""
 
     # ① 条件含尺寸比较 → 无诊断
-    ok = ("func a(const vector<u64>& xs) -> u64 { u64 i = 0; "
+    ok = ("u64 a(const vector<u64>& xs) { u64 i = 0; "
           "while (i < xs.length()) { i = i + 1; } return i; }")
     r = check_module(tu, ok)
     check(not has(r, "E-While-NoBound"), "T13-① 尺寸比较：无诊断", str(codes(r)))
 
     # ① const 绑定的尺寸变量
-    ok2 = ("func a(const vector<u64>& xs) -> u64 { const u64 n = xs.length(); u64 i = 0; "
+    ok2 = ("u64 a(const vector<u64>& xs) { const u64 n = xs.length(); u64 i = 0; "
            "while (i < n) { i = i + 1; } return i; }")
     r = check_module(tu, ok2)
     check(not has(r, "E-While-NoBound"), "T13-① const 尺寸变量：无诊断", str(codes(r)))
 
     # ② 谓词 + repeats
-    ok3 = ("func a(const vector<u64>& xs) -> u64 { u64 i = 0; "
+    ok3 = ("u64 a(const vector<u64>& xs) { u64 i = 0; "
            "while (pred(i, xs.length())) { i = i + 1; } return i; }")
     r = check_module(tu, ok3)
     check(not has(r, "E-While-NoBound"), "T13-② 谓词 repeats：无诊断", str(codes(r)))
 
     # ③ 推不出：宽松是 warning，严格是 error
-    bad = ("func a(const vector<u64>& xs) -> u64 { u64 i = 0; "
+    bad = ("u64 a(const vector<u64>& xs) { u64 i = 0; "
            "while (i < bound_of(xs.length())) { i = i + 1; } return i; }")
     r_lax = check_module(tu, bad)
     w = [d for d in r_lax.diagnostics if d.code == "E-While-NoBound"]
@@ -476,7 +502,7 @@ spec a(const vector<u64>& xs) -> u64 { effects {}; }"""
           "T13-③ 宽松模式：warning", str([(d.code, d.severity) for d in r_lax.diagnostics]))
 
     # ④ 常量上界：`while (i < 10)` 可推，不该报警
-    ok4 = ("func a(const vector<u64>& xs) -> u64 { u64 i = 0; "
+    ok4 = ("u64 a(const vector<u64>& xs) { u64 i = 0; "
            "while (i < 10) { i = i + 1; } return i; }")
     r = check_module(tu, ok4)
     check(not has(r, "E-While-NoBound"), "T13-④ 常量上界：无诊断", str(codes(r)))
@@ -497,22 +523,138 @@ def test_member_sep():
     print("[15] E-6：类型命名空间 MUST 用 `::`")
     tu = """enum Token { Number(i64), Plus }
 spec f(u64 x) -> i64 { effects {}; }"""
-    bad = "func f(u64 x) -> i64 {\n    const Token t = Token.Plus;\n    return 1;\n}"
+    bad = "i64 f(u64 x) {\n    const Token t = Token.Plus;\n    return 1;\n}"
     r = check_module(tu, bad, "m")
     check(has(r, "E-Member-WrongSep"), "枚举成员用 `.` → E-Member-WrongSep",
           str(codes(r)))
 
-    ok = "func f(u64 x) -> i64 {\n    const Token t = Token::Plus;\n    return 1;\n}"
+    ok = "i64 f(u64 x) {\n    const Token t = Token::Plus;\n    return 1;\n}"
     r2 = check_module(tu, ok, "m")
     check(not has(r2, "E-Member-WrongSep"), "用 `::` 不报", str(codes(r2)))
 
     # 值上的方法调用不受影响
     tu2 = """enum Token { Plus }
 spec g(const vector<u64>& xs) -> u64 { effects {}; }"""
-    ok2 = ("func g(const vector<u64>& xs) -> u64 {\n"
+    ok2 = ("u64 g(const vector<u64>& xs) {\n"
            "    return xs.length();\n}")
     r3 = check_module(tu2, ok2, "m")
     check(not has(r3, "E-Member-WrongSep"), "`xs.length()` 不报", str(codes(r3)))
+
+
+# ---------------------------------------------------------------- F-2 形参名
+
+def test_param_names():
+    print("[16] F-2：形参名（E-Spec-ParamName）")
+
+    # `target` 里的尺寸量按 spec 名写；实现改名 → check 阶段就该报
+    tu = ("spec f(const vector<u64>& xs) -> u64 {\n"
+          "    effects {};\n"
+          "    target { time: { max: O(xs.length()) }, };\n}\n")
+    ai = ("u64 f(const vector<u64>& ys) {\n"
+          "    return ys.length();\n}\n")
+    r = check_module(tu, ai, "m")
+    check(has(r, "E-Spec-ParamName"),
+          "target 引用 spec 名、实现改名 → E-Spec-ParamName", str(codes(r)))
+    _d = [x for x in r.diagnostics if x.code == "E-Spec-ParamName"]
+    check(bool(_d) and "`xs`" in _d[0].message and "`ys`" in _d[0].message,
+          "消息里点名两边的名字", str(_d[0].message if _d else ""))
+
+    # 名字一致 → 不报
+    check(not has(check_module(tu, ai.replace("ys", "xs"), "m"),
+                  "E-Spec-ParamName"), "名字一致 → 不报")
+
+    # 纯 `effects {}`（没有 target/requires/guarantees）→ 名字无关紧要，不报
+    tu_e = "spec g(const vector<u64>& xs) -> u64 { effects {}; }"
+    ai_e = "u64 g(const vector<u64>& ys) { return 0; }"
+    check(not has(check_module(tu_e, ai_e, "m"), "E-Spec-ParamName"),
+          "纯 effects → 不报（没有子句按名字引用它）")
+
+    # target 是常数 O(1)：名字没被引用 → 不报
+    tu_c = ("spec h(const vector<u64>& xs) -> u64 { effects {}; "
+            "target { time: { max: O(1) }, }; }")
+    ai_c = "u64 h(const vector<u64>& ys) { return 0; }"
+    check(not has(check_module(tu_c, ai_c, "m"), "E-Spec-ParamName"),
+          "target O(1) 没引用形参名 → 不报")
+
+    # `requires` 也按 spec 名写（cost 的 facts / 运行期断言都用它）
+    tu_r = ("spec k(const vector<u64>& xs) -> u64 { effects {}; "
+            "requires xs.length() > 0; }")
+    ai_r = "u64 k(const vector<u64>& ys) { return ys.length(); }"
+    check(has(check_module(tu_r, ai_r, "m"), "E-Spec-ParamName"),
+          "requires 引用形参名 → 报")
+
+    # `guarantees` 的普通改名已由 E-Guarantee-Uncheckable 报（不重复报）
+    tu_g = ("spec q(const vector<u64>& xs) -> u64 { effects {}; "
+            "guarantees is_sorted(xs); }")
+    ai_g = "u64 q(const vector<u64>& ys) { return 0; }"
+    r = check_module(tu_g, ai_g, "m")
+    check(has(r, "E-Guarantee-Uncheckable") and not has(r, "E-Spec-ParamName"),
+          "guarantees 普通改名：已由 E-Guarantee-Uncheckable 报，不重复",
+          str(codes(r)))
+
+    # ...但 spec 名被实现的**局部变量**顶掉时，guarantee 会静默绑到错的值
+    ai_sh = ("u64 q(const vector<u64>& ys) {\n"
+             "    u64 xs = 0;\n    return xs;\n}")
+    check(has(check_module(tu_g, ai_sh, "m"), "E-Spec-ParamName"),
+          "guarantees 名被实现局部变量顶掉 → E-Spec-ParamName")
+
+    # `O(n)` 的魔法绑定（恰好一个容器形参）也算引用那个形参
+    tu_n = ("spec p(const vector<u64>& xs) -> u64 { effects {}; "
+            "target { time: { max: O(n) }, }; }")
+    ai_n = "u64 p(const vector<u64>& ys) { return ys.length(); }"
+    r = check_module(tu_n, ai_n, "m")
+    check(has(r, "E-Spec-ParamName"), "O(n) 绑到唯一容器 → 改名也报", str(codes(r)))
+
+    # 只有 `.tu`、没有实现 → 不报
+    r = check_module(tu, None, "m")
+    check(not has(r, "E-Spec-ParamName"),
+          "只有 .tu、没有实现 → 不报", str(codes(r)))
+
+
+def test_repeats_contract():
+    """`repeats` 的静态那一半（2026-11-09）：名字可解析 + 声明有消费者。
+
+    修之前：`repeats alpha(n)`（未定义的名字）**check 无诊断**、`cost` 静默给 ⊤；
+    `repeats` 写在一个不当 while 条件的函数上永远不生效，也没有提示。
+    """
+    print("[17] repeats：名字可解析 + 声明有消费者")
+
+    tu_bad = """spec pred(u64 n) -> bool {
+    effects {};
+    repeats alpha(n);
+}
+spec a(u64 n) -> u64 { effects {}; }"""
+    ai_plain = "u64 a(u64 n) { return n; }"
+    r = check_module(tu_bad, ai_plain, "m")
+    check(has(r, "E-Repeats-UndefinedName"),
+          "repeats 引用未定义的名字 → error（以前静默）", str(codes(r)))
+
+    tu_ok = """const K: u64 = 8;
+spec pred(u64 n) -> bool {
+    effects {};
+    repeats K;
+}
+spec a(u64 n) -> u64 { effects {}; }"""
+    ai_used = ("bool pred(u64 n) { return n > 0; }\n"
+               "u64 a(u64 n) { u64 j = n; "
+               "while (pred(j)) { j = j - 1; } return j; }")
+    r2 = check_module(tu_ok, ai_used, "m")
+    check(not has(r2, "E-Repeats-UndefinedName"),
+          "repeats 用模块常量 + 形参 → 不报", str(codes(r2)))
+    check(not has(r2, "W-Repeats-Unused"),
+          "repeats 有消费者（while 条件）→ 不提示", str(codes(r2)))
+
+    # 声明在**不当 while 条件**的函数上 → 提示（这条上界永不生效）。
+    ai_unused = ("bool pred(u64 n) { return n > 0; }\n"
+                 "u64 a(u64 n) { return n; }")
+    r3 = check_module(tu_ok, ai_unused, "m")
+    check(has(r3, "W-Repeats-Unused"),
+          "repeats 没被任何 while 当条件 → 提示", str(codes(r3)))
+
+    # 只有 `.tu`（没有实现）→ 不提示：可能被别的模块当条件用。
+    r4 = check_module(tu_ok, None, "m")
+    check(not has(r4, "W-Repeats-Unused"),
+          "没有实现文件 → 不提示（跨模块可能被用）", str(codes(r4)))
 
 
 def main():
@@ -530,6 +672,8 @@ def main():
     test_immutability()
     test_while_bounds()
     test_member_sep()
+    test_param_names()
+    test_repeats_contract()
 
     print()
     total = _passed + len(_failed)

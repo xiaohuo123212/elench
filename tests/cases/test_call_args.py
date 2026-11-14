@@ -87,6 +87,7 @@ from cost_check import evaluate as kappa_at            # noqa: E402
 from cost_interp import CostInterp                     # noqa: E402
 from interp import Interp, ops_enable, ops_of, ops_reset   # noqa: E402
 from parser import parse_source                        # noqa: E402
+from symbolic import Cost                              # noqa: E402
 
 _passed = 0
 _failed = []
@@ -132,12 +133,17 @@ def xs(n):
 
 
 # ---------------------------------------------------------------- ① 用户函数
-#: 无 target → 走**内联**分支；`compute` 返回同一个容器，尺寸/值都可比。
+#: 无 target → 走**内联**分支；`compute` 返回**新容器**（prvalue）。
+#:
+#: **A-full（2026-11-09）**：`compute` 原先写 `return xs;`（`const&` 形参）。
+#: 值语义下那是**一次真实的容器拷贝**（借用值返回 = 拷贝，设计 §3.2），
+#: 于是 κ 会比解释器 ops 多出 n(xs)+1——本文件钉的是**实参记账**（Δ 与 ops 对得上），
+#: 不是拷贝本身，所以改成返回 prvalue；拷贝路径由 `test_cost.py::test_value_semantics` 钉。
 INLINE = """
-func f(const vector<u64>& xs) -> u64 { return xs.length(); }
-func compute(const vector<u64>& xs) -> vector<u64> { return xs; }
-func plain(const vector<u64>& xs) -> u64 { return f(xs); }
-func nested(const vector<u64>& xs) -> u64 { return f(compute(xs)); }
+u64 f(const vector<u64>& xs) { return xs.length(); }
+vector<u64> compute(const vector<u64>& xs) { return vector<u64>::make(); }
+u64 plain(const vector<u64>& xs) { return f(xs); }
+u64 nested(const vector<u64>& xs) { return f(compute(xs)); }
 """
 
 TARGET = """
@@ -192,15 +198,15 @@ def test_user_fn_target():
 
 # ---------------------------------------------------------------- ② 递归
 RECUR = """
-func down(const vector<u64>& xs, u64 i) -> u64 {
+u64 down(const vector<u64>& xs, u64 i) {
     if (i == 0) { return xs.length(); }
     return 1 + down(xs, i - 1);
 }
-func down_nested(const vector<u64>& xs, u64 i) -> u64 {
+u64 down_nested(const vector<u64>& xs, u64 i) {
     if (i == 0) { return xs.length(); }
     return 1 + down(compute(xs), i - 1);
 }
-func compute(const vector<u64>& xs) -> vector<u64> { return xs; }
+vector<u64> compute(const vector<u64>& xs) { return vector<u64>::make(); }
 """
 
 RECUR_TU = """
@@ -237,13 +243,13 @@ def test_recursion():
 
 # ---------------------------------------------------------------- ③ 函数值
 FNVAL = """
-func compute(const vector<u64>& xs) -> vector<u64> { return xs; }
-func apply_id(const vector<u64>& xs, func(vector<u64>) -> u64 g) -> u64 { return g(xs); }
-func apply_nested(const vector<u64>& xs, func(vector<u64>) -> u64 g) -> u64 {
+vector<u64> compute(const vector<u64>& xs) { return vector<u64>::make(); }
+u64 apply_id(const vector<u64>& xs, func(vector<u64>) -> u64 g) { return g(xs); }
+u64 apply_nested(const vector<u64>& xs, func(vector<u64>) -> u64 g) {
     return g(compute(xs));
 }
-func host_id(const vector<u64>& xs) -> u64 { return apply_id(xs, compute); }
-func host_nested(const vector<u64>& xs) -> u64 { return apply_nested(xs, compute); }
+u64 host_id(const vector<u64>& xs) { return apply_id(xs, compute); }
+u64 host_nested(const vector<u64>& xs) { return apply_nested(xs, compute); }
 """
 
 FNVAL_TU = """
@@ -294,15 +300,33 @@ def test_fn_value():
 # ---------------------------------------------------------------- ④ 对照组
 #: 这些分支**修前就已经**计了实参：多一个 `compute(xs)`，κ 只许多 `κc + 1`，
 #: 多出两倍就是「又加了一遍」。
+#:
+#: **A-full（2026-11-09）**：`compute_v` 原先写 `return xs;`（`const&` 形参）。
+#: 值语义下那是**一次真实的容器拷贝**（设计 §3.2：借用值返回 = 拷贝），
+#: κ 会**故意**大于解释器 ops（解释器不拷贝，实测是下界）——
+#: 本组断言的目的是「实参没有被重复计费」，所以改成返回 prvalue，
+#: 让 κ 与 ops 重新可比；"借用值返回要记拷贝"由 `test_cost.py` 的
+#: `test_value_semantics` 单独钉住。
+#:
+#: **2026-11-10（D2）**：`g_std` 以前写 `sum_of(xs)`。现在 stdlib 的尺寸是
+#: **按实参推导**的：`sum_of(compute_v(xs))` 的尺寸项 = `compute_v` 的返回尺寸
+#: （`make()` → 常数 0），而 `sum_of(xs)` 是 `n(xs)` —— 两者的尺寸项不再相同，
+#: `Δ` 会少一个 `n(xs)`（不是重复计费，是两边尺寸不同）。本组要隔离的是
+#: 「多一个嵌套调用」的账，所以两边都用**同一形状**（空 vector）作实参。
+#:
+#: **注意本组断言测的是什么**：`Δ == κc + 1` 与 `ops 增量 == Δ` 测的是
+#: **「实参没有被重复计费」**（多一个 `compute(xs)`，κ 只许多它的成本 + 1 个
+#: 调用节点），**不是**「两边的尺寸项守恒」。后者在尺寸推导之后本来就不该成立
+#: （空 vector 的尺寸就是 0），所以 fixture 才改成两边同形状。
 GUARD = """
-func compute(const vector<u64>& xs) -> u64 { return 1; }
-func compute_v(const vector<u64>& xs) -> vector<u64> { return xs; }
-func g_std(const vector<u64>& xs) -> u64 { return sum_of(xs); }
-func g_std_c(const vector<u64>& xs) -> u64 { return sum_of(compute_v(xs)); }
-func g_max(const vector<u64>& xs, u64 b) -> u64 { return max(b, 1); }
-func g_max_c(const vector<u64>& xs, u64 b) -> u64 { return max(b, compute(xs)); }
-func g_mc(const vector<u64>& xs) -> u64 { return xs.at(1); }
-func g_mc_c(const vector<u64>& xs) -> u64 { return xs.at(compute(xs)); }
+u64 compute(const vector<u64>& xs) { return 1; }
+vector<u64> compute_v(const vector<u64>& xs) { return vector<u64>::make(); }
+u64 g_std(const vector<u64>& xs) { return sum_of(vector<u64>::make()); }
+u64 g_std_c(const vector<u64>& xs) { return sum_of(compute_v(xs)); }
+u64 g_max(const vector<u64>& xs, u64 b) { return max(b, 1); }
+u64 g_max_c(const vector<u64>& xs, u64 b) { return max(b, compute(xs)); }
+u64 g_mc(const vector<u64>& xs) { return xs.at(1); }
+u64 g_mc_c(const vector<u64>& xs) { return xs.at(compute(xs)); }
 """
 
 
@@ -334,12 +358,156 @@ def test_no_double_count():
     print()
 
 
+# ---------------------------------------------------------------- ⑥ 调用点：用 κ 不用 target
+#: 被调函数 `inner` **声明** `O(1)`（承诺），实际 κ = 16。调用点必须用 κ：
+#: 修前调用方拿 target 记 1，`outer` 每轮只记 9 —— n=20 时 κ=184 < 实测 427。
+#: 同一处缺口在 `_tier_b/sha256` 上是 14 倍（κ=21,566 vs ops=308,126，
+#: `compress` 声明 O(1)、实际每块 ~18k）。
+LOOSE = """
+u64 inner(u64 n) {
+    u64 a = n + 1;
+    u64 b = a * 3;
+    u64 c = b - 2;
+    return c + n;
+}
+u64 outer(u64 n) {
+    u64 s = 0;
+    for (u64 i = 0; i < n; i = i + 1) { s = s + inner(i); }
+    return s;
+}
+"""
+
+LOOSE_TU = """
+spec inner(u64 n) -> u64 {
+    effects {};
+    target { time: { max: O(1) }, allocation: { max: 0 }, };
+}
+spec outer(u64 n) -> u64 {
+    effects {};
+    target { time: { max: O(n) }, allocation: { max: 0 }, };
+}
+"""
+
+#: **只有 spec、没有实现**：target 是唯一信息 → 按声明记账，并登记
+#: `ci.target_trusted`（被迫的信任，要能在报告里指出来）。
+SPEC_ONLY = """
+u64 caller(u64 n) { return 1 + ghost(n); }
+"""
+
+SPEC_ONLY_TU = """
+spec ghost(u64 n) -> u64 {
+    effects {};
+    target { time: { max: O(n) }, allocation: { max: 0 }, };
+}
+"""
+
+#: 被调函数的 κ 是 ⊤（`while (i != 0)` 推不出轮数）⇒ 调用方也必须是 ⊤。
+TOP_CALLEE = """
+u64 dark(u64 n) {
+    u64 i = n;
+    while (i != 0) { i = i - 1; }
+    return i;
+}
+u64 caller_top(u64 n) { return 1 + dark(n); }
+"""
+
+TOP_CALLEE_TU = """
+spec dark(u64 n) -> u64 {
+    effects {};
+    target { time: { max: O(n) }, allocation: { max: 0 }, };
+}
+spec caller_top(u64 n) -> u64 {
+    effects {};
+    target { time: { max: O(n) }, allocation: { max: 0 }, };
+}
+"""
+
+
+def test_call_uses_kappa_not_target():
+    print("[6] 调用点用被调函数的 **κ**，不用它的 target")
+    n = 20
+    ch, decl = load(LOOSE, LOOSE_TU)
+    ci = CostInterp(ch, decl)
+    ki = kappa_at(ci.cost_of("inner"), {"n": n})
+    ko = kappa_at(ci.cost_of("outer"), {"n": n})
+    check(ki == 16, "κ(inner) = 16（它的 target 只声明了 O(1)）", str(ki))
+    check(ko >= n * ki,
+          f"κ(outer) = {ko:g} ≥ n×κ(inner) = {n * ki:g}（不是 n×target = {n}）",
+          f"κ(outer)={ko:g}")
+    op = ops("outer", [n], LOOSE, LOOSE_TU)
+    check(op <= ko,
+          f"ops(outer) {op} ≤ κ(outer) {ko:g}（修前 κ=184 < ops=427）",
+          f"ops={op} κ={ko:g}")
+
+    # 没有实现 → 只能用声明的 target；这是被迫的信任，必须留下标记
+    ch, decl = load(SPEC_ONLY, SPEC_ONLY_TU)
+    ci = CostInterp(ch, decl)
+    k = kappa_at(ci.cost_of("caller"), {"n": n})
+    check(k == n + 5, f"κ(caller) = {k:g} = n + 5（按声明的 target O(n)）", str(k))
+    check("ghost" in getattr(ci, "target_trusted", {}),
+          "没有实现的被调函数登记在 ci.target_trusted（标注「按声明的 target」）",
+          str(getattr(ci, "target_trusted", None)))
+
+    # 被调函数的 κ 是 ⊤ ⇒ 调用方也是 ⊤（不许拿 target 把它救回来）
+    ch, decl = load(TOP_CALLEE, TOP_CALLEE_TU)
+    ci = CostInterp(ch, decl)
+    check(ci.cost_of("dark").is_top(), "κ(dark) 是 ⊤（循环轮数推不出）")
+    check(ci.cost_of("caller_top").is_top(),
+          "κ(caller_top) 也是 ⊤（⊤ 通过调用点传播，target 不能兜底）",
+          ci.cost_of("caller_top").render())
+    print()
+
+
+# ---------------------------------------------------------------- ⑦ 内建同名
+#: **用户函数优先于同名内建**（与解释器 `_call` 同序，interp.py:3914-3919）。
+#: 成本域以前把内建分支写在前头：`_diff/dedup` 的用户 `dedup` 被当成内建
+#: `dedup` 记账，`main` 的 κ=107 而实测 ops=1005 —— **假上界**。
+#: 这里钉两个方向：
+#:   · 用户函数盖得住内建 → 按**用户实现**的 κ（常数）；
+#:   · `print`/`swap` 是解释器在用户函数**之前**特判的 → 用户盖不住，
+#:     成本域也必须按内建记（`print` 不产生 n(xs) 那一项）。
+SHADOW = """
+u64 sum_of(const vector<u64>& xs) {
+    u64 s = 0;
+    for (u64 i = 0; i < 5; i = i + 1) { s = s + xs.at(0); }
+    return s;
+}
+u64 dedup(const vector<u64>& xs) {
+    u64 s = 0;
+    for (u64 i = 0; i < 5; i = i + 1) { s = s + xs.at(0); }
+    return s;
+}
+u64 probe_sum(const vector<u64>& xs) { return sum_of(xs); }
+u64 probe_dedup(const vector<u64>& xs) { return dedup(xs); }
+"""
+
+
+def test_builtin_shadowing():
+    print("[7] 用户函数优先于同名内建（与解释器同序）")
+    ci = CostInterp(parse_source(SHADOW, "shadow.eln").module, None)
+    k_sum = ci.cost_of("sum_of")
+    k_dedup = ci.cost_of("dedup")
+    # 用户实现是常数（循环 5 次）：κ(probe) 只能是常数，不能出现内建的 n(xs)。
+    for nm, callee, own in (("probe_sum", "sum_of", k_sum),
+                            ("probe_dedup", "dedup", k_dedup)):
+        k = ci.cost_of(nm)
+        want = Cost.add(own, Cost.num(3))
+        check(k.render() == want.render(),
+              f"κ({nm}) = κ({callee}) + 3（按用户实现记账）",
+              f"{k.render()} vs {want.render()}")
+        check("n(xs)" not in k.render(),
+              f"κ({nm}) 没有内建模型的 n(xs)", k.render())
+    print()
+
+
 def main() -> int:
     test_user_fn()
     test_user_fn_target()
     test_recursion()
     test_fn_value()
     test_no_double_count()
+    test_call_uses_kappa_not_target()
+    test_builtin_shadowing()
 
     print()
     if _failed:

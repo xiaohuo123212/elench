@@ -48,17 +48,17 @@ spec f(const vector<u64>& xs) -> u64 {
 }
 """
 
-BAD = """func g(u64 n) -> u64 { return n + 1; }
+BAD = """u64 g(u64 n) { return n + 1; }
 
-func f(const vector<u64>& xs) -> u64 {
+u64 f(const vector<u64>& xs) {
     u64 a = g("abc");
     return a + xs.length();
 }
 """
 
-GOOD = """func g(u64 n) -> u64 { return n + 1; }
+GOOD = """u64 g(u64 n) { return n + 1; }
 
-func f(const vector<u64>& xs) -> u64 {
+u64 f(const vector<u64>& xs) {
     return g(xs.length());
 }
 """

@@ -18,9 +18,9 @@
 // 「topk_select 全程更省」。这不是写错，是「上界必须可写」这条规则的真实代价。
 
 // #region fn
-pub func topk(
-              const vector<u64>& xs, u64 k) -> u64! {
-    const u64 len = xs.length();
+pub u64! topk(
+              const vector<u64>& xs, u64 k) {
+    const u64 len = xs.size();
     // 名次从 1 开始：0 是非法名次
     if (k == 0) {
         return Err(TopkError::RankZero);
@@ -36,7 +36,7 @@ pub func topk(
 } kernels topk_kernel(
                       const vector<u64>& xs, u64 k) -> u64! {
     topk_heap {
-        const u64 n = xs.length();
+        const u64 n = xs.size();
         array<u64,
         HEAP_CAP> heap = array<u64,
         HEAP_CAP>::make();
@@ -52,12 +52,12 @@ pub func topk(
             const u64 v = xs.at(i);
             if (i < k) {
                 // ---- 前 k 个：入堆（push 到末尾）后上浮
-                heap.push(v);
+                heap.push_back(v);
                 pos = i;
                 depth = 0;
                 while (depth < HEAP_LEVELS) {
                     if (pos > 0) {
-                        const u64 par = ((pos - 1) / 2)?;
+                        const u64 par = ((pos - 1) / 2);
                         if (heap.at(par) > heap.at(pos)) {
                             tmp = heap.at(par);
                             heap[par] = heap.at(pos);
@@ -100,7 +100,7 @@ pub func topk(
         return heap.at(0);
     }
     topk_select {
-        const u64 n = xs.length();
+        const u64 n = xs.size();
         // 已经确认的名次（1..rank-1 都已落定），threshold 是上一轮找到的值
         u64 rank = 1;
         u64 threshold = 0;

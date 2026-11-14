@@ -69,14 +69,14 @@
       ]
     },
     "keyword": {
-      "comment": "= lexer.KEYWORDS（40 个）。改一边不改另一边，test_editors.py 会失败。",
+      "comment": "= lexer.KEYWORDS（37 个）。改一边不改另一边，test_editors.py 会失败。**`int` / `float` / `char` / `string` 不在表里**（R1-A）：它们是 C++ 标量拼写/别名，词法上是普通标识符，由下面的 types 规则高亮。**词形逻辑运算符 `and` / `or` / `not` 已退役**（2026-11-11），移到 removed 规则。",
       "name": "keyword.control.elench",
-      "match": "\\b(?:and|break|continue|as|asm|assume|char|choose|const|dyn|else|enum|eof|error|extern|external|false|float|for|func|ident|if|impl|in|int|kernels|match|parallel|not|or|pub|return|rewrite|scope|self|spawn|spec|string|struct|trait|true|unsafe|use|while)\\b"
+      "match": "\\b(?:break|continue|as|asm|assume|choose|const|dyn|else|enum|eof|error|extern|external|false|for|func|ident|if|impl|in|kernels|match|parallel|pub|return|rewrite|scope|self|spawn|spec|struct|trait|true|unsafe|use|while)\\b"
     },
     "removed": {
-      "comment": "v0.68/v0.69 下线：词法仍识别，parser 报精确诊断。高亮成 deprecated，让读者看出不能再用。",
+      "comment": "已下线 / 已退役：词法仍识别，parser 或词法器报精确诊断。高亮成 deprecated，让读者看出不能再用。2026-11-11 起含词形逻辑运算符 `and` / `or` / `not`（报 E-Logic-WordOp）。",
       "name": "invalid.deprecated.elench",
-      "match": "\\b(?:end|fn|val|var)\\b"
+      "match": "\\b(?:and|end|fn|not|or|val|var)\\b"
     },
     "contextual": {
       "comment": "上下文关键字：只在 spec 体内有含义，词法上是普通标识符。",
@@ -90,8 +90,18 @@
           "match": "\\b(?:bool|u8|u16|u32|u64|u128|i8|i16|i32|i64|i128|f32|f64|usize|isize|void)\\b"
         },
         {
+          "comment": "C++ 标量拼写（R1-A）：词法上是标识符，语义归一到上面的宽度类型。",
+          "name": "storage.type.primitive.elench",
+          "match": "\\b(?:int|unsigned|signed|long|short|double|float|char|size_t|ssize_t|ptrdiff_t|intptr_t|uintptr_t|int8_t|int16_t|int32_t|int64_t|uint8_t|uint16_t|uint32_t|uint64_t)\\b"
+        },
+        {
+          "comment": "`std::` 里的类型名（R1-A）：与短名是同一个类型。",
           "name": "support.type.container.elench",
-          "match": "\\b(?:Vec|FixedVec|Option|Result|Slice)\\b"
+          "match": "\\bstd::(?:vector|map|set|unordered_map|unordered_set|array|optional|expected|string|pair|stack|queue|deque)\\b"
+        },
+        {
+          "name": "support.type.container.elench",
+          "match": "\\b(?:Vec|FixedVec|Option|Result|Slice|vector|map|set|unordered_map|unordered_set|array|optional|expected|string|pair)\\b"
         },
         {
           "name": "entity.name.type.elench",
@@ -184,7 +194,7 @@
       "patterns": [
         {
           "name": "keyword.operator.elench",
-          "match": "\\?!|\\?\\{|->|=>|::|==|!=|<=|>=|&&|\\|\\||\\+=|-=|\\*=|/=|\\?|=|<|>|\\+|-|\\*|/|%|!|&|\\|"
+          "match": "\\?!|\\?\\{|->|=>|::|==|!=|<=|>=|&&|\\|\\||\\+\\+|--|\\+=|-=|\\*=|/=|\\?|=|<|>|\\+|-|\\*|/|%|!|&|\\|"
         }
       ]
     },
