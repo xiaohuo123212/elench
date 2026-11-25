@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<!--
+  elench_playground.html —— Elench 成本契约检查的**单文件**网页（零依赖、无外链）。
+
+  两种用法：
+    1. 直接双击打开：先把 tools/elench_tool.py --http --port 8080 跑起来，页面里填地址。
+    2. 塞进平台的「HTML 内嵌代码」：把本文件整段贴进去即可（JS/CSS 全内联，不引任何 CDN）。
+
+  为什么是单文件：内嵌场景下平台通常不允许外链资源，也不一定有构建步骤。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Elench 成本契约检查</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --line: #262b36; --fg: #e6e8ee;
+    --dim: #9aa3b2; --ok: #35c37d; --debt: #f0a13a; --unk: #7a8290; --bad: #ef5b5b;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 14px/1.6 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
+  header { padding: 14px 18px; border-bottom: 1px solid var(--line); display: flex;
+           gap: 12px; align-items: center; flex-wrap: wrap; }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  header .sub { color: var(--dim); font-size: 12px; }
+  .grow { flex: 1; }
+  input[type=text] { background: var(--panel); color: var(--fg); border: 1px solid var(--line);
+                     border-radius: 6px; padding: 6px 9px; font: 12px var(--mono); min-width: 260px; }
+  button { background: #24418f; color: #fff; border: 0; border-radius: 6px;
+           padding: 7px 14px; font-size: 13px; cursor: pointer; }
+  button.ghost { background: transparent; border: 1px solid var(--line); color: var(--fg); }
+  button:disabled { opacity: .5; cursor: default; }
+  main { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding: 14px 18px 24px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  .col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .card > .hd { padding: 7px 11px; font-size: 12px; color: var(--dim);
+                border-bottom: 1px solid var(--line); font-family: var(--mono); }
+  textarea { width: 100%; min-height: 190px; resize: vertical; border: 0; outline: 0;
+             background: transparent; color: var(--fg); padding: 10px 11px;
+             font: 12.5px/1.55 var(--mono); tab-size: 2; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px;
+           font-weight: 600; }
+  .b-ok   { background: rgba(53,195,125,.15); color: var(--ok); }
+  .b-debt { background: rgba(240,161,58,.15); color: var(--debt); }
+  .b-unk  { background: rgba(122,130,144,.18); color: var(--unk); }
+  .b-bad  { background: rgba(239,91,91,.15);  color: var(--bad); }
+  .kappa { font: 13px/1.5 var(--mono); color: #cfe6ff; word-break: break-word;
+           padding: 10px 11px; border-bottom: 1px solid var(--line); }
+  .explain { padding: 9px 11px; color: var(--dim); font-size: 12.5px; }
+  .diag { padding: 8px 11px; border-top: 1px solid var(--line); font-size: 12.5px; }
+  .diag .code { font-family: var(--mono); color: var(--bad); }
+  .diag .where { color: var(--dim); font-family: var(--mono); font-size: 11.5px; }
+  .hint { color: var(--dim); font-size: 12px; }
+  .err { color: var(--bad); font-size: 12.5px; padding: 10px 11px; white-space: pre-wrap; }
+  pre.raw { margin: 0; padding: 10px 11px; font: 11.5px/1.5 var(--mono); color: var(--dim);
+            max-height: 240px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Elench 成本契约检查</h1>
+  <span class="sub">给一段源码，算出成本上界 κ，看它是否满足 <code>.tu</code> 里的 target</span>
+  <span class="grow"></span>
+  <label class="hint" for="ep">服务地址</label>
+  <input id="ep" type="text" placeholder="http://127.0.0.1:8080">
+  <button id="save" class="ghost" title="存到本机 localStorage">记住</button>
+</header>
+
+<main>
+  <div class="col">
+    <div class="card">
+      <div class="hd">probe.tu —— 契约（target 是作者承诺的上界）</div>
+      <textarea id="tu" spellcheck="false"></textarea>
+    </div>
+    <div class="card">
+      <div class="hd">probe.eln —— 实现（可以有函数体，零声明）</div>
+      <textarea id="eln" spellcheck="false"></textarea>
+    </div>
+    <div class="row">
+      <button id="cost">算 κ 并判定</button>
+      <button id="check" class="ghost">只做静态检查</button>
+      <span class="grow"></span>
+      <span id="status" class="hint"></span>
+    </div>
+    <div class="hint">
+      两个都只读源码、<b>不执行</b>代码。判定：<span class="badge b-ok">ok</span> 达成 ·
+      <span class="badge b-debt">debt</span> 超出承诺（是债务） ·
+      <span class="badge b-unk">unknown</span> 无法判定。
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="card">
+      <div class="hd">结果</div>
+      <div id="out" class="explain">还没跑。</div>
+    </div>
+    <details class="card">
+      <summary class="hd" style="cursor:pointer">原始 JSON（给机器看的）</summary>
+      <pre id="raw" class="raw">—</pre>
+    </details>
+  </div>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  var SAMPLE_TU = [
+    "spec sum_all(const vector<u64>& xs) -> u64 {",
+    "    effects {};",
+    "    target { time: { max: O(n) }, allocation: { max: 0 }, };",
+    "}",
+    ""
+  ].join("\n");
+
+  var SAMPLE_ELN = [
+    "u64 sum_all(const vector<u64>& xs) {",
+    "    u64 s = 0;",
+    "    for (auto x : xs) { s = s + x; }",
+    "    return s;",
+    "}",
+    ""
+  ].join("\n");
+
+  var $ = function (id) { return document.getElementById(id); };
+  var epEl = $("ep"), tuEl = $("tu"), elnEl = $("eln");
+  var outEl = $("out"), rawEl = $("raw"), statusEl = $("status");
+
+  // ---- 记住地址（内嵌场景下 localStorage 可能不可用，包一层 try）
+  try {
+    var saved = window.localStorage.getItem("elench.endpoint");
+    epEl.value = saved || "http://127.0.0.1:8080";
+  } catch (e) { epEl.value = "http://127.0.0.1:8080"; }
+  tuEl.value = SAMPLE_TU;
+  elnEl.value = SAMPLE_ELN;
+
+  $("save").addEventListener("click", function () {
+    try { window.localStorage.setItem("elench.endpoint", epEl.value.trim()); } catch (e) {}
+    statusEl.textContent = "地址已记住";
+  });
+
+  function esc(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  function badge(v) {
+    var map = { ok: ["b-ok", "ok 达成"], debt: ["b-debt", "debt 债务"], unknown: ["b-unk", "unknown 无法判定"] };
+    var m = map[v] || ["b-unk", v || "（无判决）"];
+    return '<span class="badge ' + m[0] + '">' + esc(m[1]) + "</span>";
+  }
+
+  function renderCost(d) {
+    var html = '<div style="padding:10px 11px 4px">阶段判决 ' + badge(d.verdict) + "</div>";
+    var fns = d.functions || {};
+    var names = Object.keys(fns);
+    if (!names.length) { html += '<div class="explain">没有算出任何函数（是不是没有实现？）</div>'; }
+    names.forEach(function (n) {
+      var f = fns[n] || {};
+      html += '<div class="kappa"><b>' + esc(n) + "</b>　κ ≤ " + esc(f.kappa) + "</div>";
+      html += '<div class="explain">' + badge(f.verdict) + "　" + esc(f.explanation || "") + "</div>";
+      if (f.allocation_verdict) {
+        html += '<div class="explain">分配：' + esc(f.allocation || "—") +
+                "　" + badge(f.allocation_verdict) + "　" + esc(f.allocation_explanation || "") + "</div>";
+      }
+    });
+    if ((d.diagnostics || []).length) {
+      d.diagnostics.forEach(function (x) {
+        html += '<div class="diag"><span class="code">' + esc(x.code) + "</span> " +
+                '<span class="where">@' + esc(x.line) + ":" + esc(x.col) + "</span>　" +
+                esc(x.message) + (x.fix ? '<div class="where">改法：' + esc(x.fix) + "</div>" : "") + "</div>";
+      });
+    }
+    outEl.innerHTML = html;
+  }
+
+  function renderCheck(d) {
+    var okBadge = d.check_ok ? '<span class="badge b-ok">通过</span>'
+                             : '<span class="badge b-bad">未通过</span>';
+    var html = '<div style="padding:10px 11px 4px">静态检查 ' + okBadge +
+               '　<span class="hint">' + (d.functions || []).length + " 个函数</span></div>";
+    (d.functions || []).forEach(function (f) {
+      html += '<div class="kappa"><b>' + esc(f.name) + "</b>　state=" + esc(f.state) +
+              "　" + (f.has_target ? "有契约" : "无契约") + "</div>";
+    });
+    var ds = d.diagnostics || [];
+    if (!ds.length) { html += '<div class="explain">没有诊断。</div>'; }
+    ds.forEach(function (x) {
+      html += '<div class="diag"><span class="code">' + esc(x.code) + "</span> " +
+              '<span class="where">@' + esc(x.line) + ":" + esc(x.col) + "</span>　" +
+              esc(x.message) + (x.fix ? '<div class="where">改法：' + esc(x.fix) + "</div>" : "") + "</div>";
+    });
+    outEl.innerHTML = html;
+  }
+
+  function post(op) {
+    var base = (epEl.value || "").trim().replace(/\/+$/, "");
+    if (!base) { outEl.innerHTML = '<div class="err">先填服务地址。</div>'; return; }
+    var body = { op: op, tu: tuEl.value, eln: elnEl.value };
+    // 路径写死成两种，不用 `base + "/" + op` 拼：内嵌场景下要能一眼看出它会打哪些端点
+    var path = (op === "cost") ? "/cost" : "/check";
+    statusEl.textContent = "请求中…";
+    var btns = [$("cost"), $("check")];
+    btns.forEach(function (b) { b.disabled = true; });
+
+    fetch(base + path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    }).then(function (r) {
+      return r.text().then(function (t) {
+        if (!r.ok) { throw new Error("HTTP " + r.status + "：" + t.slice(0, 300)); }
+        return JSON.parse(t);
+      });
+    }).then(function (d) {
+      rawEl.textContent = JSON.stringify(d, null, 2);
+      if (d.error) { outEl.innerHTML = '<div class="err">' + esc(d.error) + "</div>"; return; }
+      if (op === "cost") { renderCost(d); } else { renderCheck(d); }
+      statusEl.textContent = (d.elapsed_ms != null ? d.elapsed_ms + " ms" : "");
+    }).catch(function (e) {
+      outEl.innerHTML = '<div class="err">连不上或返回不是 JSON。\n' + esc(e.message) +
+        "\n\n先确认服务在跑：\n  python -B tools/elench_tool.py --http --port 8080" +
+        "\n如果页面是被平台内嵌的，还要确认平台能访问到那个地址（127.0.0.1 只有你自己能访问）。</div>";
+      statusEl.textContent = "";
+    }).then(function () {
+      btns.forEach(function (b) { b.disabled = false; });
+    });
+  }
+
+  $("cost").addEventListener("click", function () { post("cost"); });
+  $("check").addEventListener("click", function () { post("check"); });
+})();
+</script>
+</body>
+</html>

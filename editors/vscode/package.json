@@ -2,7 +2,7 @@
   "name": "elench",
   "displayName": "Elench",
   "description": "Elench（Elenchus）语法高亮：成本契约语言 .tu / .eln。命令 `elench` 由 elench-lang 提供。",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "publisher": "xiaohuo123212",
   "license": "Apache-2.0",
   "icon": "./icon.png",

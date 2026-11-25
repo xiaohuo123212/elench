@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Elench contributors
 """test_measure_incremental.py —— 分档表能装多个 label，且能只改其中一段

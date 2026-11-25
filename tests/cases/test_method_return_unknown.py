@@ -153,6 +153,9 @@ RECEIVERS = [
     ("unordered_set", "unordered_set<u64> xs;", "xs", {
         "size": "", "empty": "", "insert": "1", "contains": "1",
         "remove": "1", "erase": "1", "clear": "", "keys": "", "values": ""}),
+    ("deque", "deque<u64> xs;", "xs", {
+        "size": "", "empty": "", "push_back": "1", "push_front": "1",
+        "pop_back": "", "pop_front": "", "len": ""}),
     ("stack", "stack<u64> xs;", "xs", {
         "size": "", "empty": "", "push": "1", "enqueue": "1", "pop": "",
         "dequeue": "", "top": "", "peek": "", "front": "", "clear": ""}),

@@ -40,6 +40,9 @@ editors/vscode/runtime/
 # 本地私有材料（不进公开仓库）
 _private/
 
+# 归档区：已确认无引用的一次性脚本与本机临时产物（见 _archive/README.md）
+/_archive/
+
 # 打包产物
 dist/
 build/
@@ -70,3 +73,6 @@ artifact-report.md
 # 测试/图表产物（每次跑测试会重写）
 otel.ndjson
 pick-图.svg
+
+# 生成物：	ools/audit_numbers.py --json 的输出快照（历史上入库过一份 UTF-16 的，json.load 都读不了）
+/audit-numbers.json

@@ -1,4 +1,4 @@
-﻿// 05_ring_buffer.cpp —— struct + 成员函数（预期会挡在"没有成员函数"这一条）
+// 05_ring_buffer.cpp —— struct + 成员函数（预期会挡在"没有成员函数"这一条）
 #include <cstdio>
 #include <vector>
 

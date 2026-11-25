@@ -325,6 +325,8 @@ METHOD_TABLE = {
                       "erase", "clear", "keys", "values"},
     "unordered_set": {"size", "empty", "insert", "contains", "remove", "erase",
                       "clear", "keys", "values"},
+    "deque": {"size", "empty", "push_back", "push_front", "pop_back",
+              "pop_front", "len"},
     "stack": {"size", "empty", "push", "enqueue", "pop", "dequeue", "top",
               "peek", "front", "clear"},
     "queue": {"size", "empty", "push", "enqueue", "pop", "dequeue", "top",
@@ -2437,7 +2439,7 @@ class TypeChecker:
         把它放进声明 / 实参 / 运算 / 下标 / 条件 / 方法接收者里，下游只能
         各自兜底，于是同一个 `.eln` 三个命令三种结论：
 
-        | 写法 | 改前 check | 改前 run | 改前 `dsh cpp` |
+        | 写法 | 改前 check | 改前 run | 改前 `elench cpp` |
         |---|---|---|---|
         | `print(xs.assign(2, 0));` | ✓ 放行 | ✓ 打 `None` | ✗ `E-Cxx-Unsupported` |
         | `print(g());`（`g` 返回 `()`） | ✓ 放行 | ✓ 打 `None` | ✓ 出码，**g++ 编不过** |
@@ -2445,7 +2447,7 @@ class TypeChecker:
         | `xs.assign(2, 0).size()` | ✓ 放行 | ✗ `E-Type-NotContainer` | ✗ |
         | `if (g() == 0)` | ✓ 放行 | ✓ 走 false 分支 | ✓ 出码，**g++ 编不过** |
 
-        `run` / `build` / `dsh cpp` 都先跑 `check`，所以这一条报出来之后
+        `run` / `build` / `elench cpp` 都先跑 `check`，所以这一条报出来之后
         三方结论自动一致（`run` 打「先修完再 run/build」）。
 
         ## 不误伤的形状
@@ -2964,7 +2966,7 @@ class TypeChecker:
                     self._err_void_value(
                         f"调用 `{name or '?'}` 的实参", n,
                         note=("（这条路径以前是**下游各自兜底**：`run` 对 `print` "
-                              "打 `None`，`dsh cpp` 对 `assign` 这类值位置报 "
+                              "打 `None`，`elench cpp` 对 `assign` 这类值位置报 "
                               "`E-Cxx-Unsupported`。那些兜底**都还在**，但"
                               "**兜底不是许可**——判据只应该有 check 这一条。）"))
                     return TY_UNKNOWN
@@ -3047,6 +3049,19 @@ class TypeChecker:
             if name in ("push_heap", "pop_heap"):
                 # 堆原语（对齐 std::push_heap / std::pop_heap）：返回 u64。
                 return TY_U64
+            if name == "text_join" and args:
+                # **静态拦掉**：`text_join` 只接受 `text_split(...)` 的返回值（类型
+                # `Split`）。以前不查，传 `vector<u8>` 会在**运行期**抛宿主异常
+                # `AttributeError: 'Text' object has no attribute 'parts'`——
+                # 那不是语言诊断，用户看到的是 Python 内部细节。
+                _t0 = self._deref_ty(args[0])
+                _n0 = _t0.name if _t0.kind == "name" else ""
+                if _n0 != "Split":
+                    self._err("E-Type-ArgMismatch",
+                              f"`text_join` 的第一个实参必须是 `text_split(...)` 的"
+                              f"返回值（类型 `Split`），这里是 `{_n0 or '其它类型'}`。\n"
+                              f"改法：先 `Split sp = text_split(s, {','});` 再 "
+                              f"`text_join(sp, sep)`；要拼 `Vec<u8>` 直接写 `text_concat(a, b)`。", n)
             if name == "swap":
                 # 原地交换（B3）：3 个实参，返回 u64（0）。
                 if len(args) != 3:
@@ -3174,20 +3189,20 @@ class TypeChecker:
             name = n.name or ""
             # **接收者是 `void`**（2026-11-13）：`xs.assign(2, 0).size()` /
             # `xs.push_back(1).size()` / `xs.clear().size()` 以前 check 绿，
-            # `run` 报 `E-Type-NotContainer`、`dsh cpp` 报 `E-Cxx-Unsupported`，
-            # 而 `xs.push_back(1).size()` 连 `dsh cpp` 都放行——生成物才被
+            # `run` 报 `E-Type-NotContainer`、`elench cpp` 报 `E-Cxx-Unsupported`，
+            # 而 `xs.push_back(1).size()` 连 `elench cpp` 都放行——生成物才被
             # g++ 拒。链式调用要求前一步**有值**：`void` 只能作语句。
             if _is_void_ty(recv):
                 self._err_void_value(
                     f"方法 `.{name}()` 的接收者", n,
-                    note=("（改前 `run` 报 `E-Type-NotContainer`、`dsh cpp` 报 "
+                    note=("（改前 `run` 报 `E-Type-NotContainer`、`elench cpp` 报 "
                           "`E-Cxx-Unsupported`——两道兜底都还在，只是链式调用"
                           "本来就该在 check 期被挡。）"))
                 return TY_UNKNOWN
             # **标量 / 枚举上调容器方法**（2026-11-13，缺口 ③）：
             # `u64 x = 5; x.size()` 以前 check 绿——下面 `size`/`length`
             # 分支不看接收者，一律返回 `u64`；`run` 才报
-            # `E-Type-NotContainer`，而 `dsh cpp` **照样出码**（`x.size()`
+            # `E-Type-NotContainer`，而 `elench cpp` **照样出码**（`x.size()`
             # 连 g++ 都过不了）。容器方法只对**容器**成立。
             #
             # 判据只认**已知的标量 / 枚举**：`unknown`（推不出）与类型参数
@@ -3283,6 +3298,18 @@ class TypeChecker:
             if name in ("at", "get"):
                 # `at(i)` / `map.get(k)` 都返回**元素**（`map<K,V>` 是 `V`）。
                 return _elem_ty_of(recv)
+            if _recv_head == "deque":
+                # **`deque<T>` 的方法返回类型**（2026-11-25 接线）：
+                # `push_*` → u64(0)（与 `deque_push_*` 内建一致）、`pop_*` → `Option<T>`、
+                # `size` / `len` → u64、`empty` → bool。
+                if name in ("push_back", "push_front"):
+                    return TY_U64
+                if name in ("pop_back", "pop_front"):
+                    return Ty("name", "optional", [TY_UNKNOWN])
+                if name in ("size", "len", "length"):
+                    return TY_U64
+                if name in ("empty", "is_empty"):
+                    return Ty("name", "bool")
             if name in ("push_back", "push", "enqueue"):
                 # **`stack.push` / `queue.push` / `enqueue` 返回 u64(0)**：
                 # `interp.py` 的 `StackVal` / `QueueVal` 分支写死 `_u64(0)`
@@ -3299,7 +3326,7 @@ class TypeChecker:
                 # 类型**（`vector<T>`），于是 `vector<u64> ys = xs.assign(2, 0);`
                 # 过了 check——但 `std::vector::assign` 返回 void，发射器直译
                 # 出的 C++ 编不过（`conversion from 'void' to non-scalar type`）。
-                # 这就是"check 绿、`dsh cpp` 红"的三方不一致。
+                # 这就是"check 绿、`elench cpp` 红"的三方不一致。
                 #
                 # 本轮的裁决：**统一成 void**（`assign` 是"清空后填 n 个 x"的
                 # 写操作，本来就不产出值）：
@@ -3537,7 +3564,7 @@ class TypeChecker:
             if n.children:
                 _src_t = self._expr(n.children[0], sc)
                 # **`void as T`**（2026-11-13）：`(g()) as u64` 以前 check 绿、
-                # `run` 绿（`None` 转成 0 之类的静默值），`dsh cpp` 报
+                # `run` 绿（`None` 转成 0 之类的静默值），`elench cpp` 报
                 # `E-Cxx-Unsupported`。`as` 要的是**操作数的值**。
                 if _is_void_ty(_src_t):
                     self._err_void_value("`as` 的操作数", n)
@@ -3556,7 +3583,7 @@ class TypeChecker:
                 return TY_UNKNOWN
             # **下标表达式本身**（2026-11-13）：这个分支以前**根本不进
             # `children[1]`**——`xs[g()]` / `xs[xs.assign(2, 0)]` 里的 void
-            # 一条诊断都没有：`run` 抛 `E-Index-Type`、`dsh cpp` 出码给
+            # 一条诊断都没有：`run` 抛 `E-Index-Type`、`elench cpp` 出码给
             # g++ 才拒（`array subscript is not an integer`）。
             # 这里只补"必须是有值的表达式"；下标是不是整数由运行期/发射器
             # 各自的既有口径管（不在这里新增更严的整数判据）。
@@ -3578,7 +3605,7 @@ class TypeChecker:
             # **标量 / 枚举不能下标**（2026-11-13，缺口 ③ 的旁支）：
             # `u64 x = 5; x[0]` 以前 check 绿——这个分支只按容器取元素类型，
             # 非容器一律落到最后的 `TY_UNKNOWN`；`run` 报 `E-Type-NotIndexable`
-            # （`interp.py` 的容器分支），`dsh cpp` 还照样出码（`x[0]` 连 g++
+            # （`interp.py` 的容器分支），`elench cpp` 还照样出码（`x[0]` 连 g++
             # 都过不了）。与 `.size()` 同一条判据：**只有容器能下标**。
             # 只认**已知的标量 / 枚举**：`unknown` / 类型参数（泛型 `T`）不猜。
             _bh = base.name if base.kind == "name" else ""
@@ -3845,6 +3872,489 @@ class _TypeRecorder(TypeChecker):
         if n is not None:
             self.ty_of[id(n)] = ty
         return ty
+
+
+# ---------------------------------------------------------------------------
+# 第 20 条（--compat）：模板单态化
+# ---------------------------------------------------------------------------
+
+def _split_ty(s):
+    """把类型串拆成 `(头, [实参…])`：`vector<u64>` → `("vector", ["u64"])`。
+
+    也接受 `Ty` 对象（`_TypeRecorder` 记的就是它）——统一走 `render()`。
+    """
+    if hasattr(s, "render"):
+        s = s.render()
+    s = (s or "").strip()
+    for pre in ("const ", "mut "):
+        if s.startswith(pre):
+            s = s[len(pre):].strip()
+    if s.endswith("&"):
+        s = s[:-1].strip()
+    if s.endswith("*"):
+        s = s[:-1].strip()
+    if "<" not in s or not s.endswith(">"):
+        return s, []
+    head = s[:s.index("<")].strip()
+    inner = s[s.index("<") + 1:-1]
+    args, depth, cur = [], 0, ""
+    for ch in inner:
+        if ch == "<":
+            depth += 1
+        elif ch == ">":
+            depth -= 1
+        if ch == "," and depth == 0:
+            args.append(cur.strip()); cur = ""
+        else:
+            cur += ch
+    if cur.strip():
+        args.append(cur.strip())
+    return head, args
+
+
+def _ty_node(name: str) -> Node:
+    """把类型串做成 `type-name` 节点（支持一层嵌套实参）。"""
+    head, args = _split_ty(name)
+    n = Node("type-name", 0, 0, name=head)
+    if args:
+        ta = Node("type-args", 0, 0)
+        for a in args:
+            ta.add(_ty_node(a))
+        n.add(ta)
+    return n
+
+
+def _unify(param: Node, arg_ty: str, bind: Dict[str, str], tparams) -> bool:
+    """把形参类型节点与实参类型串**对齐**，能对齐就把类型参数绑上。"""
+    if param is None or not arg_ty:
+        return False
+    k = getattr(param, "kind", "")
+    if k in ("type-ref", "type-ptr"):
+        return _unify(param.children[0] if param.children else None, arg_ty, bind, tparams)
+    if k != "type-name":
+        return False
+    name = param.name or ""
+    if name in tparams:
+        prev = bind.get(name)
+        if prev is None:
+            bind[name] = arg_ty
+            return True
+        return prev == arg_ty
+    args = [c for c in param.children if getattr(c, "kind", "") == "type-args"]
+    head, aargs = _split_ty(arg_ty)
+    if name != head:
+        return False
+    if not args:
+        return True
+    p_args = [c for c in args[0].children]
+    if len(p_args) != len(aargs):
+        return False
+    return all(_unify(pa, aa, bind, tparams) for pa, aa in zip(p_args, aargs))
+
+
+def _subst(node: Node, bind: Dict[str, str]) -> Node:
+    """就地替换类型参数（`type-name` / `struct-literal` / `type-arg`）。"""
+    if node is None:
+        return node
+    k = getattr(node, "kind", "")
+    if k == "type-name" and (node.name or "") in bind:
+        new = _ty_node(bind[node.name])
+        new.line, new.col = node.line, node.col
+        return new
+    if k == "struct-literal" and (node.name or "") in bind:
+        node.name = _split_ty(bind[node.name])[0]
+    for i, c in enumerate(list(node.children)):
+        node.children[i] = _subst(c, bind)
+    return node
+
+
+def _ty_text(node) -> str:
+    """类型节点 → 类型串（`type-name Box` + `type-args [u64]` → `Box<u64>`）。"""
+    if node is None:
+        return ""
+    k = getattr(node, "kind", "")
+    if k in ("type-ref", "type-ptr"):
+        return _ty_text(node.children[0] if node.children else None)
+    if k != "type-name":
+        return ""
+    ta = next((c for c in node.children if getattr(c, "kind", "") == "type-args"), None)
+    if ta is None:
+        return node.name or ""
+    return "%s<%s>" % (node.name or "", ", ".join(_ty_text(c) for c in ta.children))
+
+
+def _instantiate_class_templates(eln_mod: Node) -> Dict[str, Node]:
+    """**类模板单态化**（第 20 条的后半）：`template<typename T> struct Box` 按使用点
+    `Box<u64>` 实例化成具体 struct `Box__u64`。
+
+    与函数模板同一条路线（用户提的那条）：C++ 编译器也是按使用点实例化。
+    只做**位置对应**：`Box<u64>` 的实参按顺序绑到 `T`，不需要推断，也就没有
+    "猜错"的余地。偏特化 / 非类型参数 / 可变参数**不做**。
+    """
+    tmpls = {}
+    for it in eln_mod.children:
+        if getattr(it, "kind", "") != "struct":
+            continue
+        tps = next((c for c in it.children if getattr(c, "kind", "") == "type-params"), None)
+        if tps is not None:
+            tmpls[it.name] = (it, [p.name for p in tps.children if getattr(p, "name", "")])
+    if not tmpls:
+        return {}, {}
+
+    made: Dict[str, Node] = {}
+    instances: List[tuple] = []
+
+    def instantiate(tname: str, args: List[str]) -> Optional[str]:
+        tmpl, tparams = tmpls[tname]
+        if len(args) != len(tparams):
+            return None
+        inst_name = "%s__%s" % (tname, "_".join(
+            a.replace("<", "_").replace(">", "").replace(",", "_").replace(" ", "") for a in args))
+        if inst_name in made:
+            return inst_name
+        import copy as _copy
+        inst = _copy.deepcopy(tmpl)
+        inst.name = inst_name
+        inst.children = [c for c in inst.children if getattr(c, "kind", "") != "type-params"]
+        _subst(inst, dict(zip(tparams, args)))
+        inst.value = dict(getattr(inst, "value", {}) or {})
+        inst.value["instantiated_from"] = tname
+        eln_mod.add(inst)
+        made[inst_name] = inst
+        instances.append((tname, inst_name, dict(zip(tparams, args))))
+        return inst_name
+
+    def walk(node) -> None:
+        if node is None:
+            return
+        k = getattr(node, "kind", "")
+        if k == "type-name" and (node.name or "") in tmpls:
+            ta = next((c for c in node.children if getattr(c, "kind", "") == "type-args"), None)
+            if ta is not None:
+                args = [_ty_text(c) for c in ta.children]
+                inst_name = instantiate(node.name, args)
+                if inst_name:
+                    node.name = inst_name
+                    node.children = [c for c in node.children
+                                     if getattr(c, "kind", "") != "type-args"]
+                    return
+        for c in list(getattr(node, "children", []) or []):
+            walk(c)
+
+    for it in list(eln_mod.children):
+        walk(it)
+
+    # 字面量跟着改名：`Box<u64> b{1}` 里的 `Box` 要变成 `Box__u64`，否则类型对不上。
+    def fix_literals(node) -> None:
+        if node is None:
+            return
+        if getattr(node, "kind", "") == "var-decl" and len(node.children) >= 2:
+            ty, init = node.children[0], node.children[1]
+            if (getattr(ty, "kind", "") == "type-name"
+                    and (ty.name or "") in made
+                    and getattr(init, "kind", "") == "struct-literal"):
+                init.name = ty.name
+        for c in list(getattr(node, "children", []) or []):
+            fix_literals(c)
+
+    for it in list(eln_mod.children):
+        fix_literals(it)
+
+    # **成员函数也要跟着实例化**：`struct P { u64 sum() {…} }` 在解析期就被降级成
+    # 兄弟自由函数 `P_sum(recv: P, …)`（第 13 条）。struct 实例化成 `P__u64` 之后，
+    # 那个自由函数的 `recv` 还指着模板 `P`（已经不存在）——实测报
+    # `E-Type-Unknown: 未知类型名 P`。所以按实例再克隆一份：`P__u64_sum`。
+    member_map = _clone_members_for_instances(eln_mod, tmpls, instances)
+
+    # **模板定义本身不再是"类型"**：实例化完就把 `template` struct 摘掉。
+    # 不摘的话它的字段类型还是 `T`，下游会报 `E-Type-Unknown: 未知类型名 T`
+    # ——那个 `T` 是模板参数，不是"忘了定义的类型"。C++ 里未被使用的模板同样
+    # 不产生任何实体（也不参与类型检查）。
+    eln_mod.children = [
+        c for c in eln_mod.children
+        if not (getattr(c, "kind", "") == "struct"
+                and any(getattr(k, "kind", "") == "type-params" for k in c.children))
+    ]
+    return made, member_map
+
+
+def _clone_members_for_instances(eln_mod: Node, tmpls, instances) -> Dict[str, Dict[str, str]]:
+    """给每个类模板实例克隆它的成员函数：`P_sum` → `P__u64_sum`。
+
+    返回 `{实例名: {原函数名: 新函数名}}`，调用点改写要用它。
+    """
+    import copy as _copy
+    out: Dict[str, Dict[str, str]] = {}
+    _originals: set = set()
+    for tname in tmpls:
+        insts = [(n, b) for (tm, n, b) in instances if tm == tname]
+        if not insts:
+            continue
+        for fn in [c for c in list(eln_mod.children) if getattr(c, "kind", "") == "fn"]:
+            nm = fn.name or ""
+            if not nm.startswith(tname + "_"):
+                continue
+            params = next((c for c in fn.children if getattr(c, "kind", "") == "params"), None)
+            if params is None or not params.children:
+                continue
+            recv = params.children[0]
+            recv_ty = _ty_text(recv.children[0] if recv.children else None)
+            if recv_ty != tname:
+                continue
+            for inst_name, bind in insts:
+                inst_fn = _copy.deepcopy(fn)
+                inst_fn.name = inst_name + nm[len(tname):]
+                _subst(inst_fn, bind)
+                _retarget_receiver(inst_fn, tname, inst_name)
+                eln_mod.add(inst_fn)
+                out.setdefault(inst_name, {})[nm] = inst_fn.name
+            _originals.add(nm)
+
+    # **模板的成员函数本身也要摘掉**：它的接收者类型是模板名（`P&`），模板已经被
+    # 摘了，留着就是 `E-Type-Unknown: 未知类型名 P` + `E-Ref-Scalar`。C++ 里
+    # 模板的成员函数只有被实例化时才会生成代码，未实例化时不参与检查。
+    if _originals:
+        eln_mod.children = [
+            c for c in eln_mod.children
+            if not (getattr(c, "kind", "") == "fn" and (c.name or "") in _originals)
+        ]
+    return out
+
+
+def _retarget_receiver(fn: Node, old: str, new: str) -> None:
+    """把成员函数第一个形参（接收者）的类型从模板名换成实例名。"""
+    params = next((c for c in fn.children if getattr(c, "kind", "") == "params"), None)
+    if params is None or not params.children:
+        return
+    p0 = params.children[0]
+    ty = p0.children[0] if p0.children else None
+    while ty is not None and getattr(ty, "kind", "") in ("type-ref", "type-ptr"):
+        ty = ty.children[0] if ty.children else None
+    if ty is not None and getattr(ty, "kind", "") == "type-name" and (ty.name or "") == old:
+        ty.name = new
+
+
+def resolve_generics(eln_mod: Optional[Node],
+                     tu_mod: Optional[Node] = None) -> List[Diag]:
+    """**模板单态化**（第 20 条）：按调用点的实参类型，把泛型函数变成具体重载。
+
+    用户提的路线正是这个：`template<typename T> u64 len(const vector<T>&)` 在
+    `len(xs)`（`xs` 是 `vector<u64>`）处**实例化**成 `len__u64(const vector<u64>&)`，
+    然后把调用点改成它。C++ 编译器做的也是这件事（instantiation）。
+
+    **只做单态化，不做模板元编程**：没有偏特化 / SFINAE / 可变参数 / 非类型参数。
+    推断不出来的地方**不猜**——调用点保持原样，让成对类型检查报
+    `E-Type-ArgMismatch`（那条消息本来就说清了形参与实参的类型）。
+    """
+    if eln_mod is None:
+        return []
+    # 先做**类模板**：它不需要类型信息（实参按位置对应），而且做完之后
+    # 下游看到的 struct 已经是具体的，`T` 不会再冒出来。
+    _cls_made, _member_map = _instantiate_class_templates(eln_mod)
+    generics = {}
+    for it in eln_mod.children:
+        if getattr(it, "kind", "") != "fn":
+            continue
+        tps = next((c for c in it.children if getattr(c, "kind", "") == "type-params"), None)
+        if tps is not None:
+            generics[it.name] = (it, [p.name for p in tps.children if getattr(p, "name", "")])
+    # **只有类模板时也要继续**：成员调用 `p.sum()` 已经被降级成 `P_sum(p)`，
+    # 得靠类型把它改写成 `P__u64_sum(p)`。早退会让它停在 `P_sum` 上，
+    # 而那个函数刚刚被摘掉 → `E-Call-Undeclared`。
+    if not generics and not _member_map:
+        return []
+
+    try:
+        rec = _TypeRecorder(tu_mod, eln_mod)
+        rec.check()
+        ty_of = rec.ty_of
+    except Exception:                                    # noqa: BLE001
+        return []
+
+    made: Dict[tuple, str] = {}
+
+    # 成员调用改写表：`P_sum` → 各实例的 `P__u64_sum`。靠**第一个实参的静态类型**
+    # 选实例——那正是 `this` 的类型。
+    _member_by_fn: Dict[str, Dict[str, str]] = {}
+    for _inst, _mp in (_member_map or {}).items():
+        for _old, _new in _mp.items():
+            _member_by_fn.setdefault(_old, {})[_inst] = _new
+
+    def rewrite_member_calls(node) -> None:
+        if node is None:
+            return
+        if getattr(node, "kind", "") == "call" and (node.name or "") in _member_by_fn:
+            args_node = next((c for c in node.children if getattr(c, "kind", "") == "args"), None)
+            if args_node is not None and args_node.children:
+                recv_ty = ty_of.get(id(args_node.children[0]))
+                recv_s = recv_ty.render() if hasattr(recv_ty, "render") else ""
+                cand = _member_by_fn[node.name]
+                if recv_s in cand:
+                    node.name = cand[recv_s]
+        for c in list(getattr(node, "children", []) or []):
+            rewrite_member_calls(c)
+
+    for _it in list(eln_mod.children):
+        rewrite_member_calls(_it)
+
+    def walk(node) -> None:
+        if node is None:
+            return
+        if getattr(node, "kind", "") == "call" and (node.name or "") in generics:
+            fn, tparams = generics[node.name]
+            params = next((c for c in fn.children if getattr(c, "kind", "") == "params"), None)
+            args_node = next((c for c in node.children if getattr(c, "kind", "") == "args"), None)
+            p_list = [c for c in (params.children if params else [])]
+            a_list = [c for c in (args_node.children if args_node else [])]
+            bind: Dict[str, str] = {}
+            ok = len(p_list) == len(a_list)
+            if ok:
+                for p, a in zip(p_list, a_list):
+                    pty = p.children[0] if p.children else None
+                    _t = ty_of.get(id(a))
+                    aty = _t.render() if hasattr(_t, "render") else (_t or "")
+                    if not _unify(pty, aty, bind, set(tparams)):
+                        ok = False
+                        break
+            if ok and len(bind) == len(tparams):
+                key = (node.name, tuple(sorted(bind.items())))
+                inst_name = made.get(key)
+                if inst_name is None:
+                    import copy as _copy
+                    inst = _copy.deepcopy(fn)
+                    inst.name = "%s__%s" % (node.name, "_".join(
+                        bind[t].replace("<", "_").replace(">", "").replace(",", "_")
+                        for t in tparams))
+                    # **实例化完就不是泛型了**：必须把 `type-params` 摘掉，
+                    # 否则下游还会把它当模板、再去找类型实参（实测报
+                    # `E-Type-InferFailed`，明明已经绑定过）。
+                    inst.children = [c for c in inst.children
+                                     if getattr(c, "kind", "") != "type-params"]
+                    _subst(inst, bind)
+                    inst.value = dict(getattr(inst, "value", {}) or {})
+                    inst.value["instantiated_from"] = node.name
+                    eln_mod.add(inst)
+                    made[key] = inst.name
+                    inst_name = inst.name
+                node.name = inst_name
+                # 实例化后的调用不再带类型实参
+                return
+        for c in list(getattr(node, "children", []) or []):
+            walk(c)
+
+    for it in list(eln_mod.children):
+        walk(it)
+    return []
+
+
+#: 二元运算符的**拼写** → 第 21 条的内部键（与 `parser.OPERATOR_KEYS` 对齐）。
+_OP_SYMBOL_TO_KEY = {
+    "<": "lt", ">": "gt", "<=": "le", ">=": "ge",
+    "==": "eq", "!=": "ne",
+    "+": "add", "-": "sub", "*": "mul", "/": "div",
+}
+
+
+def _op_base(s: str) -> str:
+    """把 `const P&` / `P*` 归一成 `P`（只剥最外层限定符）。"""
+    s = (s or "").strip()
+    changed = True
+    while changed:
+        changed = False
+        for pre in ("const ", "mut "):
+            if s.startswith(pre):
+                s = s[len(pre):].strip()
+                changed = True
+        for suf in ("&", "*"):
+            if s.endswith(suf):
+                s = s[:-1].strip()
+                changed = True
+    return s
+
+
+def _op_overloads(eln_mod: Node) -> Dict[tuple, str]:
+    """收集运算符重载：`{(键, 第一个形参的类型名): 函数名}`。"""
+    out: Dict[tuple, str] = {}
+    for it in eln_mod.children:
+        if getattr(it, "kind", "") != "fn":
+            continue
+        key = (getattr(it, "value", {}) or {}).get("op")
+        if not key:
+            continue
+        params = next((c for c in it.children if getattr(c, "kind", "") == "params"), None)
+        if params is None or not params.children:
+            continue
+        recv = params.children[0]
+        ty = _op_base(_ty_text(recv.children[0] if recv.children else None))
+        if ty:
+            out[(key, ty)] = it.name
+    return out
+
+
+def resolve_operators(eln_mod: Optional[Node],
+                      tu_mod: Optional[Node] = None) -> List[Diag]:
+    """**运算符重载**（第 21 条）：把 `a < b` / `a == b` / `a[i]` 改写成对
+    重载函数的调用。
+
+    为什么必须**改写**而不是"允许通过"：κ 是按语法结构数出来的。只放行的话
+    `a < b` 会被当成一次比较（常数成本），而用户写的 `operator<` 里可能有一整个
+    循环——那样 κ 就不是上界了，整套东西的意义就没了。改写成调用之后，κ 自然
+    把被调函数的成本算进去（等价性判据：`a < b` 的 κ == `less(a, b)` 的 κ）。
+
+    判据用**两侧操作数的静态类型**：两个都是同一个用户类型、且那个类型有对应的
+    重载，才改写；否则原样留给类型检查（标量比较不受影响）。
+    """
+    if eln_mod is None:
+        return []
+    ov = _op_overloads(eln_mod)
+    if not ov:
+        return []
+    try:
+        rec = _TypeRecorder(tu_mod, eln_mod)
+        rec.check()
+        ty_of = rec.ty_of
+    except Exception:                                    # noqa: BLE001
+        return []
+
+    def ty_str(n) -> str:
+        t = ty_of.get(id(n))
+        raw = t.render() if hasattr(t, "render") else ""
+        return _op_base(raw)
+
+    def make_call(fn: str, a, b) -> Node:
+        call = Node("call", a.line, a.col, name=fn)
+        call.add(Node("path", a.line, a.col, name=fn))
+        args = Node("args", a.line, a.col)
+        args.add(a)
+        args.add(b)
+        call.add(args)
+        return call
+
+    def walk(node) -> None:
+        if node is None:
+            return
+        for i, c in enumerate(list(getattr(node, "children", []) or [])):
+            if c is None:
+                continue
+            k = getattr(c, "kind", "")
+            if k == "binary" and (c.value or "") in _OP_SYMBOL_TO_KEY:
+                key = _OP_SYMBOL_TO_KEY[c.value]
+                if len(c.children) >= 2:
+                    lt, rt = ty_str(c.children[0]), ty_str(c.children[1])
+                    fn = ov.get((key, lt)) if lt and lt == rt else None
+                    if fn:
+                        node.children[i] = make_call(fn, c.children[0], c.children[1])
+                        continue
+            elif k == "index" and len(c.children) >= 2:
+                bt = ty_str(c.children[0])
+                fn = ov.get(("index", bt)) if bt else None
+                if fn:
+                    node.children[i] = make_call(fn, c.children[0], c.children[1])
+                    continue
+            walk(c)
+
+    walk(eln_mod)
+    return []
 
 
 def resolve_auto(eln_mod: Optional[Node],

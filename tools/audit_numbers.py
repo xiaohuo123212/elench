@@ -92,6 +92,20 @@ def subcommands():
     return names
 
 
+def gates():
+    """门禁数量 —— 从 `tools/gates.py` 的 `GATES` 表数，不手抄。
+
+    **为什么要这个字段**：文档里三处写死了"10 道门"，而实际早就是 12 道。
+    门禁数是会变的，写死就一定会过期（见 `文档/README.md` 第三节）。
+    """
+    import importlib.util
+    gp = os.path.join(R, "tools", "gates.py")
+    spec = importlib.util.spec_from_file_location("_gates_for_audit", gp)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return len(mod.GATES)
+
+
 def assertions():
     """`check(` 调用点：**数测试目录**，不是数实现。
 
@@ -151,6 +165,7 @@ def main():
         "keywords_removed": kw_dead,
         "check_call_sites": assertions(),
         "subcommands": subs,
+        "gates": gates(),
         "sample_lines": sample_lines(),
         "sample_programs": sample_programs(),
     }

@@ -151,29 +151,24 @@ def main() -> int:
     check("6f `%` 仍报 E-Target-BadForm（形状层与语义层同一组运算）",
           "E-Target-BadForm" in out, out)
 
-    # ---- 7. 未实现的容器（deque） ----
+    # ---- 7. deque<T>：**2026-11-25 起是能用的容器** ----
     #
-    # `deque` **不是完全没写**：stdlib 里有 `deque_new` / `deque_push_*` 一组
-    # 内建（环形缓冲），但 interp 的容器构造/方法分派没有 deque。所以
-    # `deque<u64> d;` 被兜底成 0，`d.push_back(1)` 在 run 期才炸。check 必须挡住。
+    # 以前这一节断言 `deque<T>` 被 check 挡住（`E-Type-UnimplementedContainer`），
+    # 因为 interp 的容器构造/方法分派没有 deque——`deque<u64> d;` 会被兜底成 0。
+    # 现在默认构造、六个方法、内建路径都接线了，所以这一节反过来钉：
+    # **能过，且不再是"半可用"**。诊断码本身留着（表空了，下回还能登记新容器）。
     out = _check("pub u64 f() { deque<u64> d; d.push_back(1); return d.size(); }\n")
-    check("7a deque 声明 → E-Type-UnimplementedContainer",
-          "E-Type-UnimplementedContainer" in out, out)
-    check("7b 报错里列出已实现的容器",
-          all(c in out for c in ("vector", "array", "map", "set",
-                                 "unordered_map", "unordered_set",
-                                 "stack", "queue")), out)
-    check("7c 报错里说明 deque 未实现", "尚未实现" in out, out)
+    check("7a deque 声明 + 方法 → 不再报未实现",
+          "E-Type-UnimplementedContainer" not in out, out)
 
     out = _check("pub u64 f() { deque<u64> q = deque_new(); "
                  "return deque_len(q); }\n")
-    check("7d deque_new 内建路径同样被挡（不许留半实现）",
-          "E-Type-UnimplementedContainer" in out, out)
+    check("7b deque_new 内建路径同样能过", "E-Type-UnimplementedContainer" not in out, out)
 
     out = _check(
         "pub u64 f() { return 0; }\n",
         "spec f(deque<u64> xs) -> u64 { effects {}; }\n")
-    check("7e .tu 里的 deque 形参也报", "E-Type-UnimplementedContainer" in out, out)
+    check("7c .tu 里的 deque 形参也不再报", "E-Type-UnimplementedContainer" not in out, out)
 
     out = _check("pub u64 f() { vector<u64> v; v.push_back(1); "
                  "return v.size(); }\n")
@@ -563,8 +558,8 @@ def main() -> int:
     # `deque` 是**已登记但未接线**的容器：只报 E-Type-UnimplementedContainer，
     # 不许再被未知类型检查重复报一遍（`BUILTIN_TYPE_NAMES` 里的例外）。
     out = _check("pub u64 f() { deque<u64> d; return d.size(); }\n")
-    check("14 deque 只报 UnimplementedContainer，不报未知类型名",
-          "E-Type-UnimplementedContainer" in out and "E-Type-Unknown" not in out,
+    check("14 deque 是已知且已实现的容器（不报 E-Type-Unknown / 不报未实现）",
+          "E-Type-Unknown" not in out and "E-Type-UnimplementedContainer" not in out,
           out)
 
     # ---- 15. `goto` / 标签 / 前缀 `*` / 多余的 `&`（E-Keyword / E-Unary）----

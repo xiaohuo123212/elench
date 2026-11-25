@@ -1,4 +1,4 @@
-﻿spec partition(vector<u64>& xs, u64 lo, u64 hi) -> u64 { requires hi <= xs.size(); effects { }; target { time: { max: O(xs.size()) }, allocation: { max: 0 }, }; }
+spec partition(vector<u64>& xs, u64 lo, u64 hi) -> u64 { requires hi <= xs.size(); effects { }; target { time: { max: O(xs.size()) }, allocation: { max: 0 }, }; }
 spec two_pointer_dedup(vector<u64>& xs) -> u64 { effects { }; target { time: { max: O(n) }, allocation: { max: 0 }, }; }
 spec linear_probe(vector<u64>& table, u64 key, u64 cap) -> u64 { effects { }; target { time: { max: O(1) }, allocation: { max: 0 }, }; }
 spec sliding_sum_max(vector<u64>& xs, u64 k) -> u64 { requires k <= xs.size(); effects { }; target { time: { max: O(n) }, allocation: { max: 0 }, }; }

@@ -1,4 +1,4 @@
-﻿u64 partition(vector<u64>& xs, u64 lo, u64 hi) {
+u64 partition(vector<u64>& xs, u64 lo, u64 hi) {
     u64 pivot = xs[hi];
     u64 i = lo;
     u64 j = lo;

@@ -1,6 +1,6 @@
 {
   "name": "elench-lang",
-  "version": "0.1.2",
+  "version": "0.1.5",
   "description": "Elenchus — cost contracts as machine-checkable code. CLI command: elench.",
   "keywords": [
     "cost",

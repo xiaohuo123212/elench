@@ -1,4 +1,4 @@
-﻿"""Step 1 of the routing idea: can the *spec* (`.tu`) predict implementation size (`.eln`)?
+"""Step 1 of the routing idea: can the *spec* (`.tu`) predict implementation size (`.eln`)?
 
 No model needed. We extract structural features from each function's spec, measure how
 much code the implementation actually took, and look at rank correlation.

@@ -50,7 +50,7 @@ auto add_one2(const u64& x) -> u64 {
 | `int` / `size_t` / `long` / `char` / `double` | 同 | 见 §3.1：**`int` 是 64 位** |
 | `std::vector<T>` / `std::map<K,V>` / `std::set<T>` | 同 | |
 | `using namespace std;` | 同 | 接受（不写也行） |
-| `#include` / `#define` / `#if` | 同 | 兼容层：`#include` 的**标准头**丢弃（**非标准头报 `E-Lex-IncludeUnresolved`**）、`#define` 展开后再分析 |
+| `#include` / `#define` / `#if` | 同 | 兼容层：`#include` 的**标准头**丢弃；非标准头**找到就内联**（按包含者所在目录与 `ELENCH_INCLUDE_DIRS` 搜索），**找不到才报 `E-Lex-IncludeUnresolved`**；`#define` 展开后再分析 |
 
 ### 1.2 容器方法（P4-0 起就是 C++ 的名字）
 
@@ -126,9 +126,9 @@ u64 demo_mutate(vector<u64>& xs) {
 **`map` 的遍历元素是 `(键, 值)`**（2026-11-12，对齐 C++ 的 `pair<const K, V>`）：
 
 ```elench
-u64 demo_map_iter(map<vec<u8>, u64>& m) {
+u64 demo_map_iter(map<vector<u8>, u64>& m) {
     u64 s = 0;
-    for (const auto& kv : m) {      // kv: (vec<u8>, u64)，**键序**
+    for (const auto& kv : m) {      // kv: (vector<u8>, u64)，**键序**
         s = s + kv.1;               // 值（C++ 的 kv.second）
         s = s + kv.0.size();        // 键（C++ 的 kv.first）
     }
@@ -152,10 +152,10 @@ u64 demo_map_iter(map<vec<u8>, u64>& m) {
 
 ```elench
 // 手写等价（与 --compat 的降级同形；κ / run 逐字节相同）
-u64 map_total(map<vec<u8>, u64>& m) {
+u64 map_total(map<vector<u8>, u64>& m) {
     u64 s = 0;
     {
-        vector<vec<u8>> ks = m.keys();   // 快照：**循环外只取一次**
+        vector<vector<u8>> ks = m.keys();   // 快照：**循环外只取一次**
         u64 idx = 0;
         while (idx < ks.size()) {
             s = s + m.get(ks[idx]);      // 值（C++ 的 it->second）
@@ -198,7 +198,7 @@ u64 point_sum(Point p) {
 | `struct P { int x; int y; };` | `struct Point { x: u64, y: u64, }`（字段用 `:`，逗号分隔，**写在 `.tu`**） |
 | `enum class E { A, B };` | `enum Token { Num(u64), Plus, }`（`enum class` 报错） |
 | `Point p{1, 2};` | `Point p = Point { x: 1, y: 2 };` |
-| `std::pair<A,B>` / `std::tuple` | 两元组 `(A, B)`，取 `t.0` / `t.1`（默认 `std::pair` 报 `E-Type-NoPair`；`--compat` 下 `std::pair` / `std::make_pair` / `.first`·`.second` 直接映射，见[语法清单](语法清单.md) §P0 第 14 条） |
+| `std::pair<A,B>` / `std::tuple` | 两元组 `(A, B)`，取 `t.0` / `t.1`（默认 `std::pair` 报 `E-Type-NoPair`；**`--compat` 目前只接上 `.first`/`.second` → `.0`/`.1`**——`std::pair<A,B>` 类型名与 `std::make_pair` **还没接线**：前者 `E-Parse-Expected`、后者 `E-Compat-UnknownStd`、`std::pair<A,B>(a,b)` 报 `E-Compat-CtorUnsupported`） |
 | `T* p` / `&x` / `*p` / `p->f` / `nullptr` | 同（运行期已接线；`p.f` 报 `E-Pointer-UseArrow`） |
 | `print(p)`（struct） | 同：`S { a: 1, b: 2 }` |
 
@@ -251,9 +251,9 @@ AST / κ / run 逐字节相同）。
 
 ## 2.1 `std::` 逐个对照（按 `demo/corpus/` 实测）
 
-**方法**：对 `demo/corpus/*.cpp`（12 个文件）用 `std::([A-Za-z_][A-Za-z_0-9]*)`
+**方法**：对 `demo/corpus/*.cpp`（**2026-11-11 时为 12 个文件、327 处；现语料已扩到 20 个文件、518 处**）用 `std::([A-Za-z_][A-Za-z_0-9]*)`
 逐个匹配、按名字计数——**不是凭印象**。下表是当前语料的真实次数
-（`00_docnums.cpp` 633 行、143 处；12 个文件合计 327 处）：
+（`00_docnums.cpp` 633 行、143 处；下表是 12 文件时代的口径，全量已 20 文件 518 处）：
 
 | 名字 | 00_docnums | 其余 11 个 | 合计 | 档 | 在本语言里长什么样 |
 |---|---:|---:|---:|---|---|
@@ -408,6 +408,9 @@ i64 demo_int() {
 
 - `int` → **`i64`**，`unsigned` → `u64`，`long` / `size_t` → 64 位；
 - 要真的 32 位就用定宽名：`uint32_t` / `int32_t`（映射 `u32` / `i32`，**不放大**）。
+- **一处按位置不同义（2026-11-18 审计标注）**：`int` 在**声明 / 形参**位置映射 `i64`（64 位，如上），
+  但写 C 风格强转 `(int)x` 被拒时，诊断建议改写成 `x as i32` ——那是 **32 位**。
+  同一个拼写两种宽度。**强转别靠 `int`**，直接写 `x as i32` / `x as i64` 把宽度写明。
 
 ### 3.2 `pop()` 返回元素，而且没有 `pop_back`
 
@@ -716,7 +719,7 @@ C++ 允许别名，强制借用会让"改名即用"直接破产。理由与代�
 | `auto x = f();` | `u64 x = f();` | 不推断类型 |
 | `class` + 成员函数 | `struct` + 自由函数 | 见 §3.17 |
 | `template <typename T>` | `T f<T>(T a)` | 见 §3.19 |
-| `std::pair` / `std::tuple` | `(A, B)` + `t.0` | 没有 `pair` 类型；`--compat` 下 `std::pair` / `std::make_pair` / `.first`·`.second` 映射到两元组（见 §P0 第 14 条） |
+| `std::pair` / `std::tuple` | `(A, B)` + `t.0` | 没有 `pair` 类型；`--compat` 下**只有** `.first`/`.second` 映射到 `.0`/`.1`，`std::pair<A,B>` 类型名与 `std::make_pair` 仍未接线（实测 2026-11-25） |
 | `static_cast<T>(x)`（T 与 x 同类型 / 只是加宽） | 直接删掉转换，或写 `x` | 值不变才是拼写；窄化 / 有符号↔无符号 / 整数↔浮点一律拒绝（判据见 §P0 第 11 条），真转换写 `x as T` |
 | `new` / `delete` | 直接声明容器 | 没有手工内存 |
 | `sizeof(T)` | 写常量 / 用定宽类型 | 没有 `sizeof`（`E-Call-Undeclared`） |
@@ -741,7 +744,7 @@ C++ 允许别名，强制借用会让"改名即用"直接破产。理由与代�
 | 手工内存 / 裸内存搬运 | 同上；别名只留在指针上 |
 | `goto`、标签 | 有替代写法 |
 | `reinterpret_cast` / C 风格 cast | 换宽度请用带类型的中间变量 |
-| `deque<T>` | `check` 直接拒绝（`E-Type-UnimplementedContainer`） |
+| `deque<T>` | ✓ **2026-11-25 起可用**：`deque<T> d;` 默认构造 + `push_back`/`push_front`/`pop_back`/`pop_front`/`size`/`empty`，两端 O(1) 摊还 |
 | 真指数 `O(2^n)` 作为 target | 恒真承诺等于没有承诺 |
 
 完整清单（含每条实测报错原文）：[能力边界](能力边界.md)。

@@ -91,6 +91,8 @@ r"""preproc.py —— **先预处理再分析**（规格 §8.10）
 
 from __future__ import annotations
 
+import io
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
@@ -379,6 +381,13 @@ class _Preproc:
                           f"这是源码作者写下的 `#error`，不是本语言报的——"
                           f"删掉它，或让条件编译别选中这一支",
                           line_no)
+            return
+
+        # **`#warning`**（2026-11-23）：C++ 里它只"打印一条提醒"，**不改变语义**。
+        # 真库的单头文件（nlohmann/json 等）大量用它做版本/弃用提示，一律拒绝会让
+        # 整个头都读不进来。这里在 `--compat` 下**跳过整行**；严格模式保持原行为
+        # （仍报不支持），免得默认口径变松。
+        if name == "warning" and _compat_enabled():
             return
 
         # **不静默吞**：有语义的指令悄悄删掉，会让不该编的分支也生效。
@@ -917,6 +926,157 @@ def _c_div(a: int, b: int) -> int:
 
 # ---------------------------------------------------------------- 对外入口
 
+#: 头文件内联的最大深度（防循环包含；`#pragma once` / 守卫也会靠"只内联一次"近似）。
+_INCLUDE_MAX_DEPTH = 8
+#: 内联时已经读过的头文件（绝对路径）——相当于把 `#pragma once` 当默认。
+#: **必须是每次顶层调用各自一份**：模块级集合会让"同一个文件第二次被解析"
+#: 拿不到内联结果（2026-11-22 实测：先 parse 一遍拿 pending，第二遍就报
+#: `E-Name-Undefined`），所以要作为参数往下传。
+_SEEN_STUB = None
+
+
+def _inline_enabled() -> bool:
+    """是否内联 `#include`（第 19 条）。
+
+    **FFI 风格的 `.eln` 里那个 `#include` 是给 C 侧 shim 用的**，对本语言没有语义：
+    真正的声明在 `extern … from "lib"` 那一行。把这种头内联进来只会让解析器去啃
+    整个真库头（`#error` / 宏 / 平台分支），反而从"能过"变成"过不去"。
+    所以给一个开关：`ELENCH_NO_INCLUDE_INLINE=1` 时回到"整行忽略"的老口径。
+    """
+    v = (os.environ.get("ELENCH_NO_INCLUDE_INLINE") or "").strip().lower()
+    return v not in ("1", "true", "yes", "on")
+
+
+def _compat_enabled() -> bool:
+    """兼容层开关（`--compat` / `ELENCH_COMPAT=1`）。**只读，不设**。"""
+    try:
+        import compat
+        return compat.enabled()
+    except Exception:                                      # noqa: BLE001
+        return False
+
+
+#: 把函数原型 `T name(params);` 翻成 `extern name(params) -> T from "<头>";`。
+#: 只认"整行、以 `;` 结尾、没有 `{`、没有 `#`"的形状——**函数定义不动**（它们有体，
+#: 本语言里就是普通函数），宏/别名/结构体原样留着交给下游解析。
+_PROTO_RE = re.compile(
+    r"^[ \t]*(?P<ret>(?:const[ \t]+)?[A-Za-z_][\w:<>, \t\*&\[\]]*?)[ \t]+"
+    r"(?P<name>[A-Za-z_]\w*)[ \t]*\((?P<params>[^;{)]*)\)[ \t]*;[ \t]*$")
+
+
+def _protos_to_extern(text: str, header: str) -> str:
+    out = []
+    for line in text.split("\n"):
+        s = line.strip()
+        if (not s or s.startswith("#") or "{" in s or "}" in s
+                or s.startswith("using ") or s.startswith("typedef ")
+                or s.startswith("struct ") or s.startswith("class ")
+                or s.startswith("enum ") or s.startswith("template")):
+            out.append(line)
+            continue
+        m = _PROTO_RE.match(line)
+        if not m:
+            out.append(line)
+            continue
+        ret = m.group("ret").strip()
+        name = m.group("name")
+        params = m.group("params").strip()
+        if not ret or ret in ("return", "else", "case") or "(" in ret:
+            out.append(line)
+            continue
+        out.append('extern %s(%s) -> %s from "%s" effects {};  // ← %s'
+                   % (name, params, ret, header, s))
+    return "\n".join(out)
+
+
+def _resolve_include(name: str, cur_path: str):
+    """按 C++ 的朴素顺序找头文件：**包含者所在目录 → 当前目录 → ELENCH_INCLUDE_DIRS**。"""
+    cands = []
+    base = os.path.dirname(os.path.abspath(cur_path)) if cur_path else os.getcwd()
+    cands.append(os.path.join(base, name))
+    cands.append(os.path.abspath(name))
+    for extra in (os.environ.get("ELENCH_INCLUDE_DIRS") or "").split(os.pathsep):
+        if extra.strip():
+            cands.append(os.path.join(extra.strip(), name))
+    for c in cands:
+        if os.path.isfile(c):
+            return os.path.abspath(c)
+    return None
+
+
+def _drop_includes(src: str) -> str:
+    """把所有 `#include` 行整行丢掉（`ELENCH_NO_INCLUDE_INLINE=1` 的老口径）。"""
+    out = []
+    for line in src.split("\n"):
+        s = line.strip()
+        if re.match(r'#\s*include\s*[<"]', s):
+            out.append("// include 已忽略：" + s)
+            continue
+        out.append(line)
+    return "\n".join(out)
+
+
+def _inline_quoted_includes(src: str, path: str, depth: int = 0,
+                            seen: Optional[set] = None) -> str:
+    """把 `#include "x.h"` 换成头文件正文（递归），函数原型翻成 `extern`。
+
+    **只处理引号形式**：`#include <vector>` 走原有"标准头丢弃"的路，不碰。
+    **解析不到就原样留着**——让下游照旧报 `E-Lex-IncludeUnresolved`，不假装读过。
+    """
+    if depth >= _INCLUDE_MAX_DEPTH:
+        return src
+    if seen is None:
+        seen = set()
+    out = []
+    for line in src.split("\n"):
+        s = line.strip()
+        m = re.match(r'#\s*include\s*"([^"\n]+)"\s*(?://.*)?$', s)
+        _angle = None
+        if not m:
+            # **尖括号形式**（2026-11-23）：`#include <nlohmann/json.hpp>`。
+            # 标准头照旧交给下游丢弃；**非标准头按搜索路径找**，找到就内联，
+            # 找不到就原样留着（下游仍报 `E-Lex-IncludeUnresolved`，不假装读过）。
+            m2 = re.match(r'#\s*include\s*<([^<>\s]+)>\s*(?://.*)?$', s)
+            if not m2:
+                out.append(line)
+                continue
+            _angle = m2.group(1)
+            if _angle in STANDARD_HEADERS:
+                out.append(line)          # 标准头：保持原行为（下游静默丢弃）
+                continue
+            name = _angle
+        else:
+            name = m.group(1)
+        found = _resolve_include(name, path)
+        if found is None:
+            out.append(line)                # 找不到：交回下游，仍然报 IncludeUnresolved
+            continue
+        if found in seen:
+            # **已经内联过了**（`#pragma once` / 头文件互相引用的常见形状）：
+            # 这一行是 no-op，**必须丢掉**。以前这里把行留着，下游看到
+            # `#include "core.h"` 就报 `E-Lex-IncludeUnresolved`——实测
+            # `fmt/core.h` 里正好有这么一行，于是 17 个探针"看起来"还是找不到头。
+            out.append("// 已内联过，跳过：" + name)
+            continue
+        seen.add(found)
+        try:
+            with io.open(found, encoding="utf-8", errors="replace") as f:
+                body = f.read()
+        except OSError:
+            out.append(line)
+            continue
+        # 头文件带 UTF-8 BOM 很常见（Windows 编辑器默认就会写）——`\ufeff`
+        # 不在行首会让 `#` 认成"行内字符"，接着 `#ifdef` 守卫失效、`#endif` 报错。
+        # C++ 编译器同样忽略 BOM，这里跟它一致。
+        body = body.lstrip("\ufeff")
+        body = _inline_quoted_includes(body, found, depth + 1, seen)
+        body = _protos_to_extern(body, os.path.basename(found))
+        out.append("// ── 以下来自 #include \"%s\"（兼容层内联）──" % name)
+        out.append(body)
+        out.append("// ── %s 内联结束 ──" % name)
+    return "\n".join(out)
+
+
 def preprocess(src: str, path: str = "<input>",
                defines: Optional[Dict[str, str]] = None) -> PreprocResult:
     """**先预处理再分析**：返回行号不变的展开文本 + 诊断 + 来源表。
@@ -925,6 +1085,19 @@ def preprocess(src: str, path: str = "<input>",
     """
     if defines is None:
         defines = dict(_ACTIVE_DEFINES)
+    # **第 19 条**（`--compat`，2026-11-22）：`#include "x.h"` 真的读进来。
+    # 以前一律 `E-Lex-IncludeUnresolved`（不读头文件），真实 C++ 代码第一步就断。
+    # 现在：能解析到的头文件 → 递归内联 + **把函数原型翻成 `extern` 声明**；
+    # 解析不到 → 原样留着，仍然报 `E-Lex-IncludeUnresolved`（不假装读过）。
+    if _compat_enabled():
+        if _inline_enabled():                     # `ELENCH_NO_INCLUDE_INLINE=1` 可关
+            src = _inline_quoted_includes(src, path)
+        else:
+            # **回到第 19 条之前的口径**：`#include` 整行丢掉、不报错。
+            # FFI 风格的 `.eln`（`extern … from "lib"` + `link "lib"`）里那个 include
+            # 只给 C 侧 shim 用，对本语言没有语义——当年那批探针的 `exit=0` 就是在这个
+            # 口径下得到的。**这是开关，不是默认**：默认仍然内联/报错。
+            src = _drop_includes(src)
     return _Preproc(src, path, defines).run()
 
 

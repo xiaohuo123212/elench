@@ -3,11 +3,11 @@
 # Copyright 2026 Elench contributors
 
 # -*- coding: utf-8 -*-
-"""isolated.py —— `dsh bench <fn>`：单函数隔离测量（规格 §13.5 B-18…B-22）
+"""isolated.py —— `elench bench <fn>`：单函数隔离测量（规格 §13.5 B-18…B-22）
 
-## 它和 `dsh measure` 不是一回事
+## 它和 `elench measure` 不是一回事
 
-| | `dsh measure` | `dsh bench`（本文件） |
+| | `elench measure` | `elench bench`（本文件） |
 |---|---|---|
 | 对象 | 整条链路 + 替换候选 | **单个函数** |
 | 含 `?!` | 必须有 | **MUST NOT 含**（B-18） |
@@ -29,7 +29,7 @@
 
 `?!` 的赢家由**分档表**决定，而分档表要**整个链路**一起测才有意义。
 **单函数隔离测量拿不到分档表**，测出来的东西不代表真实运行。
-所以遇到 `?!` 直接拒绝，并指向 `dsh measure`。
+所以遇到 `?!` 直接拒绝，并指向 `elench measure`。
 """
 
 from typing import Any, Dict, List, Optional, Tuple
@@ -39,7 +39,7 @@ from ast_util import descendants as _descendants
 
 
 class BenchError(Exception):
-    """`dsh bench` 的拒绝原因（不是崩溃，是"这个函数不能这样测"）。"""
+    """`elench bench` 的拒绝原因（不是崩溃，是"这个函数不能这样测"）。"""
 
 
 # ---------------------------------------------------------------- 闭包分析
@@ -81,7 +81,8 @@ def check_measurable(fn_name: str, fns: Dict[str, Node],
         raise BenchError(
             f"{fn_name} 的函数体里含 `?!`（{', '.join(labels)}）——\n"
             f"  单函数隔离测量拿不到分档表，测出来不代表真实运行（B-18）。\n"
-            f"  改用 `dsh measure {fn_name}`：它按替换法把整条链路一起测。")
+            f"  改用 `elench measure <模块>`（模块名，不是函数名）："
+            f"它按替换法把整条链路一起测。")
 
     # ---- B-18：测量闭包 MUST 全部有实现
     missing = []
@@ -126,7 +127,7 @@ def verdict(ratio: Optional[float]) -> str:
 def report(fn_name: str, ratios: Dict[str, Optional[float]],
            distortions: List[str],
            deps: List[Tuple[str, List[str]]]) -> str:
-    """生成 `dsh bench` 的输出。
+    """生成 `elench bench` 的输出。
 
     **B-21 自底向上**：先报被调用的函数（`deps`），再报被测函数。
     **B-19**：MUST 带 `isolated: true` 与失真清单。

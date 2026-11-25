@@ -611,6 +611,24 @@ CXX_SCALAR_TYPES = {
     "bool": "bool",
 }
 
+#: 本语言的**原生**数值类型名（`(u64)x` 这种写法里合法）。C++ 拼写到原生类型的
+#: 归一在 `CXX_SCALAR_TYPES`；这里放的是"本来就是本语言名字"的那些，`--compat`
+#: 下 C 风格强转 `(T)x` 两种都认（2026-11-22，第 18 条）。
+NATIVE_SCALARS = frozenset({
+    "u8", "u16", "u32", "u64",
+    "i8", "i16", "i32", "i64",
+    "f32", "f64", "bool",
+})
+
+#: **第 21 条**（`--compat`）：能重载的运算符 → 内部键。名字里的 `__op_<键>`
+#: 是降级后的函数名（`P__op_lt`），调用点在 `typecheck.resolve_operators` 里改写。
+OPERATOR_KEYS = {
+    "<": "lt", ">": "gt", "<=": "le", ">=": "ge",
+    "==": "eq", "!=": "ne",
+    "+": "add", "-": "sub", "*": "mul", "/": "div",
+    "[]": "index",
+}
+
 #: 定长 / 标准库宽度名 → 本语言类型（**按位宽精确**）。
 #: 定长名是 C++ 里「我就是要 32 位」的表达，放大到 64 位会改变**有定义**的回绕，
 #: 所以这里不跟着方案甲走：`uint32_t` 就是 `u32`（`UInt` 子类按 32 位回绕）。
@@ -2192,6 +2210,9 @@ class Parser:
             return False
         if (self.peek().text or "") == sname and self.kind(1) == Kind.LPAREN:
             return True
+        # **第 21 条**：成员运算符重载（`bool operator<(const P& o) const`）。
+        if self._compat_operator_ahead() is not None:
+            return True
         end = self._probe_type_end()
         if end is None or self.kind_at(end) != Kind.IDENT:
             return False
@@ -2296,17 +2317,22 @@ class Parser:
                 if depth == 0:
                     return
 
-    def _compat_member_quals(self) -> None:
+    def _compat_member_quals(self) -> bool:
         """吃掉成员函数尾部的限定符：`const` / `noexcept` / `override` / `final` …
+
+        **返回是否带 `const`**：`const` 成员函数的接收者必须是 `const T&`——
+        否则 `const P& p; p.m()` 会被判 `E-Const-Mutate`（实测）。
 
         **忽略**它们，不只是跳过：`const` / `noexcept` / `override` 在本语言里
         都没有对应概念（没有继承可覆盖、没有异常、引用写回是另一条规则）。
         忽略 = 接受更多写法，不会把合法程序判死；真正的写回契约仍由
         `typecheck` 按形参类型判（`T&` 对 struct 成立）。
         """
+        _saw_const = False
         while True:
             if self.at(Kind.CONST):
                 self.advance()
+                _saw_const = True
                 continue
             if self.at(Kind.AMP) or self.at(Kind.AMPAMP):
                 self.advance()                   # `… const &` / `&&`
@@ -2324,7 +2350,7 @@ class Parser:
                         elif kk == Kind.RPAREN:
                             depth -= 1
                 continue
-            return
+            return _saw_const
 
     def _compat_require_member_body(self, tok: Token, sname: str = "") -> None:
         """成员函数/构造函数必须有 `{ … }` 体。没有就报清楚（不静默跳过）。"""
@@ -2372,11 +2398,27 @@ class Parser:
             f"`vector<…>`）。",
             tok)
 
-    def _compat_parse_member_fn(self, sname: str, fields: frozenset) -> Node:
-        """解析一个成员函数并降级成自由函数节点（第 13 条）。"""
+    def _compat_parse_member_fn(self, sname: str, fields: frozenset,
+                                op_key: Optional[str] = None) -> Node:
+        """解析一个成员函数并降级成自由函数节点（第 13 条）。
+
+        `op_key` 非空时是**成员运算符重载**（第 21 条）：名字位置是
+        `operator` + 运算符，降级名取 `__op_<键>`（接收者仍是第一个形参，
+        所以 `resolve_operators` 的 `(键, 类型)` 索引照用）。
+        """
         t = self.peek()
         ret = self._compat_ret_type()
-        nt = self.expect_ident("成员函数名")
+        if op_key is not None:
+            nt = self.peek()
+            self.advance()                                   # `operator`
+            if self.kind() == Kind.LBRACKET:
+                self.advance(); self.advance()               # `[` `]`
+            else:
+                self.advance()                               # 运算符本身
+            _name_text = "__op_" + op_key
+        else:
+            nt = self.expect_ident("成员函数名")
+            _name_text = nt.text
         if self.at(Kind.LT):
             what, how = self.MEMBER_UNSUPPORTED_WORDS["template"]
             raise ParseError("E-Compat-MemberUnsupported",
@@ -2388,7 +2430,7 @@ class Parser:
         try:
             params = self.parse_params_until(Kind.RPAREN)
             self.expect(Kind.RPAREN, "')'")
-            self._compat_member_quals()
+            _quals = self._compat_member_quals()
             self._compat_require_member_body(nt, sname)
             self._member_ctx = (recv_name, fields, sname)
             try:
@@ -2398,18 +2440,33 @@ class Parser:
         finally:
             self._scope_pop()
         methods = self.struct_decls.setdefault(sname, {}).setdefault("methods", {})
-        if nt.text in methods:
-            self._compat_member_overload(sname, nt.text, nt)
-        mangled = f"{sname}_{nt.text}"
-        recv_param = Node("param", t.line, t.col, name=recv_name).add(
-            Node("type-ref", t.line, t.col).add(
-                Node("type-name", t.line, t.col, name=sname)))
+        if _name_text in methods:
+            self._compat_member_overload(sname, _name_text, nt)
+        # 运算符用**双下划线**，与自由函数形态（`P__op_lt`）同名——两种写法
+        # 落到同一个名字，等价性才好比。
+        mangled = (f"{sname}{_name_text}" if op_key is not None
+                   else f"{sname}_{_name_text}")
+        # `const` 成员函数（`bool operator<(…) const`）的接收者必须是 `const T&`：
+        # 否则把 `const P&` 传进去会被判 `E-Const-Mutate`（实测）。
+        # **只对运算符重载**把 `const` 成员函数的接收者标成 `const T&`：
+        # 普通成员函数一直降级成 `T&`，改它会让语料的 `.tu`（写着 `T&`）
+        # 全部 `E-Spec-ConstMismatch`——实测 10_backtrack 直接出码失败。
+        # 运算符没有历史 `.tu` 要兼容，而 `const P& p; p < q;` 这种调用很常见，
+        # 所以这里按需放宽，不动存量。
+        _recv_const = bool(_quals) and op_key is not None
+        recv_param = Node("param", t.line, t.col, name=recv_name)
+        if _recv_const:
+            recv_param.value = {"const": True}
+        recv_param.add(Node("type-ref", t.line, t.col).add(
+            Node("type-name", t.line, t.col, name=sname)))
         fn = Node("fn", t.line, t.col, name=mangled)
         fn.value = {"pub": False, "fallible": False}
+        if op_key is not None:
+            fn.value["op"] = op_key
         fn.add(self._compat_with_recv(params, recv_param))
         fn.add(ret)
         fn.add(body)
-        methods[nt.text] = fn
+        methods[_name_text] = fn
         self.value_names.add(mangled)
         return fn
 
@@ -2511,10 +2568,42 @@ class Parser:
         self.value_names.add(fn.name)
         return fn
 
+    #: **第 22 条**：成员位置上的**纯拼写**限定词——`--compat` 下跳过。
+    #: 判据是"它自己那条诊断就说删掉即可"：本语言字段本来就都能改、没有内联声明、
+    #: 没有编译期常量（常量写 `.tu` 顶层 `const`）。没有语义可保，所以不留节点。
+    _MEMBER_PURE_SPELLING = frozenset({"mutable", "volatile", "inline", "constexpr"})
+
+    def _compat_operator_ahead(self) -> Optional[str]:
+        """当前位置是不是**成员运算符重载**（`bool operator<(const P& o) const {`）。
+
+        返回内部键（`lt` / `eq` / `index` …）；不是就返回 None。
+        `_probe_type_end` 给的是**绝对下标**（与 `kind_at` 同一套）。
+        """
+        if not self.compat:
+            return None
+        end = self._probe_type_end()
+        if end is None or self.kind_at(end) != Kind.IDENT:
+            return None
+        if (self._text_at(end) or "") != "operator":
+            return None
+        j = end + 1
+        if self.kind_at(j) == Kind.LBRACKET and self.kind_at(j + 1) == Kind.RBRACKET:
+            j += 2
+            key = "index"
+        elif (self._text_at(j) or "") in OPERATOR_KEYS:
+            key = OPERATOR_KEYS[self._text_at(j)]
+            j += 1
+        else:
+            return None
+        return key if self.kind_at(j) == Kind.LPAREN else None
+
     def _compat_parse_member(self, sname: str, fields: frozenset) -> Node:
         """当前位置的成员（构造函数 / 成员函数）→ 降级后的 `fn` 节点。"""
         if (self.peek().text or "") == sname and self.kind(1) == Kind.LPAREN:
             return self._compat_parse_ctor(sname, fields)
+        _op = self._compat_operator_ahead()
+        if _op is not None:
+            return self._compat_parse_member_fn(sname, fields, _op)
         return self._compat_parse_member_fn(sname, fields)
 
     # -- `Ring r(3);` → `Ring r; Ring_Ring(r, 3);` --------------------------
@@ -2874,6 +2963,27 @@ class Parser:
         if self._compat_static_fn_ahead():
             self.advance()                       # 跳过 `static`，不产出节点
             return self.parse_item()
+        # **第 20 条**（`--compat`）：`template <typename T>` 前缀。
+        # 收下类型参数后继续解析后面的函数/结构体，并把 `type-params` 节点挂到它
+        # 身上——与原生 `u64 len<T>(…)` 产出**完全同形**的 AST（见
+        # `_compat_parse_template_prefix`）。单态化在 `typecheck.resolve_generics`。
+        _tps = self._compat_parse_template_prefix()
+        if _tps is not None:
+            item = self.parse_item()
+            # **带成员函数的 struct 会被包一层 `{"flatten": True}` 的 namespace**
+            # （见 `parse_struct` 末尾：struct + 降级出来的自由函数一起交出去）。
+            # 类型参数要挂到**里面那个 struct/fn** 上，挂到包装节点上会被
+            # `_add_top_item` 铺平成模块级兄弟节点——实测就是 `type-params`
+            # 单独飘在模块顶层、struct 里没有，于是 `T` 成了"未知类型"。
+            _target = item
+            if (getattr(item, "kind", "") == "namespace"
+                    and (getattr(item, "value", {}) or {}).get("flatten")
+                    and item.children):
+                _target = item.children[0]
+            if _target is not None and not any(
+                    getattr(c, "kind", "") == "type-params" for c in _target.children):
+                _target.children.insert(0, _tps)
+            return item
         # **`namespace X { … }`**（C++ 形状，2026-11-10）：接受并**展平**。
         # 本语言没有命名空间：内部 item 直接进模块全局作用域。重名不静默覆盖
         # （见 `_add_top_item`）。`using namespace std;` 走上一条分支。
@@ -3529,6 +3639,12 @@ class Parser:
                 # `_compat_member_reject` 当成"不支持的成员"（那条诊断只适用于
                 # `compat=False`；`--compat` 下它已经能降级成构造函数里的赋值）。
                 # 只认 `类型 名字 = 表达式` 这一种形状（`=` 后面直接跟表达式）。
+                # **第 22 条**（`--compat`）：`mutable` 是成员的**纯拼写**限定词。
+                # 词法器在 compat 下已把它降成 IDENT，这里跳过即可（无节点、不影响 κ）。
+                if (self.compat and self.at(Kind.IDENT)
+                        and (self.peek().text or "") in self._MEMBER_PURE_SPELLING):
+                    self.advance()
+                    continue
                 if self.compat and self._compat_default_member_ahead():
                     _f, _expr = self._compat_parse_default_member()
                     _defaults.append((_f.name, _f.line, _f.col, _expr))
@@ -4211,6 +4327,50 @@ class Parser:
 
     # ---------------------------------------------------------- fn / kernel
 
+    def _operator_fn_name(self, node: Node, op_key: str) -> str:
+        """按**第一个形参的类型**给重载函数定名：`P__op_lt`。
+
+        取不到类型就退回 `__op_lt`（调用点改写按 (op, 类型) 索引，取不到就改不动——
+        那时会报一条明确的诊断，而不是静默算错）。
+        """
+        params = next((c for c in node.children if getattr(c, "kind", "") == "params"), None)
+        if params is None or not params.children:
+            return "__op_" + op_key
+        p0 = params.children[0]
+        ty = p0.children[0] if p0.children else None
+        while ty is not None and getattr(ty, "kind", "") in ("type-ref", "type-ptr"):
+            ty = ty.children[0] if ty.children else None
+        if ty is not None and getattr(ty, "kind", "") == "type-name" and (ty.name or ""):
+            return "%s__op_%s" % (ty.name, op_key)
+        return "__op_" + op_key
+
+    def _compat_parse_template_prefix(self) -> Optional[Node]:
+        """**第 20 条**（`--compat`，2026-11-23）：`template <typename T>` 前缀。
+
+        C++ 把类型参数写在**函数/结构体前面**，本语言的原生写法是写在名字后面
+        （`u64 len<T>(…)`）。这里只做"换个位置"：把 `template<…>` 里的参数
+        收成**同一个** `type-params` 节点，后面照常解析——所以两条拼写产出
+        完全同形的 AST，下游（含单态化）一行都不用分叉。
+        """
+        if not (self.compat and self.at(Kind.IDENT)
+                and (self.peek().text or "") == "template"):
+            return None
+        t = self.advance()                                   # `template`
+        self.expect(Kind.LT, "'<'")
+        params = Node("type-params", t.line, t.col)
+        while not self.at(Kind.GT) and not self.at(Kind.EOF):
+            # `typename` / `class` 都是"后面跟一个类型参数名"，跳过即可
+            if self.at(Kind.IDENT) and (self.peek().text or "") in ("typename", "class"):
+                self.advance()
+            name_tok = self.expect_ident("类型参数名")
+            pt = Node("type-param", name_tok.line, name_tok.col, name=name_tok.text)
+            params.add(pt)
+            self.type_params.add(name_tok.text)
+            if not self.accept(Kind.COMMA):
+                break
+        self.expect(Kind.GT, "'>'")
+        return params
+
     def parse_type_params(self) -> Node:
         """`<T>` / `<K, V>`：类型参数列表（v0.71 泛型第一批）。"""
         t = self.expect(Kind.LT, "'<'")
@@ -4254,6 +4414,44 @@ class Parser:
                 # 以前只有后置 `-> T!` 一条路，于是 `func f() -> u64!` 迁成
                 # C++ 形后无法表达"可能失败"。
                 ret_bang = bool(self.accept(Kind.BANG))
+        # **第 21 条**（`--compat`）：`bool operator<(const P& x, const P& y) {…}`。
+        # 名字位置读到 `operator` 时，把紧跟的运算符收成一个**键**（`<` → `lt`），
+        # 函数名先占位，等形参解析出来再按"第一个形参的类型"定名（`P__op_lt`）——
+        # 这样调用点改写只需要类型，不需要名字约定。
+        _op_key = None
+        if (self.compat and self.at(Kind.IDENT)
+                and (self.peek().text or "") == "operator"):
+            _save = self.i
+            self.advance()                                   # `operator`
+            _tok = self.peek()
+            _spell = _tok.text or ""
+            if _tok.kind == Kind.LBRACKET and self.kind(1) == Kind.RBRACKET:
+                self.advance(); self.advance()
+                _spell = "[]"
+            elif _spell in OPERATOR_KEYS:
+                self.advance()
+            else:
+                self.i = _save                               # 不是重载：走老路（报错）
+                _spell = ""
+            if _spell and _spell in OPERATOR_KEYS:
+                _op_key = OPERATOR_KEYS[_spell]
+                name_tok = self.peek()
+                node = Node("fn", t.line, t.col, name="__op_" + _op_key)
+                node.value = {"pub": is_pub, "fallible": ret_bang, "op": _op_key}
+                self.value_names.add(node.name)
+                self.expect(Kind.LPAREN, "'('")
+                self._scope_push()
+                try:
+                    node.add(self.parse_params_until(Kind.RPAREN))
+                    self.expect(Kind.RPAREN, "')'")
+                    if ret_node is not None:
+                        node.add(ret_node)
+                    node.add(self.parse_block())
+                finally:
+                    self._scope_pop()
+                self.expect_end("fn")
+                node.name = self._operator_fn_name(node, _op_key)
+                return node
         name_tok = self.expect_ident("函数名")
         node = Node("fn", t.line, t.col, name=name_tok.text)
         node.value = {"pub": is_pub, "fallible": ret_bang}
@@ -4305,6 +4503,12 @@ class Parser:
         return node
 
     # ---------------------------------------------------------- C++ 形状探测
+
+    def _text_at(self, j: int) -> str:
+        """第 j 个 token 的文本（j 是**绝对下标**，与 `kind_at` 同一套）。"""
+        if j < 0 or j >= len(self.toks):
+            return ""
+        return self.toks[j].text or ""
 
     def kind_at(self, j: int) -> Kind:
         """第 j 个 token 的种类（j 是**绝对下标**，不是相对偏移）。"""
@@ -4363,6 +4567,23 @@ class Parser:
             j += 1
         if self.kind_at(j) != Kind.IDENT:
             return False
+        # **第 21 条**（`--compat`）：`bool operator<(const P& x, const P& y) {`。
+        # 名字位置是 `operator`，后面跟的是**运算符**而不是 `<T>`——不在这里拦下，
+        # `<` 会被当成泛型参数的开头，一路扫到文件尾返回 False，于是整条声明
+        # 落到「这里不该出现 'ident'」（`E-Parse-UnexpectedTop`）。
+        # **`j` 是绝对下标**（`kind_at` 的约定），不是 `peek` 的相对偏移——
+        # 混用会静默看错 token（实测：判据永远 False，于是又回到
+        # `E-Parse-UnexpectedTop`）。
+        if self.compat and (self._text_at(j) or "") == "operator":
+            j += 1
+            if (self.kind_at(j) == Kind.LBRACKET
+                    and self.kind_at(j + 1) == Kind.RBRACKET):
+                j += 2
+            elif (self._text_at(j) or "") in OPERATOR_KEYS:
+                j += 1
+            else:
+                return False
+            return self.kind_at(j) == Kind.LPAREN
         j += 1                                   # 函数名
         if self.kind_at(j) == Kind.LT:           # 泛型参数 `<T>`
             depth = 0
@@ -7353,6 +7574,38 @@ class Parser:
                 "（按位重解释请用显式移位 / 掩码）。", t)
 
         if k == Kind.LPAREN:
+            # **第 18 条**（`--compat`，2026-11-22）：C 风格标量强转 `(int)x` / `(unsigned long)x`。
+            #
+            # 为什么现在收：真实 C++ 代码里 `(int)xs.size()` 这类窄化遍地都是，
+            # 而"不改一个字"是这套东西的主用法。歧义风险只存在于**标识符**类型名
+            # （`(a)*b` 到底是乘法还是 `(T)*p`），所以这里**只认内建标量表里的拼写**
+            # （`int` / `u64` / `unsigned long` / `double` …，见 `CXX_SCALAR_TYPES`）：
+            # 它们是保留的类型词，不可能是变量名，解析期判断**不需要猜**。
+            # 别名 / struct 名仍然拒绝——那才是"名字是不是类型"判断不了的地方。
+            #
+            # 语义严格等于 `x as T`（同一个 `cast` 节点），所以不新增第二套语义；
+            # compat=False 时连分支都不进，诊断文案一字不改。
+            if self.compat:
+                _save = self.i
+                self.advance()                       # '('
+                _st = self._cxx_scalar_type()
+                if _st is None and self.kind() == Kind.IDENT \
+                        and (self.peek().text or "") in NATIVE_SCALARS \
+                        and self.kind(1) == Kind.RPAREN:
+                    _st = (self.peek().text, 1)
+                if _st is not None and self.kind(_st[1]) == Kind.RPAREN:
+                    _tyname, _nw = _st
+                    for _ in range(_nw):
+                        self.advance()
+                    self.expect(Kind.RPAREN, "')'")
+                    _type_node = Node("type-name", t.line, t.col, name=_tyname)
+                    # 操作数是 **unary-expression**（含后缀）：`(u64)xs.size()`
+                    # 必须读成 `(u64)(xs.size())`，不是 `((u64)xs).size()`——
+                    # 少走一层 postfix 就会把方法调用挂到强转结果上，
+                    # 报出莫名其妙的 `E-Type-NotContainer`。
+                    return Node("cast", t.line, t.col).add(
+                        self.parse_postfix(self.parse_prefix()), _type_node)
+                self.i = _save                        # 不是强转：回退到括号表达式
             self.advance()
             first = self.parse_expr()
             if self.at(Kind.COMMA):
@@ -7793,13 +8046,13 @@ class Parser:
         ## 为什么给三条，而不是一条
 
         这条诊断的**全部价值**是"复制一行就能过"，而"过"要过**整条链路**：
-        `check` → `run` → `dsh cpp`。三条路各自不同的地方在于**能不能发射**：
+        `check` → `run` → `elench cpp`。三条路各自不同的地方在于**能不能发射**：
 
-        | 改法 | check | run | `dsh cpp` |
+        | 改法 | check | run | `elench cpp` |
         |---|---|---|---|
         | A 删掉 `(T)`（不需要转换时） | ✓ | ✓ | ✓ |
         | B 带类型的中间变量（`i32 n = X;`） | ✓ | ✓ | ✓ |
-        | C `X as T`（通用拼写） | ✓ | ✓ | **✗**（`dsh cpp` 还不发射 `as`） |
+        | C `X as T`（通用拼写） | ✓ | ✓ | **✗**（`elench cpp` 还不发射 `as`） |
 
         所以顺序是 A → B → C：先问"这个转换真的需要吗"（6 处真实用例里
         `(int)xs.size()` 全是为了对齐 printf 的 `%d`，而 `.eln` 的
@@ -7807,7 +8060,7 @@ class Parser:
         **带类型的中间变量**，最后才是通用拼写。
 
         以前的消息是 `例：(u8)x → x as u8`：读者要自己把 `u8` 换成他写的类型、
-        再把自己那半个表达式抄过去，而且照抄之后 `dsh cpp` 还会再报一次
+        再把自己那半个表达式抄过去，而且照抄之后 `elench cpp` 还会再报一次
         `E-Cxx-Unsupported`——多一步手工就有第二次出错机会。
         """
         target = self._C_SCALAR_SPELLING.get(tname, "")
@@ -7826,16 +8079,16 @@ class Parser:
             # B：确实要窄化
             out.append(f"改法 B（确实要窄化）→ 先落到带类型的中间变量再往下用："
                        f"`{_t} n = {operand};`"
-                       f"（全链路可用：check / run / dsh cpp）")
+                       f"（全链路可用：check / run / elench cpp）")
             # C：通用拼写
             out.append(f"改法 C（通用拼写）→ `{operand} as {_t}`：语义与 "
-                       f"`({tname})` 相同；**注意** `dsh cpp` 目前不发射 `as`"
+                       f"`({tname})` 相同；**注意** `elench cpp` 目前不发射 `as`"
                        f"（会报 `E-Cxx-Unsupported`），移植库代码时优先 A / B。")
         else:
             out.append("改法 A（多数情况**就该这样**：不需要转换就删掉 `(T)`）")
             out.append(f"改法 B（确实要窄化）→ 带类型的中间变量：`{_t} n = X;`"
-                       f"（全链路可用：check / run / dsh cpp）")
-            out.append(f"改法 C（通用拼写）→ `X as {_t}`；`dsh cpp` 目前不发射 "
+                       f"（全链路可用：check / run / elench cpp）")
+            out.append(f"改法 C（通用拼写）→ `X as {_t}`；`elench cpp` 目前不发射 "
                        f"`as`，移植库代码时优先 A / B。")
         if target and tname != target:
             out.append(f"· `{tname}` 是 C/C++ 的拼写，本语言写 `{target}`"
@@ -7907,6 +8160,24 @@ class Parser:
 
 # ---------------------------------------------------------------- 入口
 
+def _has_op_overloads(node: Optional[Node]) -> bool:
+    """树里有没有运算符重载声明（`fn` 的 `value["op"]`）。"""
+    if node is None:
+        return False
+    if getattr(node, "kind", "") == "fn" and (getattr(node, "value", {}) or {}).get("op"):
+        return True
+    return any(_has_op_overloads(c) for c in (node.children or []))
+
+
+def _has_type_params(node: Optional[Node]) -> bool:
+    """树里有没有 `type-params`（即泛型/模板定义）。"""
+    if node is None:
+        return False
+    if getattr(node, "kind", "") == "type-params":
+        return True
+    return any(_has_type_params(c) for c in (node.children or []))
+
+
 def _has_type_auto(node: Optional[Node]) -> bool:
     """子树里有没有 `type-auto`（P0 兼容层第 3 条的待推断类型）。"""
     if node is None:
@@ -7948,6 +8219,26 @@ def parse_source(src: str, src_name: str = "<input>") -> ParseResult:
             _resolve_auto(mod)
         except Exception:                                # noqa: BLE001
             pass        # 推断失败不是解析失败：诊断由成对类型检查统一报
+
+    # **第 20 条**（P0 兼容层）：**模板单态化**。必须在 `static_cast` 折叠与
+    # 任何下游之前——`cost` / `check` 看到的必须是"已经换成具体重载"的调用点，
+    # 否则 κ 会按"T 未知"去算，类型检查也会拿 `vector<T>` 去比 `vector<u64>`。
+    # 推断不出来**不猜**：调用点保持原样，由成对类型检查报 `E-Type-ArgMismatch`。
+    if mod is not None and _compat.enabled() and _has_type_params(mod):
+        try:
+            from typecheck import resolve_generics as _resolve_generics
+            _resolve_generics(mod)
+        except Exception:                                # noqa: BLE001
+            pass        # 单态化失败不是解析失败：诊断由成对类型检查统一报
+
+    # **第 21 条**（P0 兼容层）：**运算符重载**。必须在下游之前把 `a < b` 改写成
+    # `P__op_lt(a, b)`——κ 按语法结构数，只"允许通过"会把整个循环的成本算成 1。
+    if mod is not None and _compat.enabled() and _has_op_overloads(mod):
+        try:
+            from typecheck import resolve_operators as _resolve_ops
+            _resolve_ops(mod)
+        except Exception:                                # noqa: BLE001
+            pass        # 改写失败不是解析失败：诊断由成对类型检查统一报
 
     # **第 11 条**（P0 兼容层）：`static_cast<…>(x)` 的**尽力而为**的一遍折叠。
     #

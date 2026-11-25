@@ -124,7 +124,7 @@ def test_b18():
         msg = str(e)
         check("?!`" in msg or "?!）" in msg or "含 `?!" in msg,
               "含 `?!` 被拒且说明原因", msg[:60])
-        check("dsh measure" in msg, "被拒时指向 `dsh measure`", msg[:80])
+        check("elench measure" in msg, "被拒时指向 `elench measure`", msg[:80])
 
     # 闭包不完整：调用了还没实现的函数
     ch_missing = CH_OK.replace("    return s;", "    return helper_none(s);")

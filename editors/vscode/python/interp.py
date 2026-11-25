@@ -2327,7 +2327,7 @@ class Interp:
         # **FFI**：`extern` 声明（名字 → 节点）与已加载的 ctypes 句柄
         self.externs = {c.name: c for c in (impl_mod.children or [])
                         if getattr(c, "kind", "") == "extern"}
-        # **动态库搜索目录**（`dsh run --lib-dir=`，可重复；**按命令行顺序**）。
+        # **动态库搜索目录**（`elench run --lib-dir=`，可重复；**按命令行顺序**）。
         # 解析顺序见 `ffi_c.library_candidates`：路径写法 → 每个目录 → 平台加载器。
         # 空列表 = 与加这个开关之前完全一样（裸名交给平台加载器）。
         self.lib_dirs = [str(d) for d in (lib_dirs or ()) if str(d or "").strip()]
@@ -2362,7 +2362,7 @@ class Interp:
         # 那是输入规模/常数太大，不是死循环。判不出来就保持 None（不瞎猜）。
         self._budget_bound_hint = None
         # **预算耗尽时的静态顾问**：`callable(active_fn_names) -> str|None`。
-        # 由调用方（`dsh run`）挂上，只在真的超预算时调用一次，所以正常路径
+        # 由调用方（`elench run`）挂上，只在真的超预算时调用一次，所以正常路径
         # 不付成本分析的代价。返回 None 表示没有静态证据。
         self.budget_advisor = None
         # **当前函数调用栈**（只用于预算诊断：知道超限时在跑哪个函数）。
@@ -3100,7 +3100,7 @@ class Interp:
         ② **算法本身指数/超多项式**：`cost` 侧已经算出 κ = ⊤，且原因由
            `CostInterp._note_tree_rec` 明说是**树递归**（一条路径多个自调用点）。
            **复用**那套判定，不在解释器里另写一份递归形状分析；顾问由
-           `dsh run` 挂上（`budget_advisor`），只有超预算时才跑。
+           `elench run` 挂上（`budget_advisor`），只有超预算时才跑。
         ③ **输入规模/常数太大**：while 条件有具体数值上界，且超限时计数器
            确实比进入时大（重新用 `_diag_eval` 求值，不推进计数器）。
         ④ 都没有：**疑似死循环**，但必须同时说「也可能是算法复杂度/输入太大」——
@@ -3523,6 +3523,11 @@ class Interp:
             return MapVal(key_ty=_key_type_node(tn), val_ty=_elem_type_node(tn))
         if head == "set":
             return SetVal(elem_ty=_elem_type_node(tn))
+        if head == "deque":
+            # **`deque<T> d;` 的默认值是空的双端队列**（环形缓冲，两端 O(1) 摊还）。
+            # 以前这里没有分支，`deque<u64> d;` 掉到最后的整数 0，`d.push_back(1)`
+            # 才在运行期炸——checker 于是干脆把整个 `deque` 拒了。现在两端都接上。
+            return stdlib.DequeVal()
         if head == "stack":
             return StackVal()
         if head == "queue":
@@ -4883,6 +4888,16 @@ class Interp:
                 return _u64(len(_snap))
             # ---- 二元回调的容器：先取快照（元素是 `(k, v)` 或单元素）
             _pairs = None
+            # **集合优先**：`set_new()` 的运行期类型是 `stdlib.SetVal`（MapVal 子类），
+            # 静态类型是 `set<T>`，两端都按**一元** `f(x)` 遍历键。
+            # 不先判它就会被下面的 MapVal 分支按 `f(k, v)` 调——正是"check 过、run 炸"的成因。
+            if isinstance(_m, stdlib.SetVal):
+                _els0 = [k for k, _ in _m.items()]
+                for _x in _els0:
+                    self._run_fn(_fn, [_x], force, {})
+                if _COUNT:
+                    _bump()
+                return _u64(len(_els0))
             if isinstance(_m, stdlib.MapVal):              # stdlib HashMap
                 _pairs = [(k, v) for (k, v) in _m.items()]
             elif isinstance(_m, MapVal):                   # 语言 map（键序）
@@ -5328,6 +5343,31 @@ class Interp:
                 return (list(recv.data.values()) if _is_map
                         else list(recv.data))
             raise InterpError(f"unordered 容器没有方法 {_m}")
+        # **`deque<T>` 的方法**（2026-11-25 接线）：与 `deque_*` 内建同一套语义，
+        # 两端 push/pop 都是 O(1) 摊还；`size` / `empty` 与其它容器一致。
+        if isinstance(recv, stdlib.DequeVal):
+            # 实参自己取：这一段比 `_lvs` / `_av` 的赋值更早，
+            # 直接用它们会 `UnboundLocalError`（实测）。
+            _dargs = self._args(n, env, force)
+            _dlvs = self._arg_lvs(n)
+            _m = (n.name or "").split(".")[-1]     # `_m` 原本在下面那个分支里才赋值
+            if _m == "push_back":
+                recv.push_back(self._copy_arg(_dlvs, 0, _dargs[0]))
+                return _u64(0)
+            if _m == "push_front":
+                recv.push_front(self._copy_arg(_dlvs, 0, _dargs[0]))
+                return _u64(0)
+            if _m == "pop_back":
+                return recv.pop_back()
+            if _m == "pop_front":
+                return recv.pop_front()
+            if _m in ("size", "len", "length"):
+                return _u64(len(recv))
+            if _m == "empty":
+                return bool(len(recv) == 0)
+            raise InterpError(
+                f"deque 没有方法 `{_m}`：可用 push_back / push_front / "
+                f"pop_back / pop_front / size / empty")
         if isinstance(recv, (StackVal, QueueVal)):
             _m = (n.name or "").split(".")[-1]
             _an = next((c for c in n.children if c.kind == "args"), None)
@@ -6386,7 +6426,7 @@ def exhaustive_module(interp: "Interp",
                       timeout: float = EXHAUSTIVE_TIMEOUT_S):
     """对模块里每个函数做**有限域穷举**，返回 `(报告列表, 反例列表)`。
 
-    报告是给人读的分档结论（`status` 见下）；反例是给 `dsh check` 组装
+    报告是给人读的分档结论（`status` 见下）；反例是给 `elench check` 组装
     `E-Guarantee-Counterexample` 诊断的结构化数据。**不在这里打印任何东西**
     （JSON 模式下 stdout 只能有 JSON）。
 

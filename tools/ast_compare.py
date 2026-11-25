@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Elench contributors
 """ast_compare.py —— 两个 `.tu`/`.eln` 的 AST 是否**等价**（忽略位置）

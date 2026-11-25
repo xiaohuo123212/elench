@@ -1,4 +1,4 @@
-﻿// 04_tokenizer.cpp —— 字符分类 + 计数（range-for、auto、isdigit 的常见写法）
+// 04_tokenizer.cpp —— 字符分类 + 计数（range-for、auto、isdigit 的常见写法）
 #include <cstdio>
 #include <string>
 #include <vector>

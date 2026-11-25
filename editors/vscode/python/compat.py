@@ -5,7 +5,7 @@
 
 ## 一句话
 
-`--compat` 打开时，`.eln` / `.tu` 里可以照抄 **C++ 的十二种写法**；关掉时行为与
+`--compat` 打开时，`.eln` / `.tu` 里可以照抄 **C++ 的二十二种写法（1–22，含 12b）**；关掉时行为与
 2026-11-11 之前**逐字节相同**。剥掉语法糖之后必须还是**同一个程序**：
 
     同一段逻辑写两遍（C++ 拼写 / 本语言拼写）
@@ -14,7 +14,7 @@
 
 做不到就说明那个"拼写"偷偷改了含义 ⇒ 退回。
 
-## 十二条（每条都只读 `enabled()`）
+## 各条（每条都只读 `enabled()`，当前 1–22 含 12b）
 
 | # | C++ 写法 | 落到哪 |
 |---|---|---|
@@ -30,6 +30,11 @@
 | 10 | `T x(args…)`（直接构造） | 单实参→拷贝初始化；`vector<T>(n, v)`→`vector<T>::filled(v, n)`；其余报 `E-Compat-CtorUnsupported` |
 | 11 | `static_cast<unsigned char>(x)` / `static_cast<u64>(x)` | **只认这两种目标**，且**只在"值逐位不变"时**折成 `x`；窄化 / 有符号 / 推不出类型 → `E-Cast-Unsupported` |
 | 12 | 三段式 `for` 的**唯一标准迭代器形状**：`for ([T] it = xs.begin(); it != xs.end(); ++it) { *it; it->f; }` | **降级成普通索引循环**（`it` → 新导入的 `u64 idx`：`*it`→`xs[idx]`、`it->f`→`xs[idx].f`、`xs.begin()`→`0`、`xs.end()`→`xs.size()`、`++it`→`idx = idx + 1`）。三种拼写落到**同一棵** AST，所以 κ / run 与手写索引循环必然相同；其余迭代器形状一律拒绝（见下方 `FOR_ITER_*` 与 `E-For-Iterator*`） |
+| 18 | `(int)x` / `(u64)xs.size()`（C 风格标量强转） | `x as T`（**同一个** `cast` 节点）；只认内建标量拼写，别名/struct 名仍拒绝 |
+| 22 | 成员上的 `mutable` / `volatile` / `inline` / `constexpr` | **纯拼写**，`--compat` 下跳过（字段本来就都能改、没有内联声明、没有编译期常量） |
+| 21 | `operator<` / `==` / `[]` / `+` …（自由与成员） | 降级成 `P__op_lt(...)`，并把 `a < b` **改写成**调用（κ 计入被调函数成本）；两侧类型不同则不改 |
+| 20 | `template <typename T>` 前缀 + **函数模板 / 类模板** | 在**使用点单态化**：函数 → `len__u64`；struct → `Box__u64`（成员函数一并实例化成 `Box__u64_sum`）。推断不出报 `E-Type-InferFailed`。**不做**偏特化 / SFINAE / 可变参数 / 非类型参数 |
+| 19 | `#include "x.h"`（自己的头） | 递归内联 + 函数原型翻 `extern … from "<头>"`；解析不到仍报 `E-Lex-IncludeUnresolved` |
 | 12b | 同一个形状，接收者是 **`map` / `set`**（含 `unordered_*`） | **键快照 + 下标循环**：`vector<K> ks = m.keys();`（只取一次）→ `while (idx < ks.size())`；`it->first`→`ks[idx]`、`it->second`→`m.get(ks[idx])`、`*it`→`( ks[idx], m.get(ks[idx]) )`；`set` 只有 `*it`→`ks[idx]`（`.values()` 取快照），`it->first/second` 报错。κ = **O(n log n)**（`get` 是 O(log n)）／`unordered_map` 最坏 O(n²)——比 C++ 的 O(n) **贵一档**，见 `FOR_ITER_MAP_HEADS` 那一段 |
 
 ## 开关为什么只有这一处
@@ -37,7 +42,7 @@
 **最终载体可能是 `.elnc` 后缀（用户还没定）**。所以布尔只在这里，
 `dsh._main_impl` 里**一行**决定（读 `--compat`）；parser / typecheck / checker
 都只读 `enabled()`，没有第二处开关。将来改成"按后缀决定"时，只改那一行，
-十二条特性一行都不用动。将来加到第 13 条时同样只改实现、不改开关。
+这些特性一行都不用动。再加下一条时同样只改实现、不改开关。
 
 ## 上表之外的后几条
 

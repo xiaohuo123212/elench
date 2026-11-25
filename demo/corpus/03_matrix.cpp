@@ -1,4 +1,4 @@
-﻿// 03_matrix.cpp —— 二维容器 + 三重循环（数值内核的骨架）
+// 03_matrix.cpp —— 二维容器 + 三重循环（数值内核的骨架）
 #include <cstdio>
 #include <vector>
 

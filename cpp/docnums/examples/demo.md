@@ -4,8 +4,8 @@
 `tools/audit_numbers.py`，而那两项统计只覆盖 `src/` 与 `tests/`——
 两者都在公开仓库里，所以这个检查在**没有内部文档**的镜像仓里同样成立。
 
-- 测试文件：86<!--dn:test_files--> 个（`tests/**.py` 里 `test_*.py`）
-- 断言调用点：1,402<!--dn:check_calls--> 处（`tests/**.py` 里 `check(` 出现次数）
+- 测试文件：207<!--dn:test_files--> 个（`tests/**.py` 里 `test_*.py`）
+- 断言调用点：5,590<!--dn:check_calls--> 处（`tests/**.py` 里 `check(` 出现次数）
 
 ```bash
 # 校验（不一致就非零退出）

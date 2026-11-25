@@ -1,4 +1,4 @@
-﻿// 01_sorting.cpp —— 插入排序 + 归并排序（最常见的 C++ 内核形状）
+// 01_sorting.cpp —— 插入排序 + 归并排序（最常见的 C++ 内核形状）
 #include <cstdio>
 #include <vector>
 #include <cstddef>

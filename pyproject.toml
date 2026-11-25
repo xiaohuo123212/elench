@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "elench"
-version = "1.0.0"
+version = "1.0.2"
 description = "Elench: a cost-contract language and static verification framework for AI-generated code"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -39,12 +39,15 @@ py-modules = [
     "check_docs",
     "checker",
     "compat",
-    "cost_check",
     "contract_metric",
+    "core_api",
+    "cost_artifact",
+    "cost_check",
     "cost_diff",
     "cost_explain",
     "cost_interp",
     "cxx_map",
+    "diag_json",
     "dispatch",
     "dsh",
     "dup_scan",
@@ -56,22 +59,21 @@ py-modules = [
     "grammar",
     "guarantees",
     "highlight",
+    "html_report",
     "interp",
     "isolated",
     "jsonval",
     "kappa_vs_measured",
     "kinds",
     "lexer",
-    "migrate_docs",
     "otel",
     "otel_dashboard",
+    "otel_export",
     "otel_local_sink",
     "otel_view",
-    "otel_export",
     "parser",
     "policy",
     "preproc",
-    "rename_ch",
     "requires",
     "segment_plan",
     "shape",
@@ -79,6 +81,7 @@ py-modules = [
     "symbolic",
     "sync_docs",
     "typecheck",
+    "version", "typenames",
     "walk",
 ]
 packages = ["cost_domain"]

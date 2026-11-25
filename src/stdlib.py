@@ -1050,7 +1050,7 @@ class ArgsVal:
 
 
 #: 程序参数（由 CLI 显式设置；`args()` 只读这里，**不去翻 sys.argv**——
-#: 否则 `dsh run` 自己的命令行参数会漏进去）。
+#: 否则 `elench run` 自己的命令行参数会漏进去）。
 _PROG_ARGS: List[str] = []
 
 
@@ -1412,6 +1412,11 @@ class DequeVal:
                    [None] * (self.cap - self.n)
         self.head = 0
 
+    def __len__(self) -> int:
+        """元素个数。`len(dq)` 与 `deque_len(dq)` 同值——
+        `deque<T>` 的方法分派（`.size()` / `.empty()`）走的就是这一个。"""
+        return self.n
+
     def _at(self, i: int):
         return self.buf[(self.head + i) % self.cap]
 
@@ -1447,9 +1452,22 @@ class DequeVal:
         return v
 
 
-def _set_new(args: List[Any]) -> MapVal:
+class SetVal(MapVal):
+    """集合：**值恒为 1 的 HashMap**，但运行期是**独立的类型**。
+
+    为什么需要这个子类（2026-11-25）：`for_each` 的静态判定看**类型**（`set<T>` →
+    一元回调 `f(x)`），而解释器看**运行期类型**（以前 `set_new()` 返回 `MapVal` →
+    二元回调 `f(k, v)`）。两边对不上，于是 `for_each(set_new(), on1)` 在 `check`
+    能过、`run` 报「on1 需要 1 个实参，给了 2」。子类让运行期也能分辨集合与映射，
+    其余 `set_*` 内建（`isinstance(m, MapVal)`）照旧工作。
+    """
+
+    __slots__ = ()
+
+
+def _set_new(args: List[Any]) -> SetVal:
     """`Set<T>` 就是一个"值恒为 1"的 HashMap —— 复用同一套有界探测。"""
-    return MapVal()
+    return SetVal()
 
 
 def _set_add(args: List[Any]) -> int:
@@ -1547,7 +1565,19 @@ def _split_get(args: List[Any]) -> list:
 
 
 def _text_join(args: List[Any]) -> list:
-    """`text_join(split, sep) -> Vec<u8>`：把段用 `sep` 拼回去。"""
+    """`text_join(split, sep) -> Vec<u8>`：把段用 `sep` 拼回去。
+
+    第一实参必须是 `text_split` 的返回值（带 `parts` 的那个对象）。
+    **以前直接取 `args[0].parts`**——传 `Vec<u8>` 就抛宿主异常
+    `AttributeError: 'Text' object has no attribute 'parts'`，用户看到的是 Python
+    内部细节。现在先判：静态层由 `typecheck` 挡（`E-Type-ArgMismatch`），
+    这里兜运行期（比如从 `any` 里捞出来的值）。
+    """
+    if not hasattr(args[0], "parts"):
+        raise TypeError(
+            "text_join 的第一个实参必须是 text_split(...) 的返回值（Split），"
+            "不是 Vec<u8>。改法：text_join(text_split(s, sep), sep)；"
+            "要拼两段字节直接写 text_concat(a, b)")
     parts = args[0].parts
     sep = args[1]
     s = bytes(int(x) & 0xFF for x in sep) if isinstance(sep, list) else bytes(sep)

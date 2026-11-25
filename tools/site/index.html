@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<!--
+  Elench 工作台 —— 纯静态网页：左边写代码，右边看 κ 与判决，**全部在浏览器里算**。
+
+  没有服务器端计算：页面把 src/**/*.py 灌进 Pyodide（浏览器里的 CPython），
+  再 import core_api。所以这个目录可以直接丢到任何静态托管上用。
+
+  不引任何外部资源：运行时在 /pyodide/（仓库里那份，13.2 MB），样式与脚本全内联。
+
+  给自动化验证用的钩子：window.__site = { boot(), run(tu, eln), check(tu, eln) }。
+  tests/cases/test_wasm_browser.py 会用无头浏览器调它 —— 同一条代码路径。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Elench 工作台</title>
+<style>
+  :root {
+    --bg: #0b0d12; --panel: #12151b; --panel2: #171b23; --line: #262b36;
+    --fg: #e6e8ee; --dim: #9aa3b2; --accent: #4c7cf3;
+    --ok: #35c37d; --debt: #f0a13a; --unk: #7a8290; --bad: #ef5b5b;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Courier New", monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--fg); overflow: hidden;
+         font: 13.5px/1.6 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
+
+  header { height: 52px; display: flex; align-items: center; gap: 12px;
+           padding: 0 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 14px; margin: 0; font-weight: 650; letter-spacing: .2px; }
+  header .tag { color: var(--dim); font-size: 11.5px; }
+  header .grow { flex: 1; }
+  .cpp { display: flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--dim);
+         cursor: pointer; user-select: none; padding: 4px 9px; border: 1px solid var(--line);
+         border-radius: 7px; }
+  .cpp input { accent-color: var(--accent); cursor: pointer; }
+  .cpp.on { color: var(--accent); border-color: rgba(76,124,243,.55); }
+  .pill { font: 11.5px var(--mono); padding: 3px 9px; border-radius: 999px;
+          border: 1px solid var(--line); color: var(--dim); white-space: nowrap; }
+  .pill.ready { border-color: rgba(53,195,125,.5); color: var(--ok); }
+  .pill.busy  { border-color: rgba(240,161,58,.5); color: var(--debt); }
+  .pill.err   { border-color: rgba(239,91,91,.5);  color: var(--bad); }
+
+  button { background: var(--accent); color: #fff; border: 0; border-radius: 7px;
+           padding: 7px 14px; font-size: 13px; cursor: pointer; font-weight: 550; }
+  button.ghost { background: transparent; border: 1px solid var(--line); color: var(--fg); font-weight: 400; }
+  button:disabled { opacity: .45; cursor: default; }
+
+  main { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr);
+         height: calc(100% - 52px); }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; } }
+
+  .pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .pane.left { border-right: 1px solid var(--line); }
+  .pane-hd { display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+             border-bottom: 1px solid var(--line); background: var(--panel); flex: none; }
+  .pane-hd .name { font: 12px var(--mono); color: var(--dim); }
+  .pane-hd .grow { flex: 1; }
+
+  .editors { flex: 1; display: grid; grid-template-rows: 1fr 1fr; min-height: 0; }
+  .ed { display: flex; flex-direction: column; min-height: 0; border-bottom: 1px solid var(--line); }
+  .ed:last-child { border-bottom: 0; }
+  .ed-hd { padding: 5px 12px; font: 11.5px var(--mono); color: var(--dim);
+           border-bottom: 1px solid var(--line); background: var(--panel2); flex: none;
+           display: flex; gap: 8px; align-items: center; }
+  .ed-hd .grow { flex: 1; }
+  textarea { flex: 1; width: 100%; min-height: 0; resize: none; border: 0; outline: 0;
+             background: transparent; color: var(--fg); padding: 10px 12px;
+             font: 12.5px/1.6 var(--mono); tab-size: 2; }
+
+  .out { flex: 1; overflow: auto; padding: 14px 16px 24px; min-height: 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+          margin-bottom: 12px; overflow: hidden; }
+  .card > .hd { padding: 8px 12px; border-bottom: 1px solid var(--line);
+                font: 11.5px var(--mono); color: var(--dim); display: flex; gap: 8px; align-items: center; }
+  .card > .hd .grow { flex: 1; }
+
+  .badge { display: inline-block; padding: 3px 11px; border-radius: 999px;
+           font-size: 12px; font-weight: 650; }
+  .b-ok   { background: rgba(53,195,125,.15); color: var(--ok); }
+  .b-debt { background: rgba(240,161,58,.15); color: var(--debt); }
+  .b-unk  { background: rgba(122,130,144,.18); color: var(--unk); }
+  .b-bad  { background: rgba(239,91,91,.15);  color: var(--bad); }
+
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; padding: 10px 12px; }
+  .kv .k { color: var(--dim); font-size: 12px; white-space: nowrap; }
+  .kv .v { font-family: var(--mono); font-size: 12.5px; word-break: break-word; }
+  .fn { padding: 10px 12px; border-top: 1px solid var(--line); }
+  .fn:first-child { border-top: 0; }
+  .fn-name { font-weight: 650; font-family: var(--mono); font-size: 13px; }
+  .kappa { font-family: var(--mono); font-size: 12.5px; color: #cfe6ff;
+           margin-top: 4px; word-break: break-word; }
+  .note { color: var(--dim); font-size: 12px; margin-top: 3px; }
+  .diag { padding: 8px 12px; border-top: 1px solid var(--line); font-size: 12.5px; }
+  .diag .code { font-family: var(--mono); color: var(--bad); }
+  .diag .where { color: var(--dim); font-family: var(--mono); font-size: 11.5px; }
+  .diag .fix { color: var(--dim); margin-top: 2px; }
+  .empty { color: var(--dim); padding: 22px 16px; text-align: center; font-size: 13px; }
+  .err { color: var(--bad); padding: 10px 12px; font-size: 12.5px; white-space: pre-wrap; }
+  .hint { color: var(--dim); font-size: 12px; }
+  .log { font: 11.5px/1.6 var(--mono); color: var(--dim); padding: 8px 12px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Elench 工作台</h1>
+  <span class="tag">把 .cpp 丢进来，看 κ 与 target 是否对得上</span>
+  <span class="grow"></span>
+  <label class="cpp" title="打开后走 --compat 兼容层：.cpp 原样丢进来就能查（using / typedef / auto / std:: / void / += / 多声明符等）">
+    <input type="checkbox" id="compat"> C++ 模式
+  </label>
+  <span class="pill" id="runtime">运行时未加载</span>
+  <button class="ghost" id="btn-check">静态检查</button>
+  <button id="btn-cost">算 κ</button>
+</header>
+
+<main>
+  <section class="pane left">
+    <div class="pane-hd">
+      <span class="name">源码</span>
+      <span class="grow"></span>
+      <button class="ghost" id="btn-sample-cpp-ok" style="padding:4px 10px;font-size:12px">C++ + 契约</button>
+      <button class="ghost" id="btn-sample-cpp" style="padding:4px 10px;font-size:12px">C++ 原样</button>
+      <button class="ghost" id="btn-sample-debt" style="padding:4px 10px;font-size:12px">违约</button>
+      <button class="ghost" id="btn-sample-syntax" style="padding:4px 10px;font-size:12px">语法错</button>
+    </div>
+    <div class="editors">
+      <div class="ed">
+        <div class="ed-hd"><span>probe.tu</span><span class="grow"></span>
+          <span>契约：target / effects / requires</span></div>
+        <textarea id="tu" spellcheck="false" autocomplete="off"></textarea>
+      </div>
+      <div class="ed">
+        <div class="ed-hd"><span>probe.eln</span><span class="grow"></span>
+          <span>实现：零声明，只有函数体</span></div>
+        <textarea id="eln" spellcheck="false" autocomplete="off"></textarea>
+      </div>
+    </div>
+  </section>
+
+  <section class="pane">
+    <div class="pane-hd">
+      <span class="name">结果</span>
+      <span class="grow"></span>
+      <span class="hint" id="timing"></span>
+    </div>
+    <div class="out" id="out">
+      <div class="empty">正在加载浏览器里的 CPython…<br><span id="boot-msg"></span></div>
+    </div>
+  </section>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---- 路径：由 serve.py 提供同样的布局，所以开发和部署用同一套 URL ----
+  var PYODIDE_DIR = "/pyodide/";
+  var MODULES = "/modules.json";
+  var FS_ROOT = "/elench/src";
+
+  var CPP_BODY = [
+    "#include <vector>",
+    "using namespace std;",
+    "",
+    "// 数一数有多少个元素比阈值大",
+    "int count_above(const vector<int>& xs, int threshold) {",
+    "    int n = 0;",
+    "    for (int i = 0; i < xs.size(); i++) {",
+    "        if (xs[i] > threshold) {",
+    "            n += 1;",
+    "        }",
+    "    }",
+    "    return n;",
+    "}"
+  ].join("\n") + "\n";
+
+  var SAMPLE = {
+    // **默认示例**：真 C++ + 一份三行契约 → 一进来就看到「达成」
+    cpp_ok: {
+      tu: [
+        "spec count_above(const vector<int>& xs, int threshold) -> int {",
+        "    effects {};",
+        "    target { time: { max: O(xs.size()) }, allocation: { max: 0 }, };",
+        "}"
+      ].join("\n") + "\n",
+      eln: CPP_BODY
+    },
+    ok: {
+      tu: [
+        "spec sum_all(const vector<u64>& xs) -> u64 {",
+        "    effects {};",
+        "    target { time: { max: O(n) }, allocation: { max: 0 }, };",
+        "}"
+      ].join("\n") + "\n",
+      eln: [
+        "u64 sum_all(const vector<u64>& xs) {",
+        "    u64 s = 0;",
+        "    for (auto x : xs) { s = s + x; }",
+        "    return s;",
+        "}"
+      ].join("\n") + "\n"
+    },
+    debt: {
+      tu: [
+        "spec max_pair_sum(const vector<u64>& xs) -> u64 {",
+        "    effects {};",
+        "    target { time: { max: O(n) }, allocation: { max: 0 }, };",
+        "}"
+      ].join("\n") + "\n",
+      eln: [
+        "u64 max_pair_sum(const vector<u64>& xs) {",
+        "    u64 best = 0;",
+        "    u64 i = 0;",
+        "    while (i < xs.size()) {",
+        "        u64 j = i + 1;",
+        "        while (j < xs.size()) {",
+        "            u64 s = xs.at(i) + xs.at(j);",
+        "            if (s > best) { best = s; }",
+        "            j = j + 1;",
+        "        }",
+        "        i = i + 1;",
+        "    }",
+        "    return best;",
+        "}"
+      ].join("\n") + "\n"
+    },
+    // **真 C++ 源码，一个字都没改**：靠 --compat 直接吃下来。
+    // 没有 .tu（也就没有 target）——所以结算会是"未声明契约"，但 κ 照样算得出来。
+    // 同一份 C++，**没有 .tu**：κ 照样有，判决是「未声明契约」
+    cpp: { tu: "", eln: CPP_BODY },
+    syntax: {
+      tu: "spec f(const vector<u64>& xs) -> u64 {\n    effects {};\n    target { time: { max: O(n) } };\n}\n",
+      eln: "u64 f( {\n    return\n}\n"
+    }
+  };
+
+  var $ = function (id) { return document.getElementById(id); };
+  var tuEl = $("tu"), elnEl = $("eln"), outEl = $("out");
+  var runtimeEl = $("runtime"), timingEl = $("timing"), bootMsgEl = $("boot-msg");
+
+  var compatEl = $("compat");
+  var pyodide = null, ready = false, bootError = null;
+
+  function setRuntime(kind, text) {
+    runtimeEl.className = "pill " + kind;
+    runtimeEl.textContent = text;
+  }
+
+  function esc(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  function badge(v) {
+    // `undeclared` 是**独立的第四档**：没有 .tu 就没有契约可判——它既不是达成，
+    // 也不是债务，更不是"判不出来"。写英文原词会让人以为出了错。
+    var map = { ok: ["b-ok", "达成"], debt: ["b-debt", "债务"],
+                unknown: ["b-unk", "无法判定"], undeclared: ["b-unk", "未声明契约"] };
+    var m = map[v] || ["b-unk", v || "（无判决）"];
+    return '<span class="badge ' + m[0] + '">' + esc(m[1]) + "</span>";
+  }
+
+  function worst(fns) {
+    // undeclared 不参与"最差"的排序：它表示"这件事没在判定范围内"
+    var rank = { ok: 2, debt: 1, unknown: 0 };
+    var out = null;
+    Object.keys(fns || {}).forEach(function (n) {
+      var v = fns[n].verdict;
+      if (v === "undeclared") return;                    // 不参与判定，也就不是"最差"
+      if (out === null || rank[v] < rank[out]) out = v;
+    });
+    if (out === null) {
+      // 全是 undeclared：明说"没契约可判"，不要显示成"达成"
+      var names = Object.keys(fns || {});
+      if (names.length) out = "undeclared";
+    }
+    return out;
+  }
+
+  // ---------------- 渲染 ----------------
+
+  function renderCost(p) {
+    var fns = p.functions || {};
+    var names = Object.keys(fns);
+    var w = worst(fns);
+    var html = '<div class="card"><div class="hd"><span>成本判定</span><span class="grow"></span>' +
+               badge(w) + "</div>";
+    if (!names.length) {
+      html += '<div class="empty">没有算出任何函数（实现里是不是没有函数？）</div>';
+    }
+    names.forEach(function (n) {
+      var f = fns[n] || {};
+      html += '<div class="fn"><div class="fn-name">' + esc(n) + "</div>";
+      html += '<div class="kappa">κ ≤ ' + esc(f.cost_expression) + "</div>";
+      if (f.verdict_explanation) html += '<div class="note">' + badge(f.verdict) + "　" + esc(f.verdict_explanation) + "</div>";
+      if (f.allocation_verdict) {
+        html += '<div class="note">分配：' + esc(f.allocation_expression) + "　" +
+                esc(f.allocation_verdict === "ok" ? "达成" : (f.allocation_verdict === "debt" ? "债务" : "无法判定")) +
+                (f.allocation_explanation ? "　" + esc(f.allocation_explanation) : "") + "</div>";
+      }
+      html += "</div>";
+    });
+    html += "</div>";
+    html += renderDiags(p.diagnostics);
+    outEl.innerHTML = html;
+  }
+
+  function renderCheck(p) {
+    var okBadge = p.ok ? '<span class="badge b-ok">通过</span>'
+                       : '<span class="badge b-bad">未通过</span>';
+    var html = '<div class="card"><div class="hd"><span>静态检查</span><span class="grow"></span>' +
+               okBadge + "</div>";
+    var fns = p.functions || [];
+    if (fns.length) {
+      html += '<div class="kv">';
+      fns.forEach(function (f) {
+        html += '<div class="k">' + esc(f.name) + "</div><div class=\"v\">" +
+                (f.has_target ? "有契约" : "无契约") + " · " +
+                (f.has_implementation ? "有实现" : "无实现") + " · " + esc(f.state) + "</div>";
+      });
+      html += "</div>";
+    }
+    html += "</div>";
+    html += renderDiags(p.diagnostics);
+    outEl.innerHTML = html;
+  }
+
+  function renderDiags(ds) {
+    if (!ds || !ds.length) return "";
+    var html = '<div class="card"><div class="hd"><span>诊断（' + ds.length + "）</span></div>";
+    ds.forEach(function (d) {
+      html += '<div class="diag"><span class="code">' + esc(d.code) + "</span> " +
+              '<span class="where">@' + esc(d.line) + ":" + esc(d.col) + "</span>　" +
+              esc(d.message) +
+              (d.fix ? '<div class="fix">改法：' + esc(d.fix) + "</div>" : "") +
+              "</div>";
+    });
+    return html + "</div>";
+  }
+
+  function renderError(msg) {
+    outEl.innerHTML = '<div class="card"><div class="hd"><span>出错了</span></div>' +
+                      '<div class="err">' + esc(msg) + "</div></div>";
+  }
+
+  // ---------------- 加载运行时 ----------------
+
+  function loadScript(src) {
+    return new Promise(function (res, rej) {
+      var s = document.createElement("script");
+      s.src = src;
+      s.onload = res;
+      s.onerror = function () { rej(new Error("加载失败：" + src)); };
+      document.head.appendChild(s);
+    });
+  }
+
+  async function boot() {
+    if (ready) return { reused: true, pyodide: pyodide.version };
+    setRuntime("busy", "加载运行时…");
+    try {
+      await loadScript(PYODIDE_DIR + "pyodide.js");
+      pyodide = await globalThis.loadPyodide({ indexURL: PYODIDE_DIR });
+      setRuntime("busy", "灌入 src/…");
+      var man = await (await fetch(MODULES, { cache: "no-store" })).json();
+      pyodide.FS.mkdirTree(FS_ROOT);
+      for (var i = 0; i < man.modules.length; i++) {
+        var rel = man.modules[i];              // src/xxx.py 或 src/cost_domain/xxx.py
+        var text = await (await fetch("/" + rel, { cache: "no-store" })).text();
+        var dest = "/elench/" + rel;
+        pyodide.FS.mkdirTree(dest.slice(0, dest.lastIndexOf("/")));
+        pyodide.FS.writeFile(dest, text, { encoding: "utf8" });
+      }
+      setRuntime("busy", "import core_api…");
+      pyodide.runPython("import sys, json\nsys.path.insert(0, '" + FS_ROOT + "')\nimport core_api\n");
+      ready = true;
+      setRuntime("ready", "就绪 · Pyodide " + pyodide.version + " · " + man.modules.length + " 个模块");
+      return { reused: false, pyodide: pyodide.version, modules: man.modules.length };
+    } catch (e) {
+      bootError = e;
+      setRuntime("err", "运行时加载失败");
+      renderError("加载浏览器里的 CPython 失败：\n" + (e && e.message ? e.message : e) +
+        "\n\n常见原因：\n" +
+        "· 运行时不在 /pyodide/（仓库里那份 13.2 MB；重新取：python -B tools/wasm/fetch_runtime.py）\n" +
+        "· 不是通过 http:// 打开（浏览器禁止 file:// 下读 wasm）\n" +
+        "· 浏览器太老（需要 WebAssembly）");
+      throw e;
+    }
+  }
+
+  // ---------------- 计算 ----------------
+
+  var PY_CALL = [
+    "import json, core_api",
+    "try:",
+    "    _r = core_api.__OP__(_tu, _eln, compat=_compat)",
+    "    _r.pop('_rc', None)",
+    "    _res = {'ok': True, 'payload': _r}",
+    "except Exception as _e:",
+    "    import traceback",
+    "    _res = {'ok': False, 'error': type(_e).__name__ + ': ' + str(_e)[:400],",
+    "            'traceback': traceback.format_exc()[-1600:]}",
+    "json.dumps(_res, ensure_ascii=False)"
+  ].join("\n");
+
+  async function compute(op) {
+    var t0 = performance.now();
+    pyodide.globals.set("_tu", tuEl.value);
+    pyodide.globals.set("_eln", elnEl.value);
+    pyodide.globals.set("_compat", compatEl.checked);
+    var raw = pyodide.runPython(PY_CALL.replace("__OP__", op));
+    var ms = performance.now() - t0;
+    var r = JSON.parse(raw);
+    timingEl.textContent = Math.round(ms) + " ms";
+    if (!r.ok) {
+      renderError(r.error + "\n\n" + (r.traceback || ""));
+      return { ok: false, error: r.error, ms: ms };
+    }
+    if (op === "cost") renderCost(r.payload); else renderCheck(r.payload);
+    return { ok: true, payload: r.payload, ms: ms };
+  }
+
+  async function act(op) {
+    if (!ready) {
+      try { await boot(); } catch (e) { return null; }
+    }
+    $("btn-cost").disabled = true;
+    $("btn-check").disabled = true;
+    try {
+      return await compute(op);
+    } catch (e) {
+      renderError("计算出错：" + (e && e.message ? e.message : e));
+      return null;
+    } finally {
+      $("btn-cost").disabled = false;
+      $("btn-check").disabled = false;
+    }
+  }
+
+  // ---------------- 交互 ----------------
+
+  $("btn-cost").addEventListener("click", function () { act("cost"); });
+  $("btn-check").addEventListener("click", function () { act("check"); });
+
+  function loadSample(kind) {
+    var s = SAMPLE[kind];
+    // 只有「C++ 原样」这个示例需要打开兼容层；其它示例保持用户自己的开关状态不变
+    if (kind === "cpp") compatEl.checked = true;
+    tuEl.value = s.tu;
+    elnEl.value = s.eln;
+    syncCompatStyle();
+    act("cost");
+  }
+
+  function syncCompatStyle() {
+    compatEl.parentElement.classList.toggle("on", compatEl.checked);
+  }
+  compatEl.addEventListener("change", function () { syncCompatStyle(); act("cost"); });
+  $("btn-sample-cpp-ok").addEventListener("click", function () { loadSample("cpp_ok"); });
+  $("btn-sample-debt").addEventListener("click", function () { loadSample("debt"); });
+  $("btn-sample-syntax").addEventListener("click", function () { loadSample("syntax"); });
+  $("btn-sample-cpp").addEventListener("click", function () { loadSample("cpp"); });
+
+  // 两个框都支持 Tab 缩进（浏览器的默认行为是切焦点，写代码很难受）
+  [tuEl, elnEl].forEach(function (el) {
+    el.addEventListener("keydown", function (ev) {
+      if (ev.key !== "Tab") return;
+      ev.preventDefault();
+      var s = el.selectionStart, e = el.selectionEnd;
+      el.value = el.value.slice(0, s) + "    " + el.value.slice(e);
+      el.selectionStart = el.selectionEnd = s + 4;
+    });
+  });
+
+  // ---------------- 自动化验证用的钩子 ----------------
+
+  globalThis.__site = {
+    boot: boot,
+    run: function (tu, eln) { if (tu) tuEl.value = tu; if (eln) elnEl.value = eln; return act("cost"); },
+    check: function (tu, eln) { if (tu) tuEl.value = tu; if (eln) elnEl.value = eln; return act("check"); },
+    compat: function (on) { compatEl.checked = !!on; syncCompatStyle(); return compatEl.checked; },
+    state: function () { return { ready: ready, pyodide: pyodide ? pyodide.version : null, compat: compatEl.checked, error: bootError ? String(bootError) : null }; }
+  };
+
+  // ---------------- 启动 ----------------
+
+  // **C++ 是主用法**：默认打开兼容层，默认示例就是「一份没改过的 C++ + 一份契约」
+  compatEl.checked = true;
+  syncCompatStyle();
+  tuEl.value = SAMPLE.cpp_ok.tu;
+  elnEl.value = SAMPLE.cpp_ok.eln;
+  bootMsgEl.textContent = "首次约 1 秒（13 MB 运行时在本地，不联网）";
+  boot().then(function () { act("cost"); }, function () { /* 错误已渲染 */ });
+})();
+</script>
+</body>
+</html>

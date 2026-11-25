@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<!--
+  probe.html —— 验证「Elench 能不能在浏览器里跑」（Pyodide / WASM）。
+
+  它要回答的只有一个问题：
+     把 src/**/*.py 喂进 Pyodide 之后，import core_api 能不能成功，
+     而且算出来的 κ 和命令行一致？
+
+  能 → 网站可以是纯静态页（不需要服务器、不需要公网地址）。
+  不能 → 退回「后端服务 + 前端」那条路。
+
+  这是**探针**，不是产品：界面上只有输入、一个按钮、和一份逐步日志。
+  日志要把每一步都写清楚（加载多大、多久、哪个模块失手），因为失败的细节才是要的信息。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Elench × Pyodide 可行性探针</title>
+<style>
+  :root { --bg:#0b0d12; --panel:#12151b; --line:#2a2f3a; --fg:#e6e8ee; --dim:#9aa3b2;
+          --ok:#35c37d; --bad:#ef5b5b; --warn:#f0a13a;
+          --mono: ui-monospace, Consolas, monospace; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font:14px/1.6 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif; }
+  header { padding:12px 16px; border-bottom:1px solid var(--line); }
+  h1 { font-size:15px; margin:0 0 2px; }
+  .sub { color:var(--dim); font-size:12px; }
+  main { display:grid; grid-template-columns:1fr 1fr; gap:14px; padding:14px 16px 24px; }
+  @media (max-width:980px){ main { grid-template-columns:1fr; } }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; overflow:hidden; }
+  .hd { padding:7px 11px; font-size:12px; color:var(--dim); border-bottom:1px solid var(--line);
+        font-family:var(--mono); display:flex; gap:8px; align-items:center; }
+  .hd .tag { margin-left:auto; font-size:11px; }
+  textarea { width:100%; min-height:150px; border:0; outline:0; background:transparent;
+             color:var(--fg); padding:10px 11px; font:12.5px/1.55 var(--mono); resize:vertical; }
+  button { background:#24418f; color:#fff; border:0; border-radius:6px; padding:7px 14px;
+           font-size:13px; cursor:pointer; }
+  button.ghost { background:transparent; border:1px solid var(--line); color:var(--fg); }
+  button:disabled { opacity:.45; cursor:default; }
+  .row { display:flex; gap:8px; align-items:center; padding:0 0 0 2px; margin-top:10px; }
+  #log { font:12px/1.6 var(--mono); padding:10px 11px; max-height:420px; overflow:auto; white-space:pre-wrap; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); } .warn { color:var(--warn); } .dim { color:var(--dim); }
+  pre { margin:0; white-space:pre-wrap; word-break:break-word; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Elench × Pyodide 可行性探针</h1>
+  <div class="sub">验证「把 <code>src/</code> 喂进浏览器里的 CPython，能不能算出和命令行一样的 κ」。</div>
+</header>
+
+<main>
+  <div>
+    <div class="card" style="margin-bottom:12px">
+      <div class="hd">probe.tu<span class="tag dim">契约</span></div>
+      <textarea id="tu" spellcheck="false"></textarea>
+    </div>
+    <div class="card">
+      <div class="hd">probe.eln<span class="tag dim">实现</span></div>
+      <textarea id="eln" spellcheck="false"></textarea>
+    </div>
+    <div class="row">
+      <button id="go">在浏览器里算一次 κ</button>
+      <button id="again" class="ghost">再算一次（看速度）</button>
+      <span id="verdict" class="dim"></span>
+    </div>
+    <div class="sub" style="margin-top:8px">
+      首次要点开一次网络下载 Pyodide 运行时（约 10–20 MB）。之后同一个页面内都复用，
+      再算就是毫秒级 —— 所以「再算一次」那个按钮的数字才是有意义的。
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="hd">逐步日志<span class="tag dim" id="phase">待开始</span></div>
+    <div id="log" class="dim">点左边的按钮开始。</div>
+  </div>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  var PYODIDE_VERSION = "0.27.2";
+  // 运行时**就在仓库里**（tools/wasm/pyodide/，13.2 MB，由 fetch_runtime.py 下载）。
+  // 优先走本地：不联网、不受 CDN 慢或代理拦的影响，离线也能用。
+  // 只有本地那份不在时才回退 CDN（例如刚 clone 还没跑 fetch_runtime.py）。
+  var LOCAL = "/tools/wasm/pyodide/";
+  var CDN = "https://cdn.jsdelivr.net/pyodide/v" + PYODIDE_VERSION + "/full/";
+
+  var SAMPLE_TU = [
+    "spec sum_all(const vector<u64>& xs) -> u64 {",
+    "    effects {};",
+    "    target { time: { max: O(n) }, allocation: { max: 0 }, };",
+    "}"
+  ].join("\n") + "\n";
+
+  var SAMPLE_ELN = [
+    "u64 sum_all(const vector<u64>& xs) {",
+    "    u64 s = 0;",
+    "    for (auto x : xs) { s = s + x; }",
+    "    return s;",
+    "}"
+  ].join("\n") + "\n";
+
+  var $ = function (id) { return document.getElementById(id); };
+  var logEl = $("log"), phaseEl = $("phase"), verdictEl = $("verdict");
+  $("tu").value = SAMPLE_TU;
+  $("eln").value = SAMPLE_ELN;
+
+  var pyodide = null;
+  var ready = false;
+
+  function log(msg, cls) {
+    var t = new Date().toLocaleTimeString();
+    logEl.classList.remove("dim");
+    logEl.innerHTML += '<span class="' + (cls || "dim") + '">[' + t + "] " + msg + "</span>\n";
+    logEl.scrollTop = logEl.scrollHeight;
+    console.log("[probe]", msg);
+  }
+  function phase(s) { phaseEl.textContent = s; }
+  function bytes(n) { return n > 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.round(n / 1024) + " KB"; }
+
+  // ---------- 阶段 1：加载 Pyodide ----------
+  function loadScript(src) {
+    return new Promise(function (res, rej) {
+      var s = document.createElement("script");
+      s.src = src;
+      s.onload = res;
+      s.onerror = function () { rej(new Error(src)); };
+      document.head.appendChild(s);
+    });
+  }
+
+  async function bootPyodide() {
+    phase("加载 Pyodide");
+    var t0 = performance.now();
+
+    var indexURL = LOCAL;
+    log("先试本地运行时：" + LOCAL + "（仓库里那份，不联网）");
+    try {
+      await loadScript(LOCAL + "pyodide.js");
+      log("本地运行时可用 ✓（不再走 CDN）", "ok");
+    } catch (e) {
+      log("本地没有运行时（" + LOCAL + "），回退 CDN —— " +
+          "想离线用请先跑 python -B tools/wasm/fetch_runtime.py", "warn");
+      indexURL = CDN;
+      await loadScript(CDN + "pyodide.js");
+    }
+
+    log("初始化运行时（读 wasm + 标准库）…");
+    pyodide = await globalThis.loadPyodide({ indexURL: indexURL });
+    var ms = performance.now() - t0;
+    log("Pyodide " + pyodide.version + " 就绪，" + Math.round(ms) + " ms", "ok");
+    return ms;
+  }
+
+  // ---------- 阶段 2：把 src/**/*.py 灌进去 ----------
+  async function loadElench() {
+    phase("灌入 src/");
+    var t0 = performance.now();
+    var man = await (await fetch("/modules.json", { cache: "no-store" })).json();
+    log("清单：" + man.modules.length + " 个 .py");
+
+    pyodide.FS.mkdirTree("/elench/src");
+    var total = 0;
+    for (var i = 0; i < man.modules.length; i++) {
+      var rel = man.modules[i];                       // src/xxx.py 或 src/cost_domain/xxx.py
+      var url = "/" + rel;
+      var text = await (await fetch(url, { cache: "no-store" })).text();
+      total += text.length;
+      var dest = "/elench/" + rel;
+      var dir = dest.slice(0, dest.lastIndexOf("/"));
+      pyodide.FS.mkdirTree(dir);
+      pyodide.FS.writeFile(dest, text, { encoding: "utf8" });
+    }
+    log("写入 " + man.modules.length + " 个文件，" + bytes(total) + " 源码，" +
+        Math.round(performance.now() - t0) + " ms", "ok");
+    return man.modules.length;
+  }
+
+  // ---------- 阶段 3：import core_api ----------
+  async function importCore() {
+    phase("import core_api");
+    var t0 = performance.now();
+    var r = pyodide.runPython([
+      "import sys, json",
+      "sys.path.insert(0, '/elench/src')",
+      "import core_api",
+      "json.dumps({'ok': True, 'python': sys.version.split()[0]})",
+    ].join("\n"));
+    var ms = performance.now() - t0;
+    var d = JSON.parse(r);
+    log("import core_api 成功（浏览器里的 CPython " + d.python + "），" + Math.round(ms) + " ms", "ok");
+    return ms;
+  }
+
+  // ---------- 阶段 4：真算一次 ----------
+  async function runOnce(label) {
+    phase(label || "算 κ");
+    var t0 = performance.now();
+    pyodide.globals.set("_tu", $("tu").value);
+    pyodide.globals.set("_eln", $("eln").value);
+    var out;
+    try {
+      out = pyodide.runPython([
+        "import json, core_api",
+        "try:",
+        "    _r = core_api.cost(_tu, _eln)",
+        "    _r.pop('_rc', None); _r.pop('_stderr', None)",
+        "    _res = {'ok': True, 'payload': _r}",
+        "except Exception as _e:",
+        "    import traceback",
+        "    _res = {'ok': False, 'error': type(_e).__name__ + ': ' + str(_e)[:400],",
+        "            'traceback': traceback.format_exc()[-1600:]}",
+        "json.dumps(_res, ensure_ascii=False)",
+      ].join("\n"));
+    } catch (e) {
+      log("调用 Python 时出错：" + e.message, "bad");
+      return null;
+    }
+    var ms = performance.now() - t0;
+    var r = JSON.parse(out);
+
+    if (!r.ok) {
+      log("core_api 抛异常 → " + r.error, "bad");
+      log("这一条就是探针要的答案：**在浏览器里跑不通**，得看是哪个模块的问题。", "warn");
+      verdictEl.textContent = "失败";
+      verdictEl.className = "bad";
+      // 把错误带出去：无头验证（headless_check.mjs）要能打印真正的原因，
+      // 而不是只看到"payload 是 null"。
+      return { ok: false, error: r.error, traceback: r.traceback, ms: ms };
+    }
+
+    var p = r.payload;
+    var fns = p.functions || {};
+    var names = Object.keys(fns);
+    var line = names.map(function (n) {
+      return n + "  κ ≤ " + fns[n].cost_expression + "  [" + fns[n].verdict + "]";
+    }).join("；");
+    log("算完了，" + Math.round(ms) + " ms → " + (line || "（没有函数）"),
+        "ok");
+    var worst = null;
+    names.forEach(function (n) {
+      var v = fns[n].verdict;
+      if (worst === null || (v === "unknown") || (v === "debt" && worst === "ok")) worst = v;
+    });
+    verdictEl.textContent = worst ? ("判决：" + worst) : "（无判决）";
+    verdictEl.className = worst === "ok" ? "ok" : (worst === "debt" ? "warn" : "bad");
+    return { ms: ms, payload: p };
+  }
+
+  async function go() {
+    var btn = $("go");
+    btn.disabled = true;
+    $("again").disabled = true;
+    phaseEl.textContent = "进行中";
+    try {
+      if (!ready) {
+        await bootPyodide();
+        await loadElench();
+        await importCore();
+        ready = true;
+      }
+      var r = await runOnce("算 κ");
+      if (r) {
+        log("对照方法：命令行 `python -B src/dsh.py cost <tu> <eln> --json` 的 cost_expression 应该和上面一样。", "dim");
+        phaseEl.textContent = "完成";
+      }
+    } catch (e) {
+      log("失败：" + e.message, "bad");
+      log("常见原因：① 本地运行时不在、且没有网络；② 代理拦了 jsdelivr；" +
+          "③ 浏览器太老（需要 WebAssembly）。", "warn");
+      phaseEl.textContent = "失败";
+    } finally {
+      btn.disabled = false;
+      $("again").disabled = !ready;
+    }
+  }
+
+  $("go").addEventListener("click", go);
+  $("again").addEventListener("click", function () { runOnce("再算一次"); });
+
+  // 给无头验证用的钩子（tools/wasm/headless_check.mjs 会调这些）。
+  // 暴露的是**同一条代码路径**，不是另一份逻辑 —— 否则"测过的"和"点到的"不是一回事。
+  globalThis.__probe = {
+    boot: async function () {
+      if (ready) return { reused: true };
+      await bootPyodide();
+      var n = await loadElench();
+      await importCore();
+      ready = true;
+      return { reused: false, modules: n, pyodide: pyodide.version };
+    },
+    run: async function (tu, eln) {
+      if (tu) $("tu").value = tu;
+      if (eln) $("eln").value = eln;
+      return await runOnce("headless");
+    },
+    state: function () { return { ready: ready, pyodide: pyodide ? pyodide.version : null }; },
+  };
+})();
+</script>
+</body>
+</html>

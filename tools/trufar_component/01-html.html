@@ -1,0 +1,67 @@
+<!-- 贴到平台的「将显示的 HTML 内容」。
+     零外链：样式全内联，不引字体/图片/CDN —— 内嵌场景通常没有网络。 -->
+<div class="ec">
+  <div class="ec-hd">
+    <span class="ec-title">Elench 成本契约</span>
+    <span class="ec-badge" data-role="badge">等待结果</span>
+  </div>
+
+  <div class="ec-body">
+    <div class="ec-empty" data-role="empty">
+      还没有结果：先在工作流里调用 <code>elench_cost</code>，把返回的 JSON 放到
+      <code>data.elench</code> 里。
+    </div>
+
+    <div class="ec-fns" data-role="fns"></div>
+
+    <div class="ec-heat" data-role="heat" hidden></div>
+
+    <div class="ec-diags" data-role="diags"></div>
+  </div>
+
+  <div class="ec-ft" data-role="foot"></div>
+</div>
+
+<style>
+  .ec { --line: #2a2f3a; --fg: #e6e8ee; --dim: #9aa3b2;
+        --ok: #35c37d; --debt: #f0a13a; --unk: #7a8290; --bad: #ef5b5b;
+        font: 13px/1.6 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+        color: var(--fg); background: #12151b; border: 1px solid var(--line);
+        border-radius: 10px; overflow: hidden; transition: box-shadow .25s, border-color .25s; }
+  .ec.ec-bad   { border-color: rgba(239,91,91,.65); box-shadow: 0 0 0 3px rgba(239,91,91,.12); }
+  .ec.ec-worse { animation: ec-flash .9s ease-out; }
+  @keyframes ec-flash {
+    0%   { box-shadow: 0 0 0 0 rgba(239,91,91,.55); }
+    100% { box-shadow: 0 0 0 8px rgba(239,91,91,0); }
+  }
+  .ec-hd { display: flex; align-items: center; gap: 8px;
+           padding: 9px 12px; border-bottom: 1px solid var(--line); }
+  .ec-title { font-weight: 600; font-size: 13px; }
+  .ec-hd .ec-badge { margin-left: auto; }
+  .ec-badge { display: inline-block; padding: 2px 10px; border-radius: 999px;
+              font-size: 12px; font-weight: 600; background: rgba(122,130,144,.18); color: var(--unk); }
+  .ec-badge.ok   { background: rgba(53,195,125,.15); color: var(--ok); }
+  .ec-badge.debt { background: rgba(240,161,58,.15); color: var(--debt); }
+  .ec-badge.err  { background: rgba(239,91,91,.15);  color: var(--bad); }
+  .ec-body { padding: 10px 12px; }
+  .ec-empty { color: var(--dim); font-size: 12.5px; }
+  .ec-empty code { font-family: ui-monospace, Consolas, monospace; color: #cfe6ff; }
+  .ec-fn { border-top: 1px solid var(--line); padding: 9px 0 4px; }
+  .ec-fn:first-child { border-top: 0; padding-top: 0; }
+  .ec-fn-name { font-weight: 600; }
+  .ec-kappa { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px;
+              color: #cfe6ff; word-break: break-word; margin: 3px 0; }
+  .ec-kappa.ec-fade { animation: ec-fade .6s ease-out; }
+  @keyframes ec-fade { from { opacity: .15; } to { opacity: 1; } }
+  .ec-note { color: var(--dim); font-size: 12.5px; }
+  .ec-heat { display: flex; gap: 2px; align-items: flex-end; height: 46px;
+             margin: 8px 0; padding: 4px 0; border-top: 1px dashed var(--line); }
+  .ec-heat i { flex: 1 1 auto; min-width: 2px; background: #2f6fd0; border-radius: 1px 1px 0 0; }
+  .ec-diags { margin-top: 6px; }
+  .ec-diag { border-top: 1px solid var(--line); padding: 7px 0; font-size: 12.5px; }
+  .ec-diag .ec-code { font-family: ui-monospace, Consolas, monospace; color: var(--bad); }
+  .ec-diag .ec-where { color: var(--dim); font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; }
+  .ec-diag .ec-fix { color: var(--dim); margin-top: 2px; }
+  .ec-ft { padding: 7px 12px; border-top: 1px solid var(--line); color: var(--dim); font-size: 11.5px; }
+  .ec-err { color: var(--bad); white-space: pre-wrap; font-size: 12.5px; }
+</style>

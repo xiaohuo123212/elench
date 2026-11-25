@@ -2759,12 +2759,13 @@ def _check_unimplemented_containers(mod, decl_mod=None) -> List[Diag]:
 
 #: **已实现**的内建容器：`E-Type-UnimplementedContainer` 的消息里要列全。
 IMPLEMENTED_CONTAINERS = ("vector", "array", "map", "set",
-                          "unordered_map", "unordered_set", "stack", "queue")
+                          "unordered_map", "unordered_set", "stack", "queue",
+                          "deque")
 
 #: **没有接线**的容器类型名 → 缺的是什么（方案/理由见检查函数 docstring）。
 UNIMPLEMENTED_CONTAINERS = {
-    "deque": "环形缓冲只在 `deque_new()` / `deque_push_*` 内建里，"
-             "容器构造（`deque<T> d;` / `deque<T>::new()`）与方法（`d.push(1)`）没有接线",
+    # **目前为空**：`deque` 在 2026-11-25 接线完成（默认构造 + 六个方法），
+    # 表留着——下回再有"名字登记了、实现没接"的容器，往这里加一条即可。
 }
 
 
@@ -4454,7 +4455,7 @@ def check_files(tu_path: Optional[str], ai_path: Optional[str] = None,
                 strict: bool = False, overflow: str = "off") -> CheckResult:
     """从文件检查。**`tu_path=None` 合法**：表示只有 `.eln`（`.tu` 可选）。
 
-    以前这里默认 `tu_path` 一定是 `.tu`：`dsh check bare.eln` 会把同一个
+    以前这里默认 `tu_path` 一定是 `.tu`：`elench check bare.eln` 会把同一个
     `.eln` 同时当成 `.tu` 解析一遍——于是诊断带 `[.tu]` 前缀**出现两次**，
     而且 `E-Fn-NoSpec` 连 `run` 都挡住（`--strict` 之外不该这样）。
     """

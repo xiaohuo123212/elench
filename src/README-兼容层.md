@@ -1,6 +1,6 @@
 # `src/` 顶层的四个"转发 shim"是**有意保留**的
 
-`bound.py` / `cost_check.py` / `cost_interp.py` / `symbolic.py` 各约 350 B，
+`bound.py` / `cost_check.py` / `cost_interp.py` / `symbolic.py` 各约 520 B，
 内容是：
 
 ```python
@@ -22,5 +22,5 @@ patch 才落在真正被读的那个全局上。复制名字会让"测了个寂�
 
 当所有调用方（`src/`、`tools/`、`tests/`、`editors/vscode/python/`）都改成
 `from cost_domain.cost_interp import ...`，且 monkeypatch 也改成指向
-`cost_domain.cost_interp` 时。**代价约 200 处 import**，收益 1.4 KB —— 2026-11-07
+`cost_domain.cost_interp` 时。**代价约 290 处 import**，收益 1.4 KB —— 2026-11-07
 审计的结论是：**不值得**，保留并在此说明。

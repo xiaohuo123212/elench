@@ -218,6 +218,20 @@ WORD_OPERATORS = {
 # `struct S { public: x: u64, }` 必须能写。它按普通标识符进词法，
 # 由 parser 判断位置：struct 体里的 `public:` 接受（并忽略——本语言没有
 # 访问控制）；顶层的 `public func f()` 仍报 `E-Keyword-LongForm`（应写 `pub`）。
+#: 第 22 条：成员位置的**纯拼写**限定词（与 `parser._MEMBER_PURE_SPELLING` 一致）。
+#: 词法器先放行（它们若是长写法词表里的词），parser 再跳过。
+_MEMBER_PURE_SPELLING = frozenset({"mutable", "volatile", "inline", "constexpr"})
+
+
+def _compat_on() -> bool:
+    """兼容层是否开启（词法器也要问这一句：`mutable` 在 compat 下不是错误）。"""
+    try:
+        import compat as _c
+        return bool(_c.enabled())
+    except Exception:                                    # noqa: BLE001
+        return False
+
+
 LONG_FORM_HINT = {
     "function": "func",
     "structure": "struct",
@@ -598,7 +612,13 @@ class Lexer:
             return
 
         # 长写法：C3 明确是错误，不是兼容形式 —— 给出"应改成什么"
-        if text in LONG_FORM_HINT:
+        #
+        # **例外（2026-11-23，第 22 条）**：`mutable` 在 C++ 里是**成员的纯拼写**
+        # 限定词（"这个字段在 const 成员函数里也能改"），本语言字段本来就都能改。
+        # 真库头里成片出现（`fmt/core.h` 一处就挡下 13 个探针）。`--compat` 下
+        # 把它当普通标识符放行，由 `parse_struct` 的成员循环跳过；**严格模式不变**。
+        if text in LONG_FORM_HINT and not (
+                text in _MEMBER_PURE_SPELLING and _compat_on()):
             self._err(
                 "E-Keyword-LongForm",
                 f"关键字 MUST 用缩写：`{text}` 应写作 `{LONG_FORM_HINT[text]}`",

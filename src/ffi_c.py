@@ -81,12 +81,32 @@
 from __future__ import annotations
 
 from typenames import canon, display
-import ctypes
+try:
+    import ctypes
+except ImportError:                     # 浏览器 / WASM（Pyodide）：没有 ctypes
+    ctypes = None                       # 只有真调外部库才需要它，见 _need_ctypes()
 import os
 import sys
 from typing import Any, List, Sequence, Tuple
 
 from shape import UnsupportedError
+
+
+def _need_ctypes() -> None:
+    """FFI 需要 `ctypes`。没有它的环境（浏览器 / WASM）里：
+
+    — **纯计算、成本上界 κ、契约判定全部照常**；
+    — 只有"调用外部 C 库"这一条路会在这里报一条清楚的话。
+
+    2026-11-18：为了能在浏览器里跑 `core_api`（Pyodide 里 import 链会走到
+    `interp → ffi_c`），`ctypes` 的 import 改成可选。以前模块级硬 import，
+    整个包在 WASM 里连 import 都过不去。
+    """
+    if ctypes is None:
+        raise UnsupportedError(
+            "当前环境没有 ctypes（浏览器 / WASM），**FFI 调用不可用**："
+            "外部库的加载与类型编组都要它。纯计算、成本上界 κ 与契约判定不受影响——"
+            "只有 `extern … from \"lib\"` 这条路需要 ctypes。")
 
 
 # ---------------------------------------------------------------- 动态库解析
@@ -95,8 +115,8 @@ from shape import UnsupportedError
 #
 # `ctypes.CDLL("cjson")` 在 Python 3.8+ 的 Windows 上**不会**去 cwd / PATH 里找
 # （`CDLL` 走的是 `LoadLibraryEx` 的受限搜索口径），所以 `extern … from "cjson"`
-# 里的**裸名**永远加载不了：同一个 `.eln`，`dsh cpp --run` 那条路能跑，
-# 解释器侧只能报「无法对拍」。`dsh run --lib-dir=<目录>` 就是给裸名一条
+# 里的**裸名**永远加载不了：同一个 `.eln`，`elench cpp --run` 那条路能跑，
+# 解释器侧只能报「无法对拍」。`elench run --lib-dir=<目录>` 就是给裸名一条
 # **确定、可复现**的路。
 #
 # ## 搜索顺序（写进文档，别让人猜）
@@ -213,13 +233,22 @@ def load_library(name: str, lib_dirs: Sequence[str] = ()):
 #:   · `float` 是 C 的拼写，语言的类型名是 `f64`；`argtype_for("float")` 必须继续报
 #:     `E-FFI-Unsupported`（`tests/cases/test_ffi_shape.py` 钉住了这条）；
 #:   · `i32`/`u32` 卡在 `shape.py`（只认 `u64`/`i64`），这里加映射也到不了。
-_SCALAR = {
-    "u64": ctypes.c_uint64,
-    "i64": ctypes.c_int64,
-    "bool": ctypes.c_uint64,
-    "f64": ctypes.c_double,
-    "f32": ctypes.c_float,
+#: 标量名 → ctypes 类型的**构造器表**。存的是"取哪个属性"而不是类型本身，
+#: 这样模块能在没有 ctypes 的环境里 import 成功（浏览器 / WASM），
+#: 只有真去查表时才需要 ctypes。
+_SCALAR_ATTR = {
+    "u64": "c_uint64",
+    "i64": "c_int64",
+    "bool": "c_uint64",
+    "f64": "c_double",
+    "f32": "c_float",
 }
+
+
+def _scalar(ty: str):
+    """按名字取 ctypes 标量类型；没有 ctypes 时报清楚的话（而不是 AttributeError）。"""
+    _need_ctypes()
+    return getattr(ctypes, _SCALAR_ATTR[ty])
 
 
 def _is_bytes_ptr(ty: str) -> bool:
@@ -235,11 +264,12 @@ def _is_bytes_ptr(ty: str) -> bool:
 
 def argtype_for(ty: str):
     """`.tu` 声明类型 → ctypes 参数类型。"""
-    if _is_bytes_ptr(ty):
-        return ctypes.c_char_p
     head = (ty or "").split("<")[0].split("&")[0].strip()
-    if head in _SCALAR:
-        return _SCALAR[head]
+    if _is_bytes_ptr(ty):
+        _need_ctypes()
+        return ctypes.c_char_p
+    if head in _SCALAR_ATTR:
+        return _scalar(head)
     raise UnsupportedError(f"C ABI 后端不支持参数类型 {ty}")
 
 
@@ -255,8 +285,8 @@ def restype_for(ty: str):
     if _is_bytes_ptr(ty):
         return _CString
     head = (ty or "").split("<")[0].split("&")[0].strip()
-    if head in _SCALAR:
-        return _SCALAR[head]
+    if head in _SCALAR_ATTR:
+        return _scalar(head)
     raise UnsupportedError(f"C ABI 后端不支持返回类型 {ty}")
 
 
@@ -275,7 +305,10 @@ def _as_text(raw: bytes):
     return Text(raw)
 
 
-class _CString(ctypes.c_void_p):
+_CStringBase = ctypes.c_void_p if ctypes is not None else object
+
+
+class _CString(_CStringBase):
     """C 的 `const char*`（NUL 结尾）——**收完返回值再转成字节**。
 
     为什么用 `ctypes` 的 `_check_retval_` 钩子而不是直接 `restype = c_char_p`：
@@ -295,6 +328,7 @@ class _CString(ctypes.c_void_p):
 
     @classmethod
     def _check_retval_(cls, value):
+        _need_ctypes()                  # 没有 ctypes 时在这里报清楚，而不是 AttributeError
         addr = 0
         if value is not None:
             try:

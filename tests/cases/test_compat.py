@@ -2427,10 +2427,6 @@ _MEMBER_BAD = [
                "u64 main() { return 0; }\n", "E-Compat-MemberUnsupported"),
     ("静态成员", "struct R {\n    u64 x;\n    static u64 n;\n};\n"
                  "u64 main() { return 0; }\n", "E-Compat-MemberUnsupported"),
-    ("运算符重载",
-     "struct R {\n    u64 x;\n"
-     "    bool operator==(const R& o) { return x == o.x; }\n};\n"
-     "u64 main() { return 0; }\n", "E-Compat-MemberUnsupported"),
     ("析构函数", "struct R {\n    u64 x;\n    ~R() { }\n};\n"
                  "u64 main() { return 0; }\n", "E-Compat-MemberUnsupported"),
     ("模板成员函数", "struct R {\n    u64 x;\n"

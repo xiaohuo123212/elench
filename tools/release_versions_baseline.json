@@ -1,5 +1,6 @@
 {
- "CHANGELOG.md": "0.6.1",
- "editors/vscode/package.json": "0.6.50",
- "pyproject.toml": "1.0.0"
+ "CHANGELOG.md": "1.0.2",
+ "editors/vscode/package.json": "0.7.1",
+ "pyproject.toml": "1.0.2",
+ "src/version.py": "1.0.2"
 }

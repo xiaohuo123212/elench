@@ -11,12 +11,12 @@
 
 | 形状 | 改前 | 后果 |
 |---|---|---|
-| `c ? a : b` | `E-Parse-Expected`（`?` 只被当成 `x?` 的 try 后缀） | 解析就停 ⇒ check / κ / `dsh cpp` / 对拍**全归零** |
+| `c ? a : b` | `E-Parse-Expected`（`?` 只被当成 `x?` 的 try 后缀） | 解析就停 ⇒ check / κ / `elench cpp` / 对拍**全归零** |
 | `(int)xs.size()` | `E-Cast-CStyle` | 同上 |
 
 所以这一轮的验收不是"多了一种语法"，而是"整条链路能走通"：
 
-    解析 → 类型 → 解释器 → κ（含 max 语义）→ `dsh cpp` 发射 → g++ 编译 → 行为对拍
+    解析 → 类型 → 解释器 → κ（含 max 语义）→ `elench cpp` 发射 → g++ 编译 → 行为对拍
 
 ## 断言（八组）
 
@@ -30,7 +30,7 @@
 5. **κ 仍是上界**：解释器实测 ops ≤ κ（4 个规模 × 两个分支）；
 6. **等价性**：`c ? a : b` 与 `if/else` 的 κ 与 run 对比（差在哪就写清在哪）；
 7. **C 风格强转**：仍然拒绝，但消息必须给出**这一处**可复制的 `as` 改法；
-8. **后端**：`dsh cpp` 发射 `?:`；有编译器时真编、真跑、与解释器逐字节对拍
+8. **后端**：`elench cpp` 发射 `?:`；有编译器时真编、真跑、与解释器逐字节对拍
    （没有编译器就明确说"跳过"，绝不冒充通过）。
 
 跑法：`python -B tests/cases/test_ternary.py`（退出码 0 即通过）。
@@ -391,8 +391,8 @@ def test_c_style_cast():
           "改法 A：不需要转换时**删掉**强转（真实用例多数如此）", msg)
     check("`i32 n = xs.size();`" in msg,
           "改法 B：带类型的中间变量（全链路可用）", msg)
-    check("dsh cpp" in msg and "不发射" in msg,
-          "消息如实说 `dsh cpp` 不发 `as`（否则改完 C 还会撞第二次）", msg)
+    check("elench cpp" in msg and "不发射" in msg,
+          "消息如实说 `elench cpp` 不发 `as`（否则改完 C 还会撞第二次）", msg)
     check("i32" in msg, "C++ 的 `int` 映射到本语言 `i32`（宽度与符号不改）", msg)
     check("只有一种写法" in msg, "消息说清「为什么不是两套写法」", msg)
 
@@ -406,9 +406,9 @@ def test_c_style_cast():
     try:
         text = dsh._gen_cpp(None, parse(fix_b))
         check("int32_t n = xs.size();" in text,
-              "改法 B 的产物能被 `dsh cpp` 发射（`int32_t n = xs.size();`）", "")
+              "改法 B 的产物能被 `elench cpp` 发射（`int32_t n = xs.size();`）", "")
     except dsh.CppUnsupported as exc:                      # noqa: BLE001
-        check(False, "改法 B 的产物能被 `dsh cpp` 发射", str(exc))
+        check(False, "改法 B 的产物能被 `elench cpp` 发射", str(exc))
 
     # 改法 A：`(a) * b` 这一类**合法形状不受影响**
     r = parse_source("pub u64 f(u64 a, u64 b) { return (a) * b; }", "c.eln")
@@ -454,7 +454,7 @@ def _compile_and_run(text):
 
 
 def test_cpp_backend():
-    print("[8] 后端 `dsh cpp`：发射 `?:`，有编译器就真编真跑")
+    print("[8] 后端 `elench cpp`：发射 `?:`，有编译器就真编真跑")
     ch = parse(PROBE)
     text = dsh._gen_cpp(None, ch)
     check("max(" not in text, "生成物里没有把 max 发射成 C++（那是 κ 的形状，不是源码）", "")
@@ -471,12 +471,12 @@ def test_cpp_backend():
         print("       -- 跳过编译/对拍：本机没有 g++ / clang++ / cl（ELENCH_GXX 可指定）")
         return
 
-    # 1) 语法自检（`dsh cpp` 的最后一关，与 CLI 同一个函数）
+    # 1) 语法自检（`elench cpp` 的最后一关，与 CLI 同一个函数）
     status, detail = dsh._cpp_compile_text(text)
     check(status == "ok", f"生成的 C++ 能编译（{detail}）", str(detail)[:300])
 
     # 2) **行为对拍**：真编译、真执行，与解释器比 stdout + 返回值。
-    #    注：`dsh cpp --run` 目前只做到"编译"（`_cpp_compare` 没有跑对拍），
+    #    注：`elench cpp --run` 目前只做到"编译"（`_cpp_compare` 没有跑对拍），
     #    所以这里自己做——这正是验收要的那一步。
     out_cpp, rc_cpp, err = _compile_and_run(text)
     if out_cpp is None:

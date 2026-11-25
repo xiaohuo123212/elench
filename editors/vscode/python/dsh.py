@@ -7,9 +7,9 @@
 dsh —— AI 语言工具链（M0）
 
 子命令：
-  dsh check <模块.tu> [<模块.eln>] [--strict] [--json] [--exhaustive]
-  dsh show  <模块.tu> <label>         打印某个 choose 的候选与状态
-  dsh parse <文件>                    打印 AST（调试用）
+  elench check <模块.tu> [<模块.eln>] [--strict] [--json] [--exhaustive]
+  elench show  <模块.tu> <label>         打印某个 choose 的候选与状态
+  elench parse <文件>                    打印 AST（调试用）
 
 M0 范围：**没有成本分析**，故 `state` 只能给出 draft / planned / unchecked，
         `done` / `debt` 需要 M2 的成本计算。
@@ -27,6 +27,7 @@ import io
 import json
 import os
 import re
+import shutil
 import sys
 from typing import List
 
@@ -320,7 +321,17 @@ def _tree_rec_budget_advisor(ch_mod, tu_mod, tu_p, entry: str):
 
 
 def _elench_argv() -> List[str]:
-    """怎么用**当前解释器**再调一次 elench（restart 里要跑的就是它）。"""
+    """`修法` 里显示的命令前缀。
+
+    2026-11-22：以前这里返回 `[python, <仓库>/src/elench.py]`，于是教程里写着
+    `elench measure avg`，工具自己给的修法却是
+    `<仓库>/src/elench.py measure avg` —— 一行天书贴在输出里。
+    装了命令就用 `elench`（教程、README、所有文档都是这么写的），
+    没装才退回"当前解释器 + 脚本路径"。
+    """
+    exe = shutil.which("elench")
+    if exe:
+        return ["elench"]
     return [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                          "elench.py")]
 
@@ -353,7 +364,9 @@ def _print_restarts(actions, indent: str = "      ") -> None:
     for i, a in enumerate(actions, 1):
         tail = ""
         if a.kind == "command" and a.argv:
-            tail = "  " + " ".join(a.argv[1:])
+            # 打**完整**命令：以前这里砍掉第一个元素（为了去掉解释器），
+            # 于是 `elench measure avg` 被砍成 `measure avg`（再早还砍成一行绝对路径）。
+            tail = "  " + " ".join(a.argv)
         elif a.kind == "edit":
             tail = f"  （{a.patch.get('file')}:{a.patch.get('line')}）"
         print(f"{indent}  {i}) {a.label}{tail}")
@@ -505,6 +518,15 @@ def _merge_dispatch_table(path: str, mod: str, label: str, segs, degraded: bool)
     for _, blk_lines in blocks:
         out.extend([x for x in blk_lines if x.strip() != ""])
     io.open(path, "w", encoding="utf-8", newline="\n").write("\n".join(out) + "\n")
+
+
+def _rtp(tu_dir: str, mod: str) -> str:
+    """`--commit` 要写的**入库参考表**路径：`<模块目录>/tables/<模块>.table.yaml`。
+
+    以前这里只写了调用（`_rtp(...)`）没有定义——`measure --commit` 每次都抛
+    `NameError`，被 `except` 吞掉后**退出码仍是 0**，一个表都没写出去。
+    """
+    return os.path.join(tu_dir, "tables", mod + ".table.yaml")
 
 
 def _write_dispatch_table(path: str, mod: str, labels: dict, degraded: bool) -> None:
@@ -1101,12 +1123,23 @@ def cmd_check(argv: List[str]) -> int:
         return 1
     print(f"✓ 通过（{len(res.functions)} 个函数，其中 {planned} 个无体）")
     if pending:
-        print(f"  ⚠ 有 {pending} 个 pending 候选：dsh check 通过，但 dsh build 必失败（B-17）")
+        print(f"  ⚠ 有 {pending} 个 pending 候选：elench check 通过，但 elench build 必失败（B-17）")
     print("  注：check 只做静态检查；done / debt 由 elench cost 与 elench build 判定")
     return 0
 
 
 def cmd_fmt(argv: List[str]) -> int:
+    # **未知开关必须拒绝**（2026-11-20）：以前不认识的 `--xxx` 会被静默忽略，
+    # 于是 `fmt a.eln --diff`（有人以为能"只看不改"）**直接把文件改写了**。
+    # 一个"只读意图"变成写盘，是这一版里最该堵的坑。
+    _known = {"--check", "--stdout"}
+    _unknown = [a for a in argv if a.startswith("--") and a not in _known]
+    if _unknown:
+        print(f"✗ 不认识的开关：{' '.join(_unknown)}", file=sys.stderr)
+        print("  用法：elench fmt <文件或模块名>... [--check] [--stdout]", file=sys.stderr)
+        print("  提示：`--check` 只检查不写盘；要看会改成什么，先 `--check` 看它报哪些文件。",
+              file=sys.stderr)
+        return 2
     check_only = "--check" in argv
     to_stdout = "--stdout" in argv
     files = [a for a in argv if not a.startswith("--")]
@@ -1297,7 +1330,7 @@ def _load_pair(argv: List[str]):
     """从 argv 里取出 (tu_path, ch_path)；ch 可省，按同名推导。"""
     if not argv:
         return None, None
-    # **位置参数要跳过开关**：`dsh cost --signature a.tu a.eln` 是合法写法，
+    # **位置参数要跳过开关**：`elench cost --signature a.tu a.eln` 是合法写法，
     # 不滤掉开关的话 tu 会变成 "--signature"，然后 io_read 抛 traceback。
     pos = [a for a in argv if not a.startswith("-")]
     if not pos:
@@ -1623,7 +1656,7 @@ def cmd_cpp(argv: List[str]) -> int:
     ## 链接真库：`--link=` / `--link-dir=` / `--lib=`
 
     `--include=` 只让生成物**编得过**；调用 `extern` 声明的真函数还要**链得上**。
-    2026-11-14 之前 `dsh cpp --run` **只编译生成物、不链接任何外部库**，
+    2026-11-14 之前 `elench cpp --run` **只编译生成物、不链接任何外部库**，
     接 cJSON 得手工 `gcc -c cJSON.c` → `g++ gen.cpp cJSON.o` → `./a.exe`。
     现在三条通道（都可重复）：
 
@@ -1653,8 +1686,8 @@ def cmd_cpp(argv: List[str]) -> int:
 
     ```
     extern cJSON_Version() -> vector<u8> from "cjson" effects {};
-    dsh cpp v.eln --run --link=…/cJSON.o     ✓ 生成物能链接、能跑
-    dsh run v.eln                            ✗ 加载外部库失败（cjson）：
+    elench cpp v.eln --run --link=…/cJSON.o     ✓ 生成物能链接、能跑
+    elench run v.eln                            ✗ 加载外部库失败（cjson）：
                                                 Could not find module 'cjson'
     ```
 
@@ -1682,15 +1715,15 @@ def cmd_cpp(argv: List[str]) -> int:
     链接找库仍然用 `--link=` / `--link-dir=` / `--lib=`。接一个真库通常两个都要给：
 
     ```
-    dsh cpp v.eln --include=cJSON.h --include-dir=build/real-libs/cJSON \
+    elench cpp v.eln --include=cJSON.h --include-dir=build/real-libs/cJSON \
         --run --link=build/cjson/cJSON.o --lib-dir=build/cjson
     ```
 
     ## 对拍：`--run`
 
-    找 `g++` / `clang++` / `cl`；找到就**编译 → 链接 → 跑 → 和 `dsh run` 比**：
+    找 `g++` / `clang++` / `cl`；找到就**编译 → 链接 → 跑 → 和 `elench run` 比**：
 
-    - stdout **逐字节相同**（`dsh run` 末尾那行 main 返回值按
+    - stdout **逐字节相同**（`elench run` 末尾那行 main 返回值按
       `tools/behavior_parity.py:strip_return_line` 的口径剥掉）；
     - 返回值落在 0..255 时，退出码也要相同（更大值会被 OS 截断，只报「不参与」）；
     - 解释器末行不是整数（如 `bool main()` 打 `True`）⇒ **对拍跳过，未测量**
@@ -1745,7 +1778,7 @@ def cmd_cpp(argv: List[str]) -> int:
         print("  · `--link=` / `--link-dir=` / `--lib=` 只在 `--run` 时生效："
               "编译自检是 `-fsyntax-only`，不链接", file=sys.stderr)
 
-    # **解释器侧的库搜索目录**（2026-11-14）：`--lib-dir=` 交给 `dsh run`
+    # **解释器侧的库搜索目录**（2026-11-14）：`--lib-dir=` 交给 `elench run`
     # （`--run` 的对拍那一侧），**不进链接命令行**——链接找库用
     # `--link=` / `--link-dir=` / `--lib=`。两边都收是因为一条命令要同时做两件事：
     # `g++` 链接和 ctypes 加载。当场校验：搜索路径不是目录，只会让对拍报
@@ -1986,7 +2019,7 @@ def _cxx_type_of(name: str, user_types=None) -> str:
             f"类型 `{key or '?'}` 没有 C++ 映射（不会静默退化成 uint64_t）。"
             f"要支持它请把映射加进 `cxx_map.TYPE_MAP`（哈希是个例外："
             f"`unordered_map` 在 `_CPP_HASH_TYPES` 里换成插入序适配器，"
-            f"见 `_cpp_hash_type`）；本轮 `dsh cpp` 只保证不生成错的")
+            f"见 `_cpp_hash_type`）；本轮 `elench cpp` 只保证不生成错的")
     return mapped
 
 
@@ -3036,7 +3069,7 @@ def _cpp_include_line(raw: str) -> str:
 def _cpp_extern_found(tu_mod, ch_mod):
     """`.tu` / `.eln` 里声明的 external → `[(名字, [(类型, 形参名)], 返回类型, 库名)]`。
 
-    两种写法认的是**同一件事**（`dsh header` 早就两种都认，`dsh cpp` 以前一种都不认）：
+    两种写法认的是**同一件事**（`elench header` 早就两种都认，`elench cpp` 以前一种都不认）：
 
     | 写在哪 | 形状 |
     |---|---|
@@ -3160,8 +3193,8 @@ def _gen_cpp(tu_mod, ch_mod, includes=()) -> str:
     生成物顶部现在会发两样以前完全没有的东西：
 
     1. **`extern "C"` 声明**（`_cpp_extern_decls`）：`.eln` 的 `extern …;` 与
-       `.tu` 的 `spec … { external "lib"; }` 都会发射。以前只有 `dsh header`
-       发，`dsh cpp` 一条都不发 ⇒ 生成物里调真库函数时 g++ 报
+       `.tu` 的 `spec … { external "lib"; }` 都会发射。以前只有 `elench header`
+       发，`elench cpp` 一条都不发 ⇒ 生成物里调真库函数时 g++ 报
        `'XXH64' was not declared in this scope`。
     2. **第三方头**（`includes`，来自 `--include=`）：放在 `_CPP_HEADERS` 之后、
        一切代码之前。**只能从命令行来**——`.eln`/`.tu` 里的非标准 `#include`
@@ -3178,7 +3211,7 @@ def _gen_cpp(tu_mod, ch_mod, includes=()) -> str:
     _incs = [ln for ln in (includes or []) if ln]
     if _incs:
         out.append("")
-        out.append('// ---- 第三方头：来自 `dsh cpp --include=…`（标准头之后）----')
+        out.append('// ---- 第三方头：来自 `elench cpp --include=…`（标准头之后）----')
         out.extend(_incs)
     # **外部符号声明**：C 库就是这个 ABI（`extern "C"` 关掉 C++ 的名字修饰）。
     _ext_lines, _ext_params = _cpp_extern_decls(tu_mod, ch_mod)
@@ -3550,7 +3583,7 @@ def _cpp_expr(e, ctx, stmt_void=False) -> str:
               "<": "<", "<=": "<=", ">": ">", ">=": ">=", "==": "==",
               "!=": "!=", "and": "&&", "or": "||",
               # 2026-11-11：逻辑运算在 AST 里已归一成符号（`and`/`or`/`not` 退役），
-              # 这里必须同时认符号，否则 `dsh cpp` 会对所有逻辑表达式报 E-Cxx-Unsupported。
+              # 这里必须同时认符号，否则 `elench cpp` 会对所有逻辑表达式报 E-Cxx-Unsupported。
               "&&": "&&", "||": "||",
               # 位运算（2026-11-13）：08_bits_hash / 16_bitset 两个模块整段用到。
               "&": "&", "|": "|", "^": "^", "<<": "<<", ">>": ">>"}.get(e.value or "")
@@ -3679,7 +3712,7 @@ def _cpp_lib_name(raw: str) -> str:
 def _lib_dir(raw: str) -> str:
     """`--lib-dir=` 实参 → 目录（**解释器侧**的库搜索目录；与 `--link-dir=` 不同）。
 
-    `--link-dir=` 是给**链接器**的（`-L`），`--lib-dir=` 是给 `dsh run` 的
+    `--link-dir=` 是给**链接器**的（`-L`），`--lib-dir=` 是给 `elench run` 的
     `ctypes` 的（裸名 `from "cjson"` → `<目录>/cjson.dll`）。两者互不替代，
     接一个真库通常两个都要给。空串 / 不是目录当场拒绝：指过去也找不到库。
     """
@@ -3754,7 +3787,7 @@ def _cpp_link_failure_hint(err: str) -> str:
 
 
 def _cpp_strip_run_return_line(raw: bytes) -> bytes:
-    """剥掉 `dsh run` 打印的 **main 返回值**末行（只剥「最后一行且是整数」）。
+    """剥掉 `elench run` 打印的 **main 返回值**末行（只剥「最后一行且是整数」）。
 
     **口径的唯一来源是 `tools/behavior_parity.py:strip_return_line`**。这里不能
     import `tools/`（`editors/vscode/python/dsh.py` 是独立分发的镜像，不带 tools），
@@ -3773,7 +3806,7 @@ def _cpp_strip_run_return_line(raw: bytes) -> bytes:
 
 
 def _cpp_exit_code_matches(rc: int, run_stdout: bytes):
-    """生成物退出码 vs `dsh run` 打印的返回值。
+    """生成物退出码 vs `elench run` 打印的返回值。
 
     只在返回值能落进 **0..255** 时判——那是 POSIX 与 Windows 都一样的区间；
     更大的值会被 OS 截断（口径不唯一），这时**跳过**并说清原因，不硬判、
@@ -3839,17 +3872,17 @@ def _cpp_compile_text(text: str, compiler=None, include_dirs=()):
 
 
 def _cpp_run_passthrough(argv) -> List[str]:
-    """从 `dsh cpp` 的 argv 里挑出**解释器侧也要**的开关。
+    """从 `elench cpp` 的 argv 里挑出**解释器侧也要**的开关。
 
-    `--run` 是「生成物 vs `dsh run`」的对拍：两边必须用**同一个口径**读同一份
-    源码。`--compat` 不递过去的话，`dsh cpp x.eln --compat --run` 的解释器侧
+    `--run` 是「生成物 vs `elench run`」的对拍：两边必须用**同一个口径**读同一份
+    源码。`--compat` 不递过去的话，`elench cpp x.eln --compat --run` 的解释器侧
     会按原生语法读同一份 `.eln`（`using T = …` 之类直接 `E-Keyword-Unsupported`），
     只能报「无法对拍」——那不是生成物的问题。`--no-check` / `--strict` /
     `--relax=` / `--checks=` 同理：`run` 也会跑 `_gate_checks`，口径不一致
     就会一边过一个不过。
 
     `--lib-dir=` 也在这里（2026-11-14）：它是**解释器侧**的库搜索目录，
-    不递过去的话，`from "cjson"`（裸名）在 `dsh run` 里仍然加载不了——
+    不递过去的话，`from "cjson"`（裸名）在 `elench run` 里仍然加载不了——
     一条命令就还是只能报「无法对拍」。
     """
     out: List[str] = []
@@ -3865,12 +3898,12 @@ def _cpp_run_passthrough(argv) -> List[str]:
 def _cpp_compare(tu_p: str, ch_p: str, text: str, include_dirs=(),
                  link_files=(), link_dirs=(), libs=(), no_static=False,
                  run_args=()) -> int:
-    """编译（+ 链接）+ **真跑** + 与 `dsh run` 逐字节对拍。
+    """编译（+ 链接）+ **真跑** + 与 `elench run` 逐字节对拍。
 
     **2026-11-14 之前这里只做到「编译」**：没有运行、没有对拍，`--run` 名不副实。
     现在补上后半段，口径不变（`tools/cpp_parity.py` 同一套）：
 
-      - 生成物 stdout == `dsh run` 的 stdout（**剥掉末行 main 返回值**，
+      - 生成物 stdout == `elench run` 的 stdout（**剥掉末行 main 返回值**，
         见 `_cpp_strip_run_return_line`）；
       - 返回值在 0..255 时退出码也要相同（`_cpp_exit_code_matches`）。
 
@@ -3882,7 +3915,7 @@ def _cpp_compare(tu_p: str, ch_p: str, text: str, include_dirs=(),
     stderr 说清缺什么。临时目录跑完即删（失败的产物也不留）。
 
     **状态行一律走 stderr**：没给 `--output` 时 stdout 是生成的源码，
-    `dsh cpp m --run > m.cpp` 不该被一行 `✓` 或程序输出污染。
+    `elench cpp m --run > m.cpp` 不该被一行 `✓` 或程序输出污染。
     """
     import shutil
     import subprocess
@@ -3955,7 +3988,7 @@ def _cpp_compare(tu_p: str, ch_p: str, text: str, include_dirs=(),
             print("✗ 生成物 180s 没结束——对拍无法完成", file=sys.stderr)
             return 1
 
-        # ---- 解释器同口径输出（真跑 `dsh run`，不是"猜它应该打印什么"）
+        # ---- 解释器同口径输出（真跑 `elench run`，不是"猜它应该打印什么"）
         # `--compat` 等开关一并递过去：对拍的两边必须用同一个口径读同一份源码。
         dsh_py = os.path.abspath(__file__)
         try:
@@ -3975,7 +4008,7 @@ def _cpp_compare(tu_p: str, ch_p: str, text: str, include_dirs=(),
 
         mine = got.stdout or b""
         # **把生成物的 stdout 显示出来**（走 stderr：stdout 在没给 `--output`
-        # 时要留给生成的源码，否则 `dsh cpp m --run > m.cpp` 会被程序输出污染）。
+        # 时要留给生成的源码，否则 `elench cpp m --run > m.cpp` 会被程序输出污染）。
         # "一条命令跑完并输出结果"是 `--run` 的意义所在。
         body = mine.decode("utf-8", "replace")
         shown = body if len(body) <= 4096 else body[:4096] + "…（已截断）"
@@ -3998,10 +4031,10 @@ def _cpp_compare(tu_p: str, ch_p: str, text: str, include_dirs=(),
             print("✗ 对拍失败：stdout 不逐字节相同", file=sys.stderr)
             n = min(len(mine), len(theirs))
             off = next((i for i in range(n) if mine[i] != theirs[i]), n)
-            print(f"  长度 生成物={len(mine)}B / dsh run（剥末行）={len(theirs)}B，"
+            print(f"  长度 生成物={len(mine)}B / elench run（剥末行）={len(theirs)}B，"
                   f"首个差异在字节 {off}", file=sys.stderr)
             print(f"  生成物：{mine[:300]!r}", file=sys.stderr)
-            print(f"  dsh run：{theirs[:300]!r}", file=sys.stderr)
+            print(f"  elench run：{theirs[:300]!r}", file=sys.stderr)
             return 1
 
         ok, note = _cpp_exit_code_matches(got.returncode, ir.stdout or b"")
@@ -4010,7 +4043,7 @@ def _cpp_compare(tu_p: str, ch_p: str, text: str, include_dirs=(),
             return 1
         if ok is None:
             print(f"  · 退出码：{note}", file=sys.stderr)
-        print("  ✓ 对拍一致：生成物 stdout 与 `dsh run` **逐字节相同**"
+        print("  ✓ 对拍一致：生成物 stdout 与 `elench run` **逐字节相同**"
               "（已剥 main 返回值末行）", file=sys.stderr)
         return 0
     finally:
@@ -5160,7 +5193,7 @@ def cmd_measure(argv: List[str]) -> int:
     except ImportError as e:
         print(f"测量需要执行器（src/interp.py + src/bench.py），当前不可用：{e}",
               file=sys.stderr)
-        print("提示：`dsh cost` 与 `dsh dispatch` 只做静态部分，不依赖执行器。",
+        print("提示：`elench cost` 与 `elench dispatch` 只做静态部分，不依赖执行器。",
               file=sys.stderr)
         return 3
 
@@ -5175,7 +5208,11 @@ def cmd_measure(argv: List[str]) -> int:
             _ms = int(_a.split("=", 1)[1])
             sizes_by_param = {k: [x for x in v if x <= _ms] or v[:1]
                               for k, v in sizes_by_param.items()}
-            hi = min(hi, _ms)
+            # **2026-11-15**：`hi` 是 `None` 时（模块没有 `benchmodel.scale`）
+            # 这里会 `min(None, int)` ⇒ `TypeError`，而文档教人用这个开关。
+            # 没有 scale 时 `sizes_by_param` 本来就是空、下面会正常报"无法确定测量点"。
+            if hi is not None:
+                hi = min(hi, _ms)
     if not sizes_by_param:
         print("没有 benchmodel.scale，无法确定测量点", file=sys.stderr)
         return 2
@@ -5289,13 +5326,11 @@ def cmd_measure(argv: List[str]) -> int:
             try:
                 _rp = _rtp(os.path.dirname(os.path.abspath(tu_p)), _mod)
                 os.makedirs(os.path.dirname(_rp), exist_ok=True)
-                with open(_rp, "w", encoding="utf-8", newline="\n") as _f2:
-                    _f2.write("# 由 `elench measure --commit` 生成：**入库的参考表**。\n")
-                    _f2.write("# 交叉点是实测出来的，**与机器有关**：换机器可能次优。\n")
-                    if _degraded:
-                        _f2.write("# DEGRADED: 未覆盖声明区间，不可用于承诺\n")
-                        _f2.write("degraded: true\n")
-                    _f2.writelines(_body)
+                # 复用同一个序列化器（`_write_dispatch_table`）写内容：
+                # 以前这里 `_f2.writelines(_body)`，而 `_body` 早已不在本作用域
+                # （它被收进了 `_write_dispatch_table`）——`--commit` 每次都抛
+                # `NameError`，被下面的 `except` 吞掉、退出码仍是 0。
+                _write_dispatch_table(_rp, _mod, _all, _degraded)
                 print(f"  入库参考表 → {_rp}"
                       + ("（⚠ 是 DEGRADED 的，不要提交）" if _degraded else ""))
             except Exception as _e:                        # noqa: BLE001
@@ -5539,6 +5574,7 @@ def cmd_export(argv: List[str]) -> int:
         # **时间戳只影响 `.html`**：`--now=` 原样写进报告（方便逐字节复现），
         # `--no-timestamp` 写成固定标记。两条都是给测试与 CI 用的。
         _now = None
+        _wc = None               # `--worstcase=<文件>`；None = tools/worstcase.json
         _no_ts = "--no-timestamp" in argv
         for _a in argv:
             if _a.startswith("--variant="):
@@ -5550,6 +5586,8 @@ def cmd_export(argv: List[str]) -> int:
                 _runs = int(_a.split("=", 1)[1])
             elif _a.startswith("--out="):
                 _out = _a.split("=", 1)[1]
+            elif _a.startswith("--worstcase="):
+                _wc = _a.split("=", 1)[1] or None
             elif _a.startswith("--now="):
                 _now = _a.split("=", 1)[1].strip() or None
             elif not _a.startswith("--"):
@@ -5572,6 +5610,7 @@ def cmd_export(argv: List[str]) -> int:
             elif _a.startswith("--max-points="):
                 _maxp = int(_a.split("=", 1)[1])
         return _full_report(_pos[0], _sizes, _runs, out_path=_out, split=_split,
+                            wc_path=_wc,
                             max_size=_max, max_points=_maxp, variant=_variant,
                             now=_now, no_timestamp=_no_ts,
                             tool_version=VERSION)
@@ -5815,7 +5854,7 @@ def cmd_export(argv: List[str]) -> int:
 def _make_args_for(interp, decl_mod, fn_name: str, size: int = 64):
     """给 CLI 造实参：参数不够时用 `benchmodel.data` 造（第十二条）。
 
-    这解决「`dsh stats lcs.tu lcs.eln lcs` 报『需要 2 个实参，给了 0』」——
+    这解决「`elench stats lcs.tu lcs.eln lcs` 报『需要 2 个实参，给了 0』」——
     CLI 没能力合成 `Vec<u8>`，但它**能读 benchmodel**。
     """
     from bench import make_args, read_benchmodel
@@ -6310,9 +6349,9 @@ def _static_plan_table(ci, tu_mod):
 def cmd_build(argv: List[str]) -> int:
     auto, argv = _auto_enabled(argv)
     argv = _expand_module_args(argv)
-    """`dsh build`：**B-17 的落地**——检查 + pending 门禁 + 成本表。
+    """`elench build`：**B-17 的落地**——检查 + pending 门禁 + 成本表。
 
-    B-17 原文：含 `pending` 时 `dsh check` 通过、**`dsh build` 失败**，
+    B-17 原文：含 `pending` 时 `elench check` 通过、**`elench build` 失败**，
     成本表标 `state: incomplete`。
 
     退出码：0 通过 / 1 有错误或含 pending / 2 用法错。
@@ -6330,12 +6369,12 @@ def cmd_build(argv: List[str]) -> int:
         elif not a.startswith("-"):
             pos.append(a)
     if not pos:
-        print("用法：dsh build <模块.tu> [<模块.eln>] [--out=<路径>]", file=sys.stderr)
+        print("用法：elench build <模块.tu> [<模块.eln>] [--out=<路径>]", file=sys.stderr)
         return 2
 
     tu_p, ch_p = _load_pair(pos)
     if tu_p is None:
-        print("用法：dsh build <模块.tu> [<模块.eln>] [--out=<路径>]", file=sys.stderr)
+        print("用法：elench build <模块.tu> [<模块.eln>] [--out=<路径>]", file=sys.stderr)
         return 2
     # **`.tu` 可选**（2026-11-10，规格 §8.9）：没有 `.tu` 时声明源为空——
     # 不把 `.eln` 当 `.tu` 解析第二遍，`check` 阶段的 F-1 也只汇总一条。
@@ -6577,7 +6616,8 @@ def cmd_build(argv: List[str]) -> int:
     return 0
 
 
-VERSION = "1.0.0"
+#: 版本号只在 `src/version.py` 写一份；这里引用它，别再写死字面量。
+from version import VERSION  # noqa: E402  （放在这里是为了保持文件里"常量区"的位置）
 ARGV_VERSION = ("--version", "-V", "version")
 
 
@@ -7072,6 +7112,17 @@ def main(argv=None) -> int:
     **为什么要这一层**：命令行工具崩出 Python traceback 是最不体面的失败方式——
     用户只想知道"哪个文件不存在"，不想看调用栈。
     """
+    # **编码必须先修**（2026-11-18 审计）：Windows 控制台默认 GBK，
+    # 而输出里有 `✓` `✗` `⚠` `κ`。以前只在 `__main__` 块里 reconfigure，
+    # 于是 `python src/dsh.py …` 正常，**正式入口 `elench`（elench.py → main）会崩**：
+    #   UnicodeEncodeError: 'gbk' codec can't encode character '\u26a0'
+    # 放在 main() 里，两条入口就都覆盖到了。
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass  # 被重定向成非 TextIOWrapper 时没有 reconfigure，跳过即可
+
     argv = list(sys.argv if argv is None else argv)
     if len(argv) > 1 and argv[1] in ("--version", "-V", "version"):
         print(f"elench {VERSION}")
@@ -7154,7 +7205,13 @@ def _main_impl(argv=None) -> int:
     # **将来载体可能是 `.elnc` 后缀**（用户还没定）：到时候只改这一行——
     # 把"读 argv"换成"看文件后缀"，其余一行都不用动。
     import compat as _compat_flag
-    _compat_flag.set_enabled("--compat" in rest)
+    # **`--compat` 也可以一次设开**（2026-11-22）：把 C++ 当主用法时，
+    # 每条命令都敲 `--compat` 是纯摩擦。`ELENCH_COMPAT=1` 让它成为默认，
+    # `--no-compat` 再临时关掉（环境变量不该是"只能开不能关"的单向门）。
+    _env_compat = os.environ.get("ELENCH_COMPAT", "").strip().lower()
+    _compat_default = _env_compat not in ("", "0", "false", "no", "off")
+    _compat_flag.set_enabled(("--compat" in rest or _compat_default)
+                             and "--no-compat" not in rest)
 
     # **`-D NAME[=VALUE]`**（2026-11-10，规格 §8.10）：给预处理器传宏定义。
     # `check` / `run` / `cost` / `build` 都吃；**默认空**（没有 `-D _WIN32` 时

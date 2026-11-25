@@ -9,8 +9,10 @@ Elench 是一门**组件语言**：用来写算法与数据结构这类"有边�
 
 ## 三句话
 
-1. **这是什么**：一门写法贴着 C++ 的语言——`u64 f(const vector<u64>& xs)`、`push_back` /
-   `size` / `empty` / `find` / `insert` / `erase`、`array<T, N>(v)`、`optional` / `expected`。
+1. **这是什么**：**你现有的 `.cpp` 不用改就能被检查**（`--compat`）——`#include`、`using`、
+   `struct`、`auto`、`int`、`for (auto it = xs.begin(); …)`、`static_cast` 都认。
+   新写的代码用本语言的写法（`u64 f(const vector<u64>& xs)`、`push_back` / `array<T, N>(v)`、
+   `optional` / `expected`）。
 2. **为什么**：AI 对 C++ 熟，但 C++ 的成本（时间、分配、谁改了谁）说不清。这里把成本写成
    **签名的一部分**（`.tu` 里的 `target`），编译器从实现**自己算一遍**（`κ`）来核对：
    **达成 / 债务 / 无法判定**，三种结论都能说出口。
@@ -22,29 +24,42 @@ Elench 是一门**组件语言**：用来写算法与数据结构这类"有边�
 
 需要 **Python ≥ 3.10**，**零第三方依赖**。
 
+**先拿你自己的代码试**：把任意一个 `.cpp` 改名成 `.eln`（内容不动），然后
+
 ```bash
 git clone https://github.com/xiaohuo123212/elench.git
 cd elench
+pip install -e .                                  # 提供 elench 命令
 
-python src/elench.py run   文档/入门/例子/hello      # 真的执行：42
-python src/elench.py check 文档/样例/sum             # 语法 / 类型 / 契约
-python src/elench.py cost  文档/样例/max_pair_sum    # 算 κ，和 target 比
+elench cost 你的文件.eln --compat                  # κ 直接从源码算出来，不运行程序
 ```
 
-真实输出（`cost`，2026-11-11 实跑）：
+真实输出（`文档/入门.md` 里的 `count_above`，2026-11-22 实跑）：
 
 ```text
-module max_pair_sum
-
-  ✓ max_pair_sum  κ ≤ 9 + n(xs)×(4 + 4 + n(xs)×24 + 24 + 5) + 4 + 4 + n(xs)×24 + 24 + 5 + 2
-                  分配 ✓ alloc ≤ 0   (target 0)
-                  达成：阶够，比值 ≈ 24.00
-
-✓ 所有函数都在 target 之内
+  · count_above  κ ≤ 2 + 2 + n(xs)×20 + 20 + 2
+                 未声明契约（没有 spec）：不参与判定、不算债务、不算错误
 ```
 
-那一串里的 `n(xs)×(… n(xs)×24 …)` 就是 **O(n²)**——两层循环，工具自己看出来的；
-作者只在 `.tu` 里写了 `target { time: { max: O(xs.size() * xs.size()) } }`，两条对上了。
+**`κ` 不是估计，是上界**：`n(xs)×20` 是"每轮循环最多 20 个操作"。
+
+想让它有**判决**，加一份同名 `.tu`（实现还是不动）：
+
+```bash
+elench cost count_above --compat
+```
+
+```text
+  ✓ count_above  κ ≤ 2 + 2 + n(xs)×20 + 20 + 2
+                 达成：阶够，比值 ≈ 20.00
+```
+
+仓库自带的例子也能直接跑：
+
+```bash
+elench run  文档/入门/例子/hello      # 真的执行：42
+elench cost 文档/样例/max_pair_sum    # κ ≤ 9 + n(xs)×(…) —— 那是 O(n²)
+```
 
 ---
 
@@ -94,6 +109,13 @@ u64 max_pair_sum(const vector<u64>& xs) {
 | 注释里的 `// O(n log n)` | `.tu` 里的 `target` | 这一行会被机器核对 |
 
 **同名不同义的坑有一批，别靠猜**：见 [C++ 程序员上手清单](文档/C++惯用法对照.md)。
+**哪些写法要 `--compat`、哪些本来就认**：[入门 §5 实测矩阵](文档/入门.md)。
+
+一次设开兼容层（之后不用每条命令加 `--compat`）：
+
+```bash
+export ELENCH_COMPAT=1        # Windows: set ELENCH_COMPAT=1
+```
 
 ---
 
@@ -115,12 +137,12 @@ u64 max_pair_sum(const vector<u64>& xs) {
 
 | 项 | 数字 |
 |---|---|---|
-| 样例程序 | **17 个**（`文档/样例/*.tu` + `*.eln`） |
+| 样例程序 | **17<!--dn:samples-->** 个（`文档/样例/*.tu` + `*.eln`） |
 | 子命令 | **19 个**（`effects` / `header` / `spec` / `cpp` 不在 `--help` 的常用区里） |
-| 测试文件 | **138 个**（`python -B tests/runner.py`） |
-| 实现规模 | **59 个 Python 文件 / 约 3.6 万行代码**（`python -B tools/audit_numbers.py`） |
+| 测试文件 | **207<!--dn:test_files-->** 个（`python -B tests/runner.py`） |
+| 实现规模 | **61<!--dn:impl_files-->** 个 Python 文件 / **52,141<!--dn:impl_sloc-->** 行代码（`python -B tools/audit_numbers.py`） |
 | 第三方依赖 | **零**（只用 Python 标准库） |
-| C++ 后端 | **没有**。`elench cpp` 是最小切片（只支持 `u64`/`i64`/`vector`/`while`/`if`），`elench header` 能出带契约注释的 C 头文件 |
+| C++ 后端 | **有，但只覆盖一个切片**。`elench cpp` 出可编译、可链接的 C++：语料 19 个模块**出码 19/19、编译 19/19、语义与解释器逐字节一致 19/19**（与手写原版一致 17/19，差的两例是原版自己依赖 C++ 未指定行为）。能发 `extern "C"`、接 `--include` / `--link` / `--lib-dir`，`--run` 会真编译、真链接、真跑再对拍。**仍不支持** `?!`（`choose`）与函数指针 |
 
 **它不是能拿去生产的编译器**：它是一套可检查的契约系统，加一个够跑样例的实现。
 能做的：算上界、判契约、把"不知道"明确说出来。不能做的：替代 C++、做完整程序验证。
@@ -131,6 +153,7 @@ u64 max_pair_sum(const vector<u64>& xs) {
 
 | 你想… | 读 |
 |---|---|
+| **不装任何东西，直接在浏览器里试** | [文档/工作台.md](文档/工作台.md) |
 | 一屏看懂这门语言在讲什么 | [文档/介绍.md](文档/介绍.md) |
 | **10 分钟上手** | [文档/入门.md](文档/入门.md) |
 | **把 C++ 习惯搬过来** | [文档/C++惯用法对照.md](文档/C++惯用法对照.md) |
@@ -138,6 +161,7 @@ u64 max_pair_sum(const vector<u64>& xs) {
 | 查内建 | [文档/内建函数.md](文档/内建函数.md) |
 | 知道写不了什么 | [文档/能力边界.md](文档/能力边界.md) |
 | 查子命令开关 | [文档/入门/命令一览.md](文档/入门/命令一览.md) |
+| **接到智能体平台**（初发 / Coze / Dify） | [文档/接智能体平台.md](文档/接智能体平台.md) |
 | 全部文档的地图 | [文档/README.md](文档/README.md) |
 
 ---

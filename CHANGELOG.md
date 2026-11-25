@@ -7,13 +7,366 @@
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
 > **三套版本号，不要混**：
-> · **公开发布** `1.0.0`（本文件主线）
-> · **语言与规格** `0.71`（`文档/语法清单.md` 与预印本里的口径）
-> · **VS Code 扩展** `0.6.19`（`editors/vscode/package.json`，独立制品）
+> · **公开发布** `1.0.2`（本文件主线）
+> · **语言与规格** `0.69`（`文档/设计/目前设计/AI语言设计规格.md`，内部不入库）
+> · **VS Code 扩展** `0.7.1`（`editors/vscode/package.json`，独立制品）
 
 ---
 
 ## [Unreleased]
+
+（还没有新条目）
+
+## [1.0.2] — 2026-11-25 · 兼容层补全与文档校准
+
+### Fixed（文档：样例与紧度数字对齐真文件）
+
+- **样例文档不再手抄代码**：`示例-三个构造.md` 的 4 个代码块由 `sync_docs` 从
+  `文档/样例/search.*` 生成（`doc_sync` 门盯着）；`search.tu#spec` / `search.eln#fn` /
+  `search.tu#choose` 三处标注了**节选 + 文件行号区间**，并写明两处已知差异
+  （续行缩进被规整、嵌套 region 标记被省略）。
+- **删掉不存在的命令**：`dsh refresh-dispatch`（2 处）→ `elench measure`。
+- **`示例-二分查找-三候选.md` 标为历史文档**：它的代码用的是已下线的 `[]u64` / `val` / `model`，
+  顶部说明指向仍然可跑的 `文档/样例/search`，并修掉两处「编译器尚未实现」。
+- **紧度文档 9 个数字重测**：`sum` 的比值从 1.00 → **2.70**（旧数字让工具显得比实际紧），
+  `insertion` 3.46 → 3.77，`lcs` n=64 267,126 → 284,027，`search` n=128 624/257 → 717/250 等；
+  文首写明「κ 来自源码、实测来自解释器 ops、2026-11-25 用 `tools/tightness_table.py` 重跑」。
+- `为什么界会松.md` 引用的 `_tier_a/string_match` 已移出仓库，标注并指向现存模块。
+
+### Added（`deque<T>` 接线完成）
+
+- **`deque<T>` 现在是一个真容器**：`deque<u64> d;` 默认构造为空，方法
+  `push_back` / `push_front` / `pop_back` / `pop_front` / `size` / `empty` 与
+  `deque_*` 内建同义，两端 O(1) **摊还**（环形缓冲，扩容那一次不算）。
+- 修的是「半可用」：以前 `check` 直接拒 `deque<T>`（`E-Type-UnimplementedContainer`），
+  而 6 个 `deque_*` 内建能内联调用 —— **能调、存不进变量**。现在三条路都通：
+  内建、默认构造、方法。`UNIMPLEMENTED_CONTAINERS` 表因此清空（留着，下回再登记）。
+- `stdlib.DequeVal` 补了 `__len__`，`.size()` / `.empty()` 与 `deque_len` 同值。
+
+### Fixed（两个「check 过、run 炸」的假绿）
+
+- **`for_each` 在集合上自相矛盾**：静态判定按类型（`set<T>` → 一元 `f(x)`），运行期却按
+  对象类型（`set_new()` 返回的是 `stdlib.MapVal`）走二元 `f(k, v)`，于是
+  `for_each(set_new(), on1)` **`check` 过、`run` 报「on1 需要 1 个实参，给了 2」**。
+  修法：`set_new()` 返回 `stdlib.SetVal`（`MapVal` 子类，值恒为 1），`for_each` 先判它、
+  按**键**做一元遍历；`set_*` 其余内建（`isinstance(m, MapVal)`）不受影响。
+- **`text_join` 传错类型抛宿主异常**：`text_join(Vec<u8>, sep)` 以前在运行期抛
+  `AttributeError: 'Text' object has no attribute 'parts'`。现在**`check` 期**报
+  `E-Type-ArgMismatch` 并给改法（`text_split` / `text_concat`），运行期再兜一层同样的提示。
+
+### Added（`ELENCH_NO_INCLUDE_INLINE=1`：include 退回"整行忽略"）
+
+- 第 19 条把 `#include` 从"整行忽略"改成"内联 / 找不到报错"。对普通移植是进步，
+  但对 **FFI 风格**的 `.eln`（`extern … from "lib"` + `link "lib"`，include 只给 C 侧
+  shim 用）是退步：它会把整个真库头拖进来啃。
+- 新增开关 `ELENCH_NO_INCLUDE_INLINE=1`：整行丢掉、不报错，回到第 19 条之前的口径。
+  **默认不变**（仍内联/报错）。实测：`build/real-libs/_cases/eln/` 下 4 个有历史日志的
+  探针，打开开关后 `utf8` / `xxh` / `stb2` 通过、`stb` 报 `E-Call-Undeclared`，
+  **与当年日志逐条一致**——当年那次 `exit=0` 就是在忽略 include 的口径下得到的。
+
+### Added（第 22 条：成员的纯拼写限定词）
+
+- `mutable` / `volatile` / `inline` / `constexpr` 修饰**成员**时在 `--compat` 下**跳过**。
+  它们各自那条诊断自己就写着"字段本来就都能改 / 删掉它"——没有语义可保。
+  真库头里成片出现：`fmt/core.h` 的一个 `mutable` 就挡下 13 个探针。
+- 实现上必须**两层改**：`mutable` 是**词法器**的长写法词（`LONG_FORM_HINT`），
+  光在 parser 里跳过没用——实测合成用例仍报 `E-Keyword-LongForm`。词法器在 compat 下
+  把它降成 IDENT，parser 的成员循环再跳过。严格模式两层都不变。
+
+### Fixed（第 19 条：已内联过的 include 不再报错）
+
+- **头文件用基名包含自己**（`fmt/core.h` 里的 `#include "core.h"`）以前会被判
+  `E-Lex-IncludeUnresolved`：内联器把它当"已经内联过"跳过，却**把这一行留在正文里**，
+  下游看到就报未解析。**17 个真库探针就是被这一行挡住的**。现在已内联过的 include
+  直接丢掉（正是 `#pragma once` / include guard 的语义），`E-Lex-IncludeUnresolved`
+  从 17 条降到 4 条（剩 doctest 的 4 个，它们的头确实不在搜索路径里）。
+
+### Added（第 19 条扩展：尖括号 include + `#warning`）
+
+- **`#include <lib.h>` 也按搜索路径内联**（`--compat`）：真库的头几乎都是尖括号形式
+  （`#include <nlohmann/json.hpp>`），以前一律 `E-Lex-IncludeUnresolved`。现在按
+  `ELENCH_INCLUDE_DIRS`（`os.pathsep` 分隔）找，找到就内联；**标准头仍在白名单里
+  静默丢弃**，找不到的头仍报错（不假装读过）。
+- **`#warning` 在 `--compat` 下跳过**：它只打印提醒、不改变语义，而真库单头大量使用；
+  严格模式保持原行为。
+- `tools/probe_real_libs.py`：自动把 9 个真库的 `include/` 与库根设成搜索路径
+  （等价 `-I`），`--no-include-dirs` 可关掉做对照——**两种口径都报**，不把
+  "缺搜索路径"算成"语言吃不下"。
+
+### Added（运算符重载，第 21 条）
+
+- **运算符重载**（`--compat`）：`bool operator<(const P&, const P&)` 与成员写法
+  `bool operator<(const P& o) const` 都认，覆盖 `== != < <= > >= + - * / []`。
+  两种形态都降级成同一个名字（`P__op_lt`），`const` 成员函数的接收者按 `const P&` 传。
+  **关键不是"允许通过"，是改写**：`a < b` 在 typecheck 期按两侧操作数的静态类型
+  改写成 `P__op_lt(a, b)`——κ 按语法结构数，只放行会把整个循环算成 1，那就不再是上界。
+  实测 `a < b` 的 κ 与显式写 `less(a, b)` **逐字符相同**；标量比较不受影响；
+  严格模式一字不改地拒绝。
+- 实现里踩到一个 `kind_at` 的坑：它吃**绝对下标**而 `peek` 吃**相对偏移**，混用会
+  静默看错 token（判据永远 False，又回到 `E-Parse-UnexpectedTop`）。
+
+### Added（类模板单态化，第 20 条后半）
+
+- **类模板**（`--compat`）：`template <typename T> struct Box { T v; };` 按**使用点**
+  实例化成具体 struct——`Box<u64>` → `Box__u64`，`Box<vector<u64>>` 也行（实参按位置
+  对应，不需要推断）。**成员函数跟着实例化**：`struct P { u64 sum() {…} }` 在解析期已被
+  降级成 `P_sum(recv: P)`，实例化时克隆成 `P__u64_sum(recv: P__u64)`，调用点按接收者的
+  静态类型改写。实测 κ 与手写具体 struct **逐字符相同**、`run` 结果一致。
+  模板定义本身（struct 与它的成员函数）在实例化后**从模块里摘掉**——不摘的话字段类型
+  还是 `T`，下游报 `E-Type-Unknown: 未知类型名 T`（那是模板参数，不是漏定义）。
+
+### Added（C++ 兼容层第 20 条：模板单态化）
+
+- **函数模板**（`--compat`）：`template <typename T> u64 len(const vector<T>& xs)` 在
+  **调用点单态化**——按实参类型实例化成 `len__u64(const vector<u64>&)`，调用点改写成它。
+  C++ 编译器做的也是这件事（instantiation），所以不是"近似"。实测**κ 与手写具体函数
+  逐字符相同**、`run` 返回值一致；同一模板按不同实参实例化两次（`len__u64` / `len__u8`）
+  各算各的；推断不出类型时报 `E-Type-InferFailed` 并说明怎么改（不猜）。
+  `template <typename T>` 前缀与原生 `u64 len<T>(…)` 产出**完全同形**的 AST。
+  **不做**：偏特化 / SFINAE / 可变参数 / 非类型参数 / 类模板 / 模板元编程。
+- **`src/compat.py` 的规则表补上第 18 / 19 / 20 条**（此前实现进去了、表没更新——
+  文档和代码对不上是这一轮反复踩到的坑）。
+
+### Added（C++ 兼容层第 18 / 19 条）
+
+- **C 风格标量强转 `(int)x` / `(u64)xs.size()`**（`--compat`）：真实 C++ 代码里这种窄化
+  遍地都是，以前一律 `E-Cast-CStyle`。只认**内建标量**拼写（`CXX_SCALAR_TYPES` 与
+  `NATIVE_SCALARS`）——它们是保留的类型词，不可能是变量名，解析期**不需要猜**，
+  所以 `(a)*b` 与 `(T)*p` 那个歧义**不成立**。语义严格等于 `x as T`（同一个 `cast`
+  节点），实测 κ 与 `as` **逐字符相同**；别名 / struct 名仍拒绝。严格模式一字未改。
+- **`#include "你的头.h"` 真的读进来**（`--compat`）：递归内联，头里的**函数原型**自动
+  翻成 `extern name(…) -> T from "<头>";`，于是调用能过、κ 里显示 `ext(名字)`。
+  解析不到的头仍然报 `E-Lex-IncludeUnresolved`——**不假装读过**。
+  顺带处理了两个坑：头文件 UTF-8 BOM（会让 `#` 不在行首、`#ifdef` 守卫失效）、
+  以及"同一文件第二次解析拿不到内联结果"（去重集合必须是每次顶层调用一份）。
+
+
+## [1.0.1] — 2026-11-20 · 浏览器工作台
+
+> 这一版的主题：**κ 可以在浏览器里算了**，而且算它的还是同一份实现。
+
+**发布形态**：`elench`（PyPI，1.0.1）· `elench-lang`（npm，0.1.5）· VS Code 扩展（0.7.1）。
+
+### 已知问题（诚实列出，不在这一版修）
+
+- **`fmt --check` 与样例不一致**：全部 15 个 `文档/样例/*.eln` 都会被 `elench fmt` 改写
+  （formatter 的规范风格与样例写法不同）。改样例会牵动 `doc_sync` 与 `golden`，
+  所以这次**不动**；`scripts/npm_smoke.js` 里把它标成"已知偏差"，输出仍然照实打印。
+
+### Fixed（这一版修掉的）
+
+- **用户看到的版本号与原来源三处不一致**：`dsh.py` 里写死 `VERSION = "1.0.0"`，
+  `pyproject.toml` 是 1.0.1，而 editable 装出来的元数据是 0.69.0 ——
+  `elench version` 打 1.0.0。现在版本号只有 `src/version.py` 一份，
+  `tools/release_check.py` 把它也纳入比对（改 pyproject 却忘了这里，门禁直接红）。
+  另外：本机的 editable 安装原先指向**另一个 checkout**（`ai-lang-design/src`），
+  所以 `elench` 一直在跑旧代码 —— `pip install -e .` 重新指回 `elench-cpp/src` 后恢复正常。
+- **`修法` 里贴的是一条天书绝对路径**：以前打 `C:/Users/…/src/elench.py measure avg`，
+  现在打 `elench measure avg`（装了命令就用命令名）。
+- **用户可见文本里还留着 39 处旧命令名 `dsh xxx`**（`dsh check 通过，但 dsh build 必失败`
+  之类）——全换成 `elench`。`dsh bench` 的拒绝提示还指错了参数：
+  写 `dsh measure <函数名>`，实际要的是**模块名**。
+
+- **`fmt` 对未知开关不再静默忽略**：以前 `elench fmt a.eln --diff`（有人以为能"只看不改"）
+  会**直接把文件改写**——一个只读意图变成写盘。现在不认识的开关一律拒绝（rc=2）并给提示。
+  这个坑是准备这一版时踩到并当场修的。
+- **`scripts/npm_smoke.js` 从包里改名起就一直是坏的**：它把入口写死成
+  `node_modules/elench/...`，而包后来叫 `elench-lang`，于是 22 条子命令**全部**
+  `MODULE_NOT_FOUND`——而它不在门禁里，坏了很久没人发现。现在包名从 `package.json` 读，
+  装完找不到入口会明确报错。修好后 **22/22 通过**。
+
+### Changed
+
+- **文档改成「C++ 模式是主用法」**：`文档/入门.md` 整篇重写，第一步不再是"学一门新语法"，
+  而是**把你现有的 `.cpp` 改名丢进去**（一个字不改）→ 拿到 `κ`；第二步才是补一份三行
+  `.tu` 让它有判决。README 的"三分钟跑起来"、`文档/介绍.md`、`文档/命令一览.md`、
+  `文档/工作台.md` 同步改成 C++ 优先。**每一节里的命令都真跑过**，输出照抄实测结果。
+- **`ELENCH_COMPAT=1` / `--no-compat`**：把兼容层设成默认，不必每条命令都敲 `--compat`
+  （环境变量不该是只能开不能关的单向门，所以配了 `--no-compat`）。
+- **工作台默认就是 C++ 模式**：兼容层默认开，默认示例换成「一份没改过的 C++ + 一份契约」
+  → 打开页面第一屏就是 `达成`。示例按钮改成四个（C++ + 契约 / C++ 原样 / 违约 / 语法错）。
+- **`tools/wasm/headless_check.mjs --initial`**：只看"页面自己首屏跑成什么样"，
+  验的就是第一印象（默认示例、默认模式、首屏判决）。
+
+### Added
+
+- **`tools/site/`：Elench 工作台 —— 纯静态网页，κ 在浏览器里算**。
+  左边写 `.tu` / `.eln`，右边出判决、κ、分配、诊断（带改法）；三个一键示例
+  （合规 / 违约 / 语法错）。**没有服务端计算**：页面把 60 个 `.py` 灌进 Pyodide，
+  再 `import core_api` —— 与命令行**同一份逻辑**，所以不存在"网页算一套、命令行算一套"。
+  首次加载约 1–2 秒（13.2 MB 运行时在本地、不联网），之后每次 **3–7 ms**。
+  - `serve.py` 把路由理清（`/` → 页面，`/src/**` 与 `/pyodide/**` → 仓库里的真实文件，
+    `/modules.json` → 现扫），**开发与部署用同一套 URL**，页面里不写死环境差异。
+  - `serve.py --export dist` 导出 **16.3 MB / 73 个文件**的可部署目录；
+    已实测用 `python -m http.server` 独立跑通——**目标机器不需要 Python**。
+  - **「C++ 模式」开关（等价 `--compat`）**：打开后 `.cpp` **原样丢进来**就能算 κ
+    ——`using namespace std;`、`size_t`、`+=`、`xs[i]` 都不改。实测
+    `demo/corpus/01_sorting.cpp`（41 行未改动）：`check` ✓ 4 个函数、`cost` 算出 κ。
+    没有 `.tu` 时判决是**第四档 `undeclared`（未声明契约）**——κ 有，但"合不合格"没承诺可判，
+    不显示成"达成"。工作台与平台组件都认这一档。
+  - `core_api.check/cost`、`tools/elench_tool.py`、`tools/elench_mcp.py` 的
+    `compat` 参数一路透传，所以**网页 / MCP / 平台组件**都能吃 C++ 原样源码。
+  - `test_wasm_browser.py` 现在验的就是这个页面（无头 Edge + 真 Pyodide + 真 κ），
+    顺带给 `headless_check.mjs` 加了钩子名参数，一个脚本能验探针与工作台两个页面。
+
+### Added
+
+- **Pyodide 运行时入库，网页不再依赖 CDN**（`tools/wasm/pyodide/`，**13.2 MB**）。
+  `tools/wasm/fetch_runtime.py` 负责取/校验（幂等，`--check` 只报告）。页面优先走本地，
+  本地缺了才回退 CDN 并明说。这样离线可用、不受代理/CDN 抖动影响——而它其实不大：
+  `pyodide.asm.wasm` 9.6 MB + `python_stdlib.zip` 2.2 MB + 其它 1.4 MB。
+- **`tools/wasm/headless_check.mjs`：用本机 Edge/Chrome 的无头模式真跑一遍探针**。
+  不用 puppeteer/playwright：起浏览器读 DevTools 的 WebSocket 地址，用 Node 内置的
+  `WebSocket` 发 CDP 命令，`Runtime.evaluate` 里调页面暴露的 `window.__probe`
+  ——**同一条代码路径**，不是另写一份。
+- **`tests/cases/test_wasm_browser.py`**：把上面那条变成门禁里的一条测试（没 node /
+  没浏览器 / 运行时不在时**明确说跳过**，不假装通过）。
+- **`tests/cases/test_annotations_resolve.py`**：扫全部模块，主动访问每个函数/类的注解，
+  确认它们能在运行期求值。
+
+### Fixed
+
+- **`cost_domain/cost_interp.py` 在 Python ≤ 3.13 上 import 就炸**：注解
+  `-> Dict[str, Any]` 用了 `Any` 却没 import，而 ≤3.13 的注解是 **eager 求值**的
+  ⇒ `NameError: name 'Any' is not defined`。本机是 **3.14**（PEP 649 惰性求值）所以
+  一直看不见，直到 Pyodide（3.12）里跑才暴露——意味着 `requires-python = ">=3.10"`
+  这条声明在 3.10–3.13 上**是假的**。已补 `Any`；`test_annotations_resolve.py`
+  在任何版本上都能抓到同类问题。
+- **探针页面的失败诊断不够**：以前 `runOnce` 失败只 `return null`，无头跑只能看到
+  "payload 是 null"。现在把 `error` 与 **Python traceback** 一起带出去，才有上面那条发现。
+
+### Added
+
+- **`src/core_api.py`：进程内核心，给"网站"和所有工具壳共用**。以前要把 Elench 包成工具
+  只能 `subprocess` 起一个 `dsh.py`：每次约 116 ms，而且**浏览器里根本没有 subprocess**。
+  现在 `core_api.check()` / `core_api.cost()` 在**本进程**里调 `dsh.main([... "--json"])`，
+  再把 stdout 的 JSON 解析出来——**不重写任何逻辑**，所以与 CLI 逐字段相同。
+  - 每次调用 **116 ms → 8 ms（14×）**。
+  - `tools/elench_tool.py` 已改用它（MCP / HTTP / 组件那条链一并变快）。
+  - 顺带修了 stdio 长连接的一个真 bug：**单条请求抛异常会打断整条流**
+    （实测 4 条只回了 2 条），现在单条失败只回一条错误响应。
+- **`tools/wasm/probe.py` + `probe.html`：浏览器可行性探针**。它把 `src/**/*.py` 灌进
+  Pyodide（浏览器里的 CPython），再 `import core_api` 真算一次 κ，并把每一步的
+  大小/耗时/成败写进日志。**探针通过，网站就能做成纯静态页**——不需要服务器、
+  不需要公网地址、也不需要内网穿透，这正好根治"平台访问不到 127.0.0.1"。
+- **`tests/cases/test_core_api.py`**：8 条断言。前 4 条比对"进程内 == 子进程"，
+  后 4 条在**禁止 import subprocess/ctypes/socket/ssl** 的子进程里跑完整链路
+  （这比真实 Pyodide 更严），确认核心路径不依赖任何宿主能力。
+
+### Fixed
+
+- **`ctypes` 变成可选，否则整个包在浏览器里连 import 都过不去**。`cost` 的依赖链是
+  `cost_interp → interp → ffi_c → import ctypes`，而 `ffi_c` 有两处在**模块级**就要
+  `ctypes`（`class _CString(ctypes.c_void_p)` 与 `_SCALAR` 表）。现在：import 失败就退化，
+  真去调 FFI 时报一条说清的话（"纯计算与 κ 不受影响，只有 FFI 需要 ctypes"）。
+  FFI 相关测试（`test_ffi_types` / `test_ffi_shape` / `test_interp`）仍全绿。
+- **`tools/trufar_component/01-html.html` 里有个死元素**：`data-role="body"` 从没被
+  JS 取过。`test_trufar_component.py` 的"每个 data-role 都必须被取到"这一条当场抓到，已删。
+
+### Added
+
+- **`tools/trufar_component/`：平台「自定义代码」组件的四段代码 + 本地预览**。
+  平台的这个组件只有 `onMount` / `onUpdate` / `onUnmount` 三个钩子，**没有网络访问通道**，
+  所以分工只能是「**工作流算、组件画**」：工作流调 MCP 工具 `elench_cost`，
+  结果作为页面数据传进组件，组件只渲染。**HTML 里一行计算都不写**——因此不会出现
+  "页面算一套、命令行算另一套"的漂移。
+  - 四段：`01-html.html`（零外链、样式内联）、`02-onMount.js`（带渲染器）、
+    `03-onUpdate.js`（取 `data.elench`，用 `prevData` 做"变差"动画）、
+    `04-onUnmount.js`（说清为什么不需要清理）。
+  - **三种状态严格区分**：`debt`（代码不达标，橙色）、工具失败（红色，显示 `error` 原文）、
+    "这一轮没有结果"（明说上一次结果已作废，**不留旧数字**）。
+  - `preview.py` + `preview.html`：本地模拟平台调用约定（`new Function` 按平台参数顺序执行），
+    **不复制那四段代码**，所以预览的就是要贴的那一份。
+  - `selftest.js`：用 DOM 桩跑完整生命周期，18 条断言。`test_trufar_component.py` 里
+    装了 node 就跑它，没装则**明确说跳过**，不假装通过。
+- **`tools/elench_mcp.py`：MCP server**（智能体平台「添加 MCP 服务」用）。
+  两种传输：`--stdio`（换行分隔 JSON-RPC，平台能跑本地进程时用）与
+  `--http --port N`（streamable HTTP，`POST /mcp`，云平台只能这样）。
+  实现 `initialize` / `notifications/initialized` / `tools/list` / `tools/call` / `ping`，
+  暴露 `elench_check` 与 `elench_cost` 两个工具。
+  - **不重复实现检查逻辑**：它只做协议转换，干活的是 `elench_tool.handle()`，
+    所以 MCP / HTTP / stdio / 内嵌网页四条路的结果逐字节相同。
+  - 只实现这五个方法（`resources` / `prompts` / `sampling` 声明了却不实现比不声明更坏）；
+    **不做 SSE 流式**，`GET /mcp` 会如实说明"请 POST 一问一答"，不假装支持。
+  - `tools/call` 同时返回 `content[0].type="text"` 与 `structuredContent`：
+    前者给只能读文本的客户端，后者让支持的客户端直接读字段。
+- **`tools/elench_playground.html`：单文件内嵌网页**（平台「HTML 内嵌代码」用）。
+  CSS/JS 全内联、**无任何外链**（CDN 在内嵌场景里加载不出来），所以整段贴进去即可。
+  左边填 `.tu` / `.eln`，右边出判决徽章、κ 表达式、诊断（带改法），底部可展开原始 JSON。
+- **`tests/cases/test_mcp_server.py`**：22 项断言钉住 MCP 协议行为
+  （通知不响应、未知工具 `-32602`、未知方法 `-32601`、HTTP 通知回 202 无正文、
+  批量返回数组、`tools/list` 里不能出现会执行代码的工具）+ 内嵌网页的静态检查（无外链、
+  是完整 HTML 文档）。
+- **`tools/elench_tool.py`**：把 check / cost 包成智能体平台能调的工具**（初发 Trufar、
+  Coze、Dify 这类）。三种接法都一样的行为，因为都走同一个 `handle()`：
+  `--http --port N`（配合 `--openapi` 生成 OpenAPI 3.0 文档）、`--stdio`
+  （一行一个 JSON，沙箱 / MCP 用）、或直接 `import`。
+  - **只开放 `check` 与 `cost`**，故意不开 `run` / `stats` / `measure`：那两个会真的执行
+    提交的代码，在别人家平台上开放等于送一个免费代码执行沙箱。`op=run` 会被明确拒绝。
+  - `ok` 与 `verdict` **分开**：`ok` 只说"工具跑完了"，代码合不合格看
+    `verdict`（`ok` / `debt` / `unknown`，多函数取最差）。混起来平台会把"契约不达标"
+    报成"工具坏了"。
+  - 没设 `ELENCH_TOOL_TOKEN` 时 `/health` 如实报 `auth: "none"`，不假装有认证。
+    限额：单字段 256 KB、整体 512 KB、单次 30 秒。
+  - 新增 `tests/cases/test_tool_server.py`（stdio / HTTP / 鉴权 / OpenAPI 共 18 项断言），
+    接口被改坏会当场变红；新增 `文档/接智能体平台.md`。
+  - **零第三方依赖在这里是真优势**：整条工具链只用标准库，可以直接塞进平台沙箱跑，
+    不一定要暴露公网服务。
+
+### Fixed
+
+- **`pip install` 装出来的包是坏的（严重）**：`pyproject.toml` 的 `py-modules` 漏了
+  `cost_artifact` / `diag_json` / `html_report` / `typenames` 四个模块，而 `checker.py`
+  在**模块级**就 `from typenames import canon, display` —— 于是装完任何一条命令都是
+  `ModuleNotFoundError: No module named 'typenames'`。开发机上一直没暴露，因为本机
+  site-packages 里有一条指向别的 checkout 的路径，它会"帮"你把 `typenames` 找出来
+  （版本还不对，表现为莫名其妙的 `E-Internal-TypeCheck`）。只有干净环境才看得见。
+  新增 `tests/cases/test_packaging.py`：把 `py-modules` 与 `src/*.py` 双向绑死。
+- **正式入口在 GBK 控制台下崩溃**：`sys.stdout.reconfigure(encoding="utf-8")` 只写在
+  `dsh.py` 的 `if __name__ == "__main__":` 里，而正式入口是 `elench.py → dsh.main()`，
+  所以 `python src/dsh.py check a.eln` 正常、**`elench check a.eln` 抛
+  `UnicodeEncodeError: 'gbk' codec can't encode character '\u26a0'`**（输出里全是
+  `✓` `✗` `⚠` `κ`）。挪进 `main()`，两条入口都覆盖。新增
+  `tests/cases/test_console_encoding.py`，用 `PYTHONIOENCODING=gbk` 复现。
+- **`measure --max-size=<N>` 直接崩**：模块没有 `benchmodel.scale` 时 `hi` 是 `None`，
+  `min(None, int)` 抛 `TypeError`。现在正常报「没有 benchmodel.scale，无法确定测量点」。
+- **CI 的 docnums 作业本来是红的**：`cpp/docnums/examples/demo.md` 里的两个绑定写着
+  86 个测试 / 1,402 个断言调用点（真实是 195 / 5,452），而 `.github/workflows/docnums.yml`
+  会跑 `docnums --check cpp/docnums/examples/demo.md`。已改正，并把这个文件加进
+  `tools/doc_numbers.json` 的 `_docs`，本地门禁也会看它（检查面 20 → 22 处）。
+- **51 个入库文件违反「UTF-8 无 BOM」**（`AGENTS.md` 的规矩）：50 个带 UTF-8 BOM
+  （`tools/` 14、`tests/cases/` 29、`demo/corpus/` 6、`corpus/adversarial/` 2，
+  基本是 PowerShell 5 的 `Set-Content -Encoding utf8` 留下的），另 1 个是 UTF-16 的
+  `audit-numbers.json`。全部处理掉；新增 `tests/cases/test_encoding_hygiene.py`
+  扫 `git ls-files` 的文本文件，把这条规矩变成会红的测试。
+
+### Changed
+
+- **文档里「没有 C++ 后端」的说法全部清掉**（`README` / `介绍` / `入门` / `能力边界` /
+  `为什么界会松`）。这些句子写成时是真的，现在不是了：`elench cpp` 对语料 19 个模块
+  **出码 19/19、编译 19/19、语义与解释器逐字节一致 19/19**，还能发 `extern "C"`、
+  接 `--include` / `--link` / `--lib-dir`，`--run` 会真编译真链接真跑再对拍。
+  改后的说法保留边界（`?!` 与函数指针仍不支持），不吹成"完整后端"。
+- **`能力边界` 里「FFI 不支持 `f64` 参数」已过期**（2026-11-14 就扩了类型集）——
+  改成"当时补不上"，并给出现在的两条提速路（`cpp` 出码 / FFI）。
+- **文档里的规模数字改成绑定，不再手抄**：样例 17 / 测试 194 / 实现 59 文件 51,082 行 /
+  门禁 12 道，全部用 `<!--dn:key-->` 绑到 `tools/audit_numbers.py`。
+  `doc_numbers` 的检查面从 5 处扩到 **20 处、6 份文档**（原来只盯着预印本，
+  所以 README 与介绍里的 138/59/3.6万 全都过期了也没人报）。为此
+  `audit_numbers.py` 新增 `gates()` 字段（从 `tools/gates.py` 的 `GATES` 表数）。
+- **`C++惯用法对照` §3.1 标注一处按位置不同义**：`int` 在声明/形参位置是 `i64`（64 位），
+  但 C 风格强转 `(int)x` 被拒时诊断建议 `x as i32`（32 位）。同一拼写两种宽度。
+
+### Removed
+
+- **归档两个跑完就没用的一次性迁移脚本**：`src/migrate_docs.py`（v0.68 文档语法迁移）、
+  `src/rename_ch.py`（`.ai` → `.eln` 改名）。全仓 0 引用，且再跑一次会把**新写的**文档改坏
+  （`rename_ch` 的 docstring 已经变成"把 `.eln` 改成 `.eln`"，说明它当时全仓跑过）。
+  归档说明见 `_archive/README.md`（本地目录，不入库）；git 历史仍可查。
+- **删掉 `audit-numbers.json`**：它是 `tools/audit_numbers.py --json` 的**生成物快照**，
+  **全仓 0 引用**，内容是 33 文件 / 58 测试（早就过期），而且编码是 **UTF-16**
+  （`ff fe` 开头，`json.load` 直接抛 `UnicodeDecodeError`）。生成物不入库——
+  真值永远从 `python -B tools/audit_numbers.py --json` 现取。已加进 `.gitignore`。
 
 ### Added
 
@@ -380,6 +733,9 @@
   `external spec abs(i64) -> i64` 能跑，但 `f64` 参数直接
   `E-FFI-Unsupported`（C ABI 后端不支持 `f64`）。于是"算个平方根"只能牛顿迭代 /
   二分，还要在 `.tu` 里给一个假的 `O(log n)`。
+  > 括号补注（2026-11-18 审计）：这条的 `f64` 半句**已过期**——2026-11-14 起 FFI
+  > 类型集含 `f64`/`f32`，实测 `pow(2.0, 3.0)` 走 FFI 返回 8。原文保留是为了记录
+  > 当时的动机（"所以这 10 个必须进语言本体"），不代表现状。
   - **新增 10 个内建**（全 `O(1)`、不分配，登记在 `stdlib` 的 `ret=` / `cost="1"` /
     `alloc=0` / `FAIL_MODE=never`）：
     `sqrt` / `log2` / `floor` / `ceil` / `round` / `fabs`（`f64 -> f64`）、

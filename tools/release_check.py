@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Elench contributors
 """release_check.py —— 版本号一致性（CI 门）
@@ -48,6 +48,15 @@ def read_versions():
                 io.open(p2, encoding="utf-8")).get("version", "")
         except Exception:                              # noqa: BLE001
             pass
+    # `src/version.py` 是 `elench version` 的唯一来源（2026-11-22 收的口子）。
+    # 它必须进这张表：**改 pyproject 却忘了这里**，用户看到的版本就和包对不上——
+    # 发 1.0.1 时正好撞上（pyproject 1.0.1 / `elench version` 1.0.0 / 装出来 0.69.0）。
+    p4 = os.path.join(R, "src", "version.py")
+    if os.path.exists(p4):
+        m = re.search(r'^VERSION\s*=\s*"([^"]+)"',
+                      io.open(p4, encoding="utf-8").read(), re.M)
+        if m:
+            out["src/version.py"] = m.group(1)
     p3 = os.path.join(R, "CHANGELOG.md")
     if os.path.exists(p3):
         m = re.search(r"^##\s*\[(\d+\.\d+(?:\.\d+)?)\]", io.open(p3, encoding="utf-8").read(), re.M)

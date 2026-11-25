@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<!--
+  preview.html —— 在本地模拟平台的「自定义代码」组件，用来先看效果再往平台上贴。
+
+  它刻意**不复制**那四段代码：直接从同目录读 01/02/03/04 文件，
+  用 `new Function(参数…)` 按平台的调用约定执行。所以预览看到的就是要贴的那一份，
+  改了文件刷新即可 —— 不会出现"预览是对的、贴上去不是"的漂移。
+
+  需要起一个本地服务器（浏览器不允许 file:// 下 fetch 同目录文件）：
+      python -B tools/trufar_component/preview.py
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Elench 组件预览（模拟平台）</title>
+<style>
+  body { margin: 0; background: #0b0d12; color: #e6e8ee;
+         font: 14px/1.6 system-ui, -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; }
+  .wrap { display: grid; grid-template-columns: 420px 1fr; gap: 16px; padding: 16px; }
+  @media (max-width: 980px) { .wrap { grid-template-columns: 1fr; } }
+  h1 { font-size: 15px; margin: 0 0 4px; }
+  .sub { color: #9aa3b2; font-size: 12px; margin-bottom: 12px; }
+  .panel { background: #12151b; border: 1px solid #2a2f3a; border-radius: 10px; padding: 12px; }
+  label { display: block; color: #9aa3b2; font-size: 12px; margin: 10px 0 4px; }
+  textarea { width: 100%; min-height: 120px; background: #0f1218; color: #e6e8ee;
+             border: 1px solid #2a2f3a; border-radius: 6px; padding: 8px;
+             font: 11.5px/1.5 ui-monospace, Consolas, monospace; resize: vertical; }
+  button { background: #24418f; color: #fff; border: 0; border-radius: 6px;
+           padding: 7px 12px; font-size: 13px; cursor: pointer; margin: 8px 6px 0 0; }
+  button.ghost { background: transparent; border: 1px solid #2a2f3a; color: #e6e8ee; }
+  .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  #mount { min-height: 120px; }
+  #log { color: #9aa3b2; font: 11.5px/1.55 ui-monospace, Consolas, monospace;
+         white-space: pre-wrap; margin-top: 10px; max-height: 200px; overflow: auto; }
+  .bad { color: #ef5b5b; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="panel">
+    <h1>模拟平台调用</h1>
+    <div class="sub">按平台的约定喂数据：<code>dom / value / onChange / props</code>，
+      <code>onUpdate(dom, data, prevData, props)</code>。</div>
+
+    <label for="props">props（JSON，挂载时可用；工作流也可以把结果放这里）</label>
+    <textarea id="props">{}</textarea>
+
+    <label for="data">data（JSON，触发 onUpdate 时用；结果放 data.elench）</label>
+    <textarea id="data">{}</textarea>
+
+    <div class="row">
+      <button id="btn-update">触发 onUpdate</button>
+      <button id="btn-debt" class="ghost">塞一份"违约"样例</button>
+      <button id="btn-empty" class="ghost">塞一份"空结果"</button>
+      <button id="btn-unmount" class="ghost">触发 onUnmount</button>
+    </div>
+    <div id="log">（还没动作）</div>
+  </div>
+
+  <div class="panel">
+    <h1>组件渲染区</h1>
+    <div class="sub">下面这块就是平台里会长成的样子。</div>
+    <div id="mount"></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var elLog = document.getElementById("log");
+  function log(msg, bad) {
+    var line = "[" + new Date().toLocaleTimeString() + "] " + msg;
+    elLog.innerHTML = (bad ? '<span class="bad">' : "<span>") + line + "</span>\n" + elLog.innerHTML;
+    (bad ? console.error : console.log)("[preview] " + msg);
+  }
+
+  async function text(name) {
+    var r = await fetch(name, { cache: "no-store" });
+    if (!r.ok) throw new Error("读不到 " + name + "（HTTP " + r.status + "）");
+    return r.text();
+  }
+
+  var SRC = {};
+
+  // 平台把 HTML 塞进组件容器，再把 onMount 以 (dom, value, onChange, props) 调起来。
+  // 这里用 new Function 精确模拟这个调用约定：hook 里的 dom/props 就是参数，
+  // 不是预览页伪造的全局变量。
+  function runMount(code, dom, props) {
+    var fn = new Function("dom", "value", "onChange", "props", code);
+    fn(dom, null, function (v) { log("onChange(" + JSON.stringify(v) + ")"); }, props);
+  }
+  function runUpdate(code, dom, data, prevData, props) {
+    var fn = new Function("dom", "data", "prevData", "props", code);
+    fn(dom, data, prevData, props);
+  }
+  function runUnmount(code, props) {
+    // 平台调 onUnmount 时**只给 props**（不给 dom）——预览也照这个来，
+    // 否则会掩盖"卸载时拿不到 dom"这个真实约束。
+    var fn = new Function("props", code);
+    fn(props);
+  }
+
+  var mountEl = document.getElementById("mount");
+  var state = { props: {}, last: null };
+
+  function parse(id, dflt) {
+    try {
+      var t = document.getElementById(id).value.trim();
+      return t ? JSON.parse(t) : dflt;
+    } catch (e) {
+      log(id + " 不是合法 JSON：" + e.message, true);
+      throw e;
+    }
+  }
+
+  async function boot() {
+    try {
+      SRC.html = await text("01-html.html");
+      SRC.mount = await text("02-onMount.js");
+      SRC.update = await text("03-onUpdate.js");
+      SRC.unmount = await text("04-onUnmount.js");
+    } catch (e) {
+      log("加载失败：" + e.message + "　—— 要先起服务器：python -B tools/trufar_component/preview.py", true);
+      return;
+    }
+    mountEl.innerHTML = SRC.html;
+    state.props = parse("props", {});
+    state.props.data = state.props.data || {};
+    try {
+      runMount(SRC.mount, mountEl, state.props);
+      log("onMount 已执行");
+    } catch (e) {
+      log("onMount 抛错：" + e.message, true);
+    }
+  }
+
+  document.getElementById("btn-update").addEventListener("click", function () {
+    var data;
+    try { data = parse("data", {}); } catch (e) { return; }
+    var prev = state.last || {};
+    try {
+      runUpdate(SRC.update, mountEl, data, prev, state.props);
+      state.last = data;
+      log("onUpdate 已执行（prevData = " + (Object.keys(prev).length ? "上一次 data" : "空") + "）");
+    } catch (e) {
+      log("onUpdate 抛错：" + e.message, true);
+    }
+  });
+
+  document.getElementById("btn-debt").addEventListener("click", function () {
+    document.getElementById("data").value = JSON.stringify({
+      elench: {
+        ok: true, op: "cost", verdict: "debt", exit_code: 0, elapsed_ms: 118,
+        functions: {
+          sum_all: {
+            kappa: "2 + n(xs)×(2 + n(xs)×7) + 2",
+            verdict: "debt",
+            explanation: "**超标**：阶不够，比值 ≈ 7696581394434.00",
+            allocation: "0", allocation_verdict: "ok", allocation_explanation: "达成：阶够"
+          }
+        },
+        diagnostics: [
+          { code: "E-Cost-OverTarget", line: 3, col: 5, severity: "error",
+            message: "实现在 n² 上界下跑，而 target 要求 O(n)",
+            fix: "把内层循环改成一次遍历（前缀和 / 双指针）" }
+        ],
+        lines: [{ n: 2, hits: 1 }, { n: 3, hits: 4096 }, { n: 4, hits: 16773120 }, { n: 5, hits: 4096 }]
+      }
+    }, null, 2);
+    log("已填入违约样例，点「触发 onUpdate」");
+  });
+
+  document.getElementById("btn-empty").addEventListener("click", function () {
+    document.getElementById("data").value = JSON.stringify({ elench: null }, null, 2);
+    log("已填入空结果，点「触发 onUpdate」（应该显示「结果已作废」）");
+  });
+
+  document.getElementById("btn-unmount").addEventListener("click", function () {
+    try {
+      runUnmount(SRC.unmount, state.props);
+      log("onUnmount 已执行（看控制台：拿不到 dom 是本平台的接口限制）");
+    } catch (e) {
+      log("onUnmount 抛错：" + e.message, true);
+    }
+  });
+
+  boot();
+})();
+</script>
+</body>
+</html>

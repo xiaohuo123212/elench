@@ -24,7 +24,7 @@ import os
 import stdlib
 import sys
 from fractions import Fraction
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from .bound import (Bound, bound_of_while, expr_to_bound, is_count_var,
                     predicate_call_of, predicate_cost_node,

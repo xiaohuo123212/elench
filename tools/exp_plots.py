@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Elench contributors
 """exp_plots.py —— 把 S1–S4 的 CSV 画成 SVG（四张敏感性图）

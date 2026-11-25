@@ -95,7 +95,7 @@ elench export count --push
 |---|---|---|
 | `{'sent': False, 'reason': 'no metrics endpoint'}` | 环境变量没设 / 新开的窗口没继承 | 重开终端再试 |
 | 连不上、超时 | **端口写成 4317**（那是 gRPC） | 改 **4318** |
-| 收集端归到 `unknown_service` | 没设 `OTEL_SERVICE_NAME`，或端点用了 `_METRICS_` 专用变量但只配了通用变量 | 设 `OTEL_SERVICE_NAME` |
+| 收集端归到 `unknown_service` | 显式设成空串 `OTEL_SERVICE_NAME=`，或端点用了 `_METRICS_` 专用变量但只配了通用变量 | 设 `OTEL_SERVICE_NAME` |
 | 不想让 CI 推 | `OTEL_SDK_DISABLED=true` | 一个字节都不会发 |
 
 **自检一条命令**（不发数据，只打印解析后的配置）：
@@ -114,7 +114,8 @@ python -c "import sys; sys.path.insert(0,'src'); import otel_export as o; print(
 |---|---|---|
 | `upper_bound` | 承诺（最劣候选） | 上方那条线 |
 | `candidate_bound` | 分段最优 | 中间那条 |
-| `measured` | 实测 | 下方那条（**看它和 candidate_bound 是否平行**） |
+| `observation` | 实跑观测到的值 | 下方那条（**看它和 candidate_bound 是否平行**） |
+| `budget` | 声明的 target（上限，不是观测） | 画成阈值线 |
 
 **如果把它们混成一条序列，看到的会是一个没有意义的平均值。**
 
@@ -149,7 +150,7 @@ python -c "import sys; sys.path.insert(0,'src'); import otel_export as o; print(
 # 附：**不想装 Docker** —— 用我们自带的本机接收端
 
 配 OTel 的现实门槛不是"发数据"，是"**得先有个东西收**"。
-所以仓库里带了一个 200 行的小接收端（标准库，零依赖）：
+所以仓库里带了一个约 140 行的小接收端（标准库，零依赖；实现在 `src/otel_local_sink.py`，`tools/` 下的同名文件是 20 行转发）：
 
 ```powershell
 python tools/otel_local_sink.py --out otel.ndjson
